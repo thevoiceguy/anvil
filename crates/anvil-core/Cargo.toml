@@ -27,6 +27,7 @@ serde        = { workspace = true }
 
 # SIP stack
 sip-core        = { workspace = true }
+sip-parse       = { workspace = true }
 sip-transport   = { workspace = true }
 sip-transaction = { workspace = true }
 sip-dialog      = { workspace = true }
@@ -35,6 +36,8 @@ sip-uas         = { workspace = true }
 sip-sdp         = { workspace = true }
 sip-auth        = { workspace = true }
 sip-dns         = { workspace = true }
+
+anyhow = { workspace = true }
 
 # Media engine
 forge-core   = { workspace = true }

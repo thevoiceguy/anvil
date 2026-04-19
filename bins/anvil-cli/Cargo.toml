@@ -10,15 +10,12 @@ repository.workspace   = true
 homepage.workspace     = true
 
 [dependencies]
-anvil-core   = { workspace = true }
-anvil-audio  = { workspace = true }
-anvil-brand  = { workspace = true }
-anvil-codec  = { workspace = true }
+# Phase 1 M1: REGISTER-only smoke test. Audio, brand, and codec deps land
+# with their respective milestones.
+anvil-core = { workspace = true }
 
 tokio              = { workspace = true }
 anyhow             = { workspace = true }
 tracing            = { workspace = true }
 tracing-subscriber = { workspace = true }
-serde              = { workspace = true }
-# Re-using serde_json for now; swap to `toml` once config wiring starts.
-serde_json         = { workspace = true }
+clap               = { version = "4", features = ["derive", "env"] }

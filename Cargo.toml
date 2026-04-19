@@ -49,6 +49,7 @@ opus = "0.3"
 
 # siphon-rs (SIP stack) — path deps while we iterate locally
 sip-core = { path = "../siphon-rs/crates/sip-core" }
+sip-parse = { path = "../siphon-rs/crates/sip-parse" }
 sip-transport = { path = "../siphon-rs/crates/sip-transport" }
 sip-transaction = { path = "../siphon-rs/crates/sip-transaction" }
 sip-dialog = { path = "../siphon-rs/crates/sip-dialog" }
@@ -78,3 +79,16 @@ anvil-codec = { path = "crates/anvil-codec" }
 lto = "thin"
 codegen-units = 1
 strip = "symbols"
+
+# forge-media vendors an older copy of sip-sdp at its external/siphon-rs/.
+# The only diff versus top-level siphon-rs is rustfmt whitespace. Redirect
+# forge-media's vendored path to the canonical copy so cargo can resolve
+# a single sip-sdp across the graph.
+[patch."https://github.com/thevoiceguy/siphon-rs"]
+sip-sdp = { path = "../siphon-rs/crates/sip-sdp" }
+
+# Path-source patch: cargo matches by crate name + source. Since forge-sdp
+# uses a path dep, the effective source is the local directory — which we
+# override with a second patch block keyed on the path URL.
+[patch."file:///home/siphon/forge-media/external/siphon-rs/crates/sip-sdp"]
+sip-sdp = { path = "../siphon-rs/crates/sip-sdp" }

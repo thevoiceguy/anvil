@@ -26,6 +26,9 @@ pub struct AccountConfig {
     pub stun: Option<String>,
     pub register_expires: Duration,
     pub user_agent: String,
+    /// Local UDP bind address. `None` defaults to `0.0.0.0:0` (any interface,
+    /// ephemeral port). Set this if the user wants to pin the SIP port.
+    pub bind_addr: Option<String>,
     /// Base URL of the FCP provisioning service. If `None`, Anvil attempts
     /// auto-discovery from the REGISTER 200 OK `X-FCP-Provisioning-Url`
     /// header; if that's also absent, branding is skipped and the UI falls
