@@ -16,6 +16,7 @@ pub(crate) mod call;
 pub mod config;
 pub mod error;
 pub mod event;
+pub(crate) mod media;
 pub(crate) mod transport;
 
 pub use brand::{
@@ -38,6 +39,7 @@ use sip_uac::integrated::IntegratedUAC;
 use tokio::sync::mpsc;
 use tokio::task::JoinHandle;
 
+use crate::audio::AudioHost;
 use crate::call::CallEntry;
 use crate::config::Codec;
 
@@ -51,6 +53,7 @@ pub struct Anvil {
     registrar_uri: SipUri,
     events: mpsc::Sender<Event>,
     calls: Arc<DashMap<CallId, CallEntry>>,
+    audio: Arc<dyn AudioHost>,
     /// IP used in SDP offers. Defaults to loopback; `AccountConfig::bind_addr`
     /// overrides when set to a specific host.
     media_ip: IpAddr,
@@ -155,12 +158,15 @@ impl Anvil {
             .map(|s| s.to_string())
             .unwrap_or_else(|| "anvil".to_string());
 
+        let audio: Arc<dyn AudioHost> = Arc::from(cfg.audio);
+
         Ok((
             Self {
                 uac,
                 registrar_uri,
                 events: event_tx,
                 calls: Arc::new(DashMap::new()),
+                audio,
                 media_ip,
                 local_user,
                 tasks: vec![pump],
@@ -292,16 +298,18 @@ impl Anvil {
             CallEntry {
                 handle: Arc::clone(&handle),
                 negotiated_codec: None,
-                rtp_socket,
+                rtp_socket: Arc::clone(&rtp_socket),
+                pipeline: None,
             },
         );
 
         // Spawn a task to drive the call's state machine: drain provisionals,
-        // await final, emit events, and clean up on termination.
+        // await final, start the media pipeline, emit events.
         let events = self.events.clone();
         let calls = Arc::clone(&self.calls);
+        let audio = Arc::clone(&self.audio);
         tokio::spawn(async move {
-            drive_outgoing_call(call_id, handle, calls, events).await;
+            drive_outgoing_call(call_id, handle, rtp_socket, audio, calls, events).await;
         });
 
         Ok(call_id)
@@ -381,6 +389,8 @@ impl Anvil {
 async fn drive_outgoing_call(
     call_id: CallId,
     handle: Arc<sip_uac::integrated::CallHandle>,
+    rtp_socket: Arc<tokio::net::UdpSocket>,
+    audio: Arc<dyn AudioHost>,
     calls: Arc<DashMap<CallId, CallEntry>>,
     events: mpsc::Sender<Event>,
 ) {
@@ -412,9 +422,24 @@ async fn drive_outgoing_call(
             // the first audio format byte. Proper negotiation (matching rtpmap
             // names, dropping unknown PTs) arrives with the codec milestone.
             let codec = extract_codec_from_answer(resp.body().as_ref()).unwrap_or(Codec::Pcmu);
+            let remote_rtp = media::extract_remote_rtp_addr(resp.body().as_ref());
+
+            // Start media: open audio host streams for this call, spawn the
+            // send/receive tasks. Failures are logged but don't tear down the
+            // call — a half-deaf call is still better UX than a cryptic panic
+            // before `CallEstablished` fires. Real AEC / renegotiation lands
+            // in Phase 2.
+            let pipeline = match remote_rtp {
+                Some(remote) => start_media(&audio, rtp_socket, remote).await,
+                None => {
+                    tracing::warn!("no remote RTP address in SDP answer; no media");
+                    None
+                }
+            };
 
             if let Some(mut entry) = calls.get_mut(&call_id) {
                 entry.negotiated_codec = Some(codec);
+                entry.pipeline = pipeline;
             }
 
             let _ = events
@@ -438,6 +463,42 @@ async fn drive_outgoing_call(
                     reason: EndReason::Error(e.to_string()),
                 })
                 .await;
+        }
+    }
+}
+
+/// Opens audio host streams and starts the RTP pipeline. Returns `None` if
+/// capture or playback cannot be opened; callers surface that as "no media"
+/// rather than failing the call.
+async fn start_media(
+    audio: &Arc<dyn AudioHost>,
+    rtp_socket: Arc<tokio::net::UdpSocket>,
+    remote: std::net::SocketAddr,
+) -> Option<media::MediaPipeline> {
+    let fmt = media::g711_format();
+    let capture = match audio.make_capture(fmt) {
+        Ok(c) => c,
+        Err(e) => {
+            tracing::warn!(%e, "audio capture open failed");
+            return None;
+        }
+    };
+    let playback = match audio.make_playback(fmt) {
+        Ok(p) => p,
+        Err(e) => {
+            tracing::warn!(%e, "audio playback open failed");
+            return None;
+        }
+    };
+
+    match media::start_pipeline(rtp_socket, remote, capture, playback) {
+        Ok(p) => {
+            tracing::info!(%remote, "media pipeline started");
+            Some(p)
+        }
+        Err(e) => {
+            tracing::warn!(%e, "media pipeline failed to start");
+            None
         }
     }
 }

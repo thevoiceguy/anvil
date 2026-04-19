@@ -9,10 +9,15 @@
 //! and do not use this crate.
 
 #![forbid(unsafe_code)]
-#![warn(missing_docs)]
 
 #[cfg(feature = "cpal-default")]
 mod cpal_host;
 
 #[cfg(feature = "cpal-default")]
 pub use cpal_host::CpalHost;
+
+#[cfg(feature = "tone")]
+mod tone;
+
+#[cfg(feature = "tone")]
+pub use tone::{ToneHost, ToneStats};

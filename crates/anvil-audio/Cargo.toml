@@ -11,10 +11,12 @@ homepage.workspace     = true
 
 [features]
 default = ["cpal-default"]
-cpal-default = ["dep:cpal"]
+cpal-default = ["dep:cpal", "dep:forge-resampler"]
 # Link webrtc-audio-processing for AEC / NS / AGC. Off by default because
 # it's a C++ build; turn it on for desktop / Linux where it's reliable.
 apm = []
+# Tone-generator audio host, handy for headless end-to-end tests.
+tone = []
 
 [dependencies]
 anvil-core  = { workspace = true }
@@ -24,3 +26,5 @@ thiserror   = { workspace = true }
 tracing     = { workspace = true }
 parking_lot = { workspace = true }
 cpal        = { workspace = true, optional = true }
+# Resampling from device rate (typically 48 kHz) to G.711 8 kHz.
+forge-resampler = { path = "../../../forge-media/crates/forge-resampler", optional = true }

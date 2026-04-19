@@ -10,9 +10,8 @@ repository.workspace   = true
 homepage.workspace     = true
 
 [dependencies]
-# Phase 1 M1: REGISTER-only smoke test. Audio, brand, and codec deps land
-# with their respective milestones.
-anvil-core = { workspace = true }
+anvil-core  = { workspace = true }
+anvil-audio = { workspace = true, features = ["cpal-default", "tone"] }
 
 tokio              = { workspace = true }
 anyhow             = { workspace = true }

@@ -6,6 +6,9 @@
 
 use std::time::Duration;
 
+use std::sync::Arc;
+
+use anvil_audio::{CpalHost, ToneHost, ToneStats};
 use anvil_core::{
     AccountConfig, Anvil, AnvilConfig, BrandConfig, CallId, EndReason, Event, MediaConfig,
     Transport,
@@ -48,6 +51,12 @@ struct Cli {
     /// Local bind address. Defaults to `0.0.0.0:0` (ephemeral port).
     #[arg(long)]
     bind: Option<String>,
+
+    /// Use the synthetic tone generator instead of cpal (for headless CI
+    /// and hardware-less dev boxes). When a call is established the
+    /// sink's peak RMS is printed at hangup.
+    #[arg(long)]
+    tone: bool,
 }
 
 #[tokio::main]
@@ -61,24 +70,43 @@ async fn main() -> Result<()> {
 
     let cli = Cli::parse();
 
+    let account = AccountConfig {
+        aor: cli.aor.clone(),
+        registrar: cli.registrar.clone(),
+        username: cli.username.clone(),
+        password: cli.password.clone(),
+        transport: Transport::Udp,
+        outbound_proxy: None,
+        stun: None,
+        register_expires: Duration::from_secs(3600),
+        user_agent: format!("Anvil/{} (phase1-m3)", env!("CARGO_PKG_VERSION")),
+        bind_addr: cli.bind.clone(),
+        provisioning_url: None,
+    };
+
+    let (audio, tone_stats): (Box<dyn anvil_core::audio::AudioHost>, Option<Arc<ToneStats>>) =
+        if cli.tone {
+            tracing::info!("using synthetic tone audio host");
+            let host = ToneHost::new();
+            let stats = host.stats();
+            (Box::new(host), Some(stats))
+        } else {
+            let host = CpalHost::new()
+                .map_err(|e| anyhow::anyhow!("CpalHost init failed: {e}"))?;
+            (Box::new(host), None)
+        };
+
     let cfg = AnvilConfig {
-        account: AccountConfig {
-            aor: cli.aor,
-            registrar: cli.registrar,
-            username: cli.username,
-            password: cli.password,
-            transport: Transport::Udp,
-            outbound_proxy: None,
-            stun: None,
-            register_expires: Duration::from_secs(3600),
-            user_agent: format!("Anvil/{} (phase1-m2)", env!("CARGO_PKG_VERSION")),
-            bind_addr: cli.bind,
-            provisioning_url: None,
-        },
+        account,
         media: MediaConfig::default(),
-        audio: Box::new(NullAudioHost),
+        audio,
         brand: BrandConfig::default(),
     };
+
+    run(cli, cfg, tone_stats).await
+}
+
+async fn run(cli: Cli, cfg: AnvilConfig, tone_stats: Option<Arc<ToneStats>>) -> Result<()> {
 
     tracing::info!("starting Anvil");
     let (anvil, mut events) = Anvil::start(cfg).await?;
@@ -147,6 +175,15 @@ async fn main() -> Result<()> {
         }
     }
 
+    if let Some(stats) = tone_stats.as_ref() {
+        println!(
+            "[tone] frames_rx={} last_rms={:.0} peak_rms={:.0}",
+            stats.frames(),
+            stats.last_rms(),
+            stats.peak_rms()
+        );
+    }
+
     tracing::info!("unregistering...");
     let _ = anvil.unregister().await;
     anvil.shutdown().await?;
@@ -155,23 +192,3 @@ async fn main() -> Result<()> {
     Ok(())
 }
 
-// Phase 1 M2 doesn't stream audio. Replaced by `anvil-audio::CpalHost` later.
-struct NullAudioHost;
-
-impl anvil_core::audio::AudioHost for NullAudioHost {
-    fn make_capture(
-        &self,
-        _cfg: anvil_core::audio::AudioFormat,
-    ) -> std::result::Result<Box<dyn anvil_core::audio::AudioSource>, anvil_core::AnvilError> {
-        Err(anvil_core::AnvilError::AudioDevice("no audio host in Phase 1 M2".into()))
-    }
-
-    fn make_playback(
-        &self,
-        _cfg: anvil_core::audio::AudioFormat,
-    ) -> std::result::Result<Box<dyn anvil_core::audio::AudioSink>, anvil_core::AnvilError> {
-        Err(anvil_core::AnvilError::AudioDevice("no audio host in Phase 1 M2".into()))
-    }
-
-    fn devices(&self) -> Vec<anvil_core::audio::DeviceInfo> { Vec::new() }
-}

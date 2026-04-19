@@ -13,6 +13,7 @@ use sip_uac::integrated::CallHandle;
 use tokio::net::UdpSocket;
 
 use crate::config::Codec;
+use crate::media::MediaPipeline;
 use crate::CallId;
 
 /// Process-local monotonically increasing source of `CallId`s.
@@ -30,8 +31,10 @@ pub(crate) fn next_call_id() -> CallId {
 pub(crate) struct CallEntry {
     pub handle: Arc<CallHandle>,
     pub negotiated_codec: Option<Codec>,
-    #[allow(dead_code)] // reserved by audio milestone
     pub rtp_socket: Arc<UdpSocket>,
+    /// Populated when the call reaches `CallEstablished` and the RTP pipeline
+    /// starts. `None` until then. Dropping it aborts the send/receive tasks.
+    pub pipeline: Option<MediaPipeline>,
 }
 
 /// Bind a UDP socket for RTP. Caller supplies a media IP (usually the

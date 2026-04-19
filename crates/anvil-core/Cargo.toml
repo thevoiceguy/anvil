@@ -37,8 +37,6 @@ sip-sdp         = { workspace = true }
 sip-auth        = { workspace = true }
 sip-dns         = { workspace = true }
 
-anyhow = { workspace = true }
-
 # Media engine
 forge-core   = { workspace = true }
 forge-rtp    = { workspace = true }
@@ -46,3 +44,9 @@ forge-engine = { workspace = true }
 forge-codecs = { workspace = true }
 forge-dtmf   = { workspace = true }
 forge-sdp    = { workspace = true }
+
+anyhow = { workspace = true }
+rand   = "0.8"
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["test-util"] }

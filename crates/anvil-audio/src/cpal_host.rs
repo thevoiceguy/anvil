@@ -1,28 +1,483 @@
-//! cpal-backed implementation of `AudioHost`. Phase 1 stub.
+//! cpal-backed implementation of `AudioHost`.
+//!
+//! Each call opens its own pair of streams. The `AudioSource` / `AudioSink`
+//! handles returned from `make_capture` / `make_playback` each own a
+//! dedicated OS thread that holds the `cpal::Stream` (streams are `!Send` on
+//! some platforms). Audio samples cross the thread boundary via bounded
+//! tokio channels; dropping the handle closes the channel and the worker
+//! thread exits, dropping the stream.
+//!
+//! Phase 1 M3 targets 8 kHz mono 20 ms frames (160 samples). The device's
+//! native rate is typically 48 kHz; `forge-resampler` bridges the gap.
 
-use anvil_core::audio::{AudioFormat, AudioHost, AudioSink, AudioSource, DeviceInfo};
+use std::collections::VecDeque;
+use std::sync::Arc;
+use std::thread;
+
+use async_trait::async_trait;
+use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
+use cpal::{SampleFormat, SampleRate, StreamConfig};
+use forge_resampler::Resampler;
+use parking_lot::Mutex;
+use tokio::sync::mpsc;
+
+use anvil_core::audio::{AudioFormat, AudioFrame, AudioHost, AudioSink, AudioSource, DeviceInfo};
 use anvil_core::error::AnvilError;
 
 /// Desktop audio host using cpal.
-pub struct CpalHost {
-    _private: (),
-}
+pub struct CpalHost;
 
 impl CpalHost {
     /// Create a host using the system default input and output devices.
     pub fn new() -> Result<Self, AnvilError> {
-        Ok(Self { _private: () })
+        Ok(Self)
     }
 }
 
 impl AudioHost for CpalHost {
-    fn make_capture(&self, _cfg: AudioFormat) -> Result<Box<dyn AudioSource>, AnvilError> {
-        Err(AnvilError::AudioDevice("CpalHost::make_capture not yet implemented".into()))
+    fn make_capture(&self, cfg: AudioFormat) -> Result<Box<dyn AudioSource>, AnvilError> {
+        CpalCapture::open(cfg).map(|h| Box::new(h) as Box<dyn AudioSource>)
     }
 
-    fn make_playback(&self, _cfg: AudioFormat) -> Result<Box<dyn AudioSink>, AnvilError> {
-        Err(AnvilError::AudioDevice("CpalHost::make_playback not yet implemented".into()))
+    fn make_playback(&self, cfg: AudioFormat) -> Result<Box<dyn AudioSink>, AnvilError> {
+        CpalPlayback::open(cfg).map(|h| Box::new(h) as Box<dyn AudioSink>)
     }
 
-    fn devices(&self) -> Vec<DeviceInfo> { Vec::new() }
+    fn devices(&self) -> Vec<DeviceInfo> {
+        let host = cpal::default_host();
+        let mut out = Vec::new();
+        if let Ok(inputs) = host.input_devices() {
+            let default_name = host
+                .default_input_device()
+                .and_then(|d| d.name().ok());
+            for dev in inputs {
+                if let Ok(name) = dev.name() {
+                    out.push(DeviceInfo {
+                        id: name.clone(),
+                        is_default: Some(&name) == default_name.as_ref(),
+                        name,
+                        is_input: true,
+                    });
+                }
+            }
+        }
+        if let Ok(outputs) = host.output_devices() {
+            let default_name = host
+                .default_output_device()
+                .and_then(|d| d.name().ok());
+            for dev in outputs {
+                if let Ok(name) = dev.name() {
+                    out.push(DeviceInfo {
+                        id: name.clone(),
+                        is_default: Some(&name) == default_name.as_ref(),
+                        name,
+                        is_input: false,
+                    });
+                }
+            }
+        }
+        out
+    }
+}
+
+// ─── Capture ────────────────────────────────────────────────────────────────
+
+struct CpalCapture {
+    frame_rx: mpsc::Receiver<AudioFrame>,
+    _worker: thread::JoinHandle<()>,
+}
+
+impl CpalCapture {
+    fn open(cfg: AudioFormat) -> Result<Self, AnvilError> {
+        // 8 frames of headroom; beyond that we drop to avoid unbounded memory
+        // growth if the RTP send task stalls.
+        let (frame_tx, frame_rx) = mpsc::channel::<AudioFrame>(8);
+
+        let worker = thread::Builder::new()
+            .name("anvil-capture".into())
+            .spawn(move || run_capture(cfg, frame_tx))
+            .map_err(|e| AnvilError::AudioDevice(format!("spawn capture thread: {e}")))?;
+
+        Ok(Self { frame_rx, _worker: worker })
+    }
+}
+
+#[async_trait]
+impl AudioSource for CpalCapture {
+    async fn next_frame(&mut self) -> Option<AudioFrame> {
+        self.frame_rx.recv().await
+    }
+}
+
+fn run_capture(cfg: AudioFormat, frame_tx: mpsc::Sender<AudioFrame>) {
+    let host = cpal::default_host();
+    let device = match host.default_input_device() {
+        Some(d) => d,
+        None => {
+            tracing::error!("no default input device");
+            return;
+        }
+    };
+
+    let default_config = match device.default_input_config() {
+        Ok(c) => c,
+        Err(e) => {
+            tracing::error!(%e, "default_input_config failed");
+            return;
+        }
+    };
+
+    let device_rate = default_config.sample_rate().0;
+    let channels = default_config.channels();
+    let sample_format = default_config.sample_format();
+    let frame_samples = (cfg.sample_rate as u64 * cfg.frame_ms as u64 / 1000) as usize;
+
+    let stream_config: StreamConfig = StreamConfig {
+        channels,
+        sample_rate: SampleRate(device_rate),
+        buffer_size: cpal::BufferSize::Default,
+    };
+
+    let mut resampler = match Resampler::new(device_rate, cfg.sample_rate, 1) {
+        Ok(r) => r,
+        Err(e) => {
+            tracing::error!(%e, %device_rate, "resampler init");
+            return;
+        }
+    };
+    let frame_buf: Arc<Mutex<VecDeque<i16>>> = Arc::new(Mutex::new(VecDeque::new()));
+
+    // The callback hands samples to a small inline pipeline: downmix to mono,
+    // resample to 8 kHz, push into the shared frame buffer. Complete 160-sample
+    // frames are flushed to the tokio channel via try_send. We use blocking_send
+    // on the async side; on the callback side we use try_send to avoid ever
+    // blocking the RT audio thread.
+    let tx = frame_tx.clone();
+    let fmt_for_frames = cfg;
+    let buf_for_cb = Arc::clone(&frame_buf);
+
+    let callback_f32 = {
+        let tx = tx.clone();
+        let buf = Arc::clone(&buf_for_cb);
+        move |data: &[f32], _info: &cpal::InputCallbackInfo| {
+            let mono = downmix_f32(data, channels);
+            push_frames(&mut resampler, mono, &buf, frame_samples, fmt_for_frames, &tx);
+        }
+    };
+
+    // cpal can deliver samples in several formats depending on the driver.
+    let stream = match sample_format {
+        SampleFormat::F32 => device.build_input_stream(
+            &stream_config,
+            callback_f32,
+            report_input_err,
+            None,
+        ),
+        SampleFormat::I16 => {
+            let tx = tx.clone();
+            let buf = Arc::clone(&buf_for_cb);
+            // Reuse the same pipeline: i16 → f32 → same path. Allocating is
+            // OK on Linux/desktop; real-time audio constraints on mobile are
+            // handled by the host natively, not by cpal.
+            let mut rs = match Resampler::new(device_rate, cfg.sample_rate, 1) {
+                Ok(r) => r,
+                Err(e) => {
+                    tracing::error!(%e, "resampler init (i16 path)");
+                    return;
+                }
+            };
+            device.build_input_stream(
+                &stream_config,
+                move |data: &[i16], _info: &cpal::InputCallbackInfo| {
+                    let mono = downmix_i16(data, channels);
+                    push_frames(&mut rs, mono, &buf, frame_samples, fmt_for_frames, &tx);
+                },
+                report_input_err,
+                None,
+            )
+        }
+        SampleFormat::U16 => {
+            let tx = tx.clone();
+            let buf = Arc::clone(&buf_for_cb);
+            let mut rs = match Resampler::new(device_rate, cfg.sample_rate, 1) {
+                Ok(r) => r,
+                Err(e) => {
+                    tracing::error!(%e, "resampler init (u16 path)");
+                    return;
+                }
+            };
+            device.build_input_stream(
+                &stream_config,
+                move |data: &[u16], _info: &cpal::InputCallbackInfo| {
+                    let mono: Vec<i16> = data
+                        .chunks(channels as usize)
+                        .map(|frame| {
+                            let sum: i32 = frame
+                                .iter()
+                                .map(|&s| (s as i32) - 32768)
+                                .sum();
+                            (sum / channels as i32).clamp(-32768, 32767) as i16
+                        })
+                        .collect();
+                    push_frames(&mut rs, mono, &buf, frame_samples, fmt_for_frames, &tx);
+                },
+                report_input_err,
+                None,
+            )
+        }
+        other => {
+            tracing::error!(?other, "unsupported input sample format");
+            return;
+        }
+    };
+
+    let stream = match stream {
+        Ok(s) => s,
+        Err(e) => {
+            tracing::error!(%e, "build_input_stream failed");
+            return;
+        }
+    };
+
+    if let Err(e) = stream.play() {
+        tracing::error!(%e, "input stream play failed");
+        return;
+    }
+
+    tracing::info!(
+        device_rate,
+        channels,
+        target_rate = cfg.sample_rate,
+        "audio capture running"
+    );
+
+    // Stream runs until frame_tx is closed (the AudioSource was dropped).
+    while !tx.is_closed() {
+        thread::park_timeout(std::time::Duration::from_millis(200));
+    }
+
+    tracing::debug!("audio capture stopping");
+}
+
+// ─── Playback ───────────────────────────────────────────────────────────────
+
+struct CpalPlayback {
+    frame_tx: mpsc::Sender<AudioFrame>,
+    _worker: thread::JoinHandle<()>,
+}
+
+impl CpalPlayback {
+    fn open(cfg: AudioFormat) -> Result<Self, AnvilError> {
+        let (frame_tx, frame_rx) = mpsc::channel::<AudioFrame>(8);
+
+        let worker = thread::Builder::new()
+            .name("anvil-playback".into())
+            .spawn(move || run_playback(cfg, frame_rx))
+            .map_err(|e| AnvilError::AudioDevice(format!("spawn playback thread: {e}")))?;
+
+        Ok(Self { frame_tx, _worker: worker })
+    }
+}
+
+#[async_trait]
+impl AudioSink for CpalPlayback {
+    async fn write_frame(&mut self, frame: &AudioFrame) -> Result<(), AnvilError> {
+        // Clone the frame; the channel owns it until the playback side pops it.
+        self.frame_tx
+            .send(frame.clone())
+            .await
+            .map_err(|_| AnvilError::AudioDevice("playback channel closed".into()))
+    }
+}
+
+fn run_playback(cfg: AudioFormat, mut frame_rx: mpsc::Receiver<AudioFrame>) {
+    let host = cpal::default_host();
+    let device = match host.default_output_device() {
+        Some(d) => d,
+        None => {
+            tracing::error!("no default output device");
+            return;
+        }
+    };
+
+    let default_config = match device.default_output_config() {
+        Ok(c) => c,
+        Err(e) => {
+            tracing::error!(%e, "default_output_config failed");
+            return;
+        }
+    };
+    let device_rate = default_config.sample_rate().0;
+    let channels = default_config.channels();
+    let sample_format = default_config.sample_format();
+
+    let stream_config: StreamConfig = StreamConfig {
+        channels,
+        sample_rate: SampleRate(device_rate),
+        buffer_size: cpal::BufferSize::Default,
+    };
+
+    // Shared sample queue: resampled mono i16 at device rate, feed the
+    // cpal callback. parking_lot::Mutex keeps lock cycles short.
+    let out_buf: Arc<Mutex<VecDeque<i16>>> = Arc::new(Mutex::new(VecDeque::with_capacity(
+        (device_rate as usize).max(8000), // ~1 s of slack
+    )));
+
+    let buf_for_cb = Arc::clone(&out_buf);
+    let callback_f32 = move |data: &mut [f32], _info: &cpal::OutputCallbackInfo| {
+        let mut guard = buf_for_cb.lock();
+        for frame in data.chunks_mut(channels as usize) {
+            let sample = guard.pop_front().unwrap_or(0);
+            let f = (sample as f32) / (i16::MAX as f32);
+            for ch in frame.iter_mut() {
+                *ch = f;
+            }
+        }
+    };
+
+    let stream = match sample_format {
+        SampleFormat::F32 => device.build_output_stream(
+            &stream_config,
+            callback_f32,
+            report_output_err,
+            None,
+        ),
+        SampleFormat::I16 => {
+            let buf = Arc::clone(&out_buf);
+            device.build_output_stream(
+                &stream_config,
+                move |data: &mut [i16], _info: &cpal::OutputCallbackInfo| {
+                    let mut guard = buf.lock();
+                    for frame in data.chunks_mut(channels as usize) {
+                        let sample = guard.pop_front().unwrap_or(0);
+                        for ch in frame.iter_mut() {
+                            *ch = sample;
+                        }
+                    }
+                },
+                report_output_err,
+                None,
+            )
+        }
+        SampleFormat::U16 => {
+            let buf = Arc::clone(&out_buf);
+            device.build_output_stream(
+                &stream_config,
+                move |data: &mut [u16], _info: &cpal::OutputCallbackInfo| {
+                    let mut guard = buf.lock();
+                    for frame in data.chunks_mut(channels as usize) {
+                        let sample = guard.pop_front().unwrap_or(0);
+                        let u = ((sample as i32) + 32768).clamp(0, 65535) as u16;
+                        for ch in frame.iter_mut() {
+                            *ch = u;
+                        }
+                    }
+                },
+                report_output_err,
+                None,
+            )
+        }
+        other => {
+            tracing::error!(?other, "unsupported output sample format");
+            return;
+        }
+    };
+
+    let stream = match stream {
+        Ok(s) => s,
+        Err(e) => {
+            tracing::error!(%e, "build_output_stream failed");
+            return;
+        }
+    };
+    if let Err(e) = stream.play() {
+        tracing::error!(%e, "output stream play failed");
+        return;
+    }
+
+    let mut upsampler = match Resampler::new(cfg.sample_rate, device_rate, 1) {
+        Ok(r) => r,
+        Err(e) => {
+            tracing::error!(%e, "output resampler init");
+            return;
+        }
+    };
+
+    tracing::info!(
+        device_rate,
+        channels,
+        source_rate = cfg.sample_rate,
+        "audio playback running"
+    );
+
+    // Drain frames, resample up to device rate, push into out_buf.
+    while let Some(frame) = frame_rx.blocking_recv() {
+        let upsampled = match upsampler.resample(&frame.samples) {
+            Ok(v) => v,
+            Err(e) => {
+                tracing::warn!(%e, "playback resample");
+                continue;
+            }
+        };
+        let mut guard = out_buf.lock();
+        guard.extend(upsampled);
+        // Cap at 200ms to keep latency bounded if the producer runs ahead.
+        let cap = (device_rate as usize * 200) / 1000;
+        while guard.len() > cap {
+            guard.pop_front();
+        }
+    }
+
+    tracing::debug!("audio playback stopping");
+}
+
+// ─── helpers ────────────────────────────────────────────────────────────────
+
+fn downmix_f32(data: &[f32], channels: u16) -> Vec<i16> {
+    data.chunks(channels as usize)
+        .map(|frame| {
+            let avg = frame.iter().sum::<f32>() / (channels.max(1) as f32);
+            (avg * i16::MAX as f32).clamp(i16::MIN as f32, i16::MAX as f32) as i16
+        })
+        .collect()
+}
+
+fn downmix_i16(data: &[i16], channels: u16) -> Vec<i16> {
+    data.chunks(channels as usize)
+        .map(|frame| {
+            let sum: i32 = frame.iter().map(|&s| s as i32).sum();
+            (sum / channels.max(1) as i32).clamp(-32768, 32767) as i16
+        })
+        .collect()
+}
+
+fn push_frames(
+    resampler: &mut Resampler,
+    mono: Vec<i16>,
+    buf: &Arc<Mutex<VecDeque<i16>>>,
+    frame_samples: usize,
+    fmt: AudioFormat,
+    tx: &mpsc::Sender<AudioFrame>,
+) {
+    let resampled = match resampler.resample(&mono) {
+        Ok(v) => v,
+        Err(_) => return,
+    };
+    let mut guard = buf.lock();
+    guard.extend(resampled);
+    while guard.len() >= frame_samples {
+        let frame: Vec<i16> = guard.drain(..frame_samples).collect();
+        if tx.try_send(AudioFrame { samples: frame, format: fmt }).is_err() {
+            // Consumer stalled; drop the frame to keep moving forward.
+            // A warning would spam the log.
+        }
+    }
+}
+
+fn report_input_err(err: cpal::StreamError) {
+    tracing::warn!(?err, "capture stream error");
+}
+
+fn report_output_err(err: cpal::StreamError) {
+    tracing::warn!(?err, "playback stream error");
 }
