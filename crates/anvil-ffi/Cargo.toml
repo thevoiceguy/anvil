@@ -1,0 +1,24 @@
+[package]
+name = "anvil-ffi"
+description = "C ABI surface for Anvil. Consumed by iOS / Android / native UI hosts."
+version.workspace      = true
+edition.workspace      = true
+rust-version.workspace = true
+license.workspace      = true
+authors.workspace      = true
+repository.workspace   = true
+homepage.workspace     = true
+
+[lib]
+# Static + dynamic so hosts can pick whichever linkage they need:
+#   iOS .xcframework wants staticlib, Android wants cdylib, Windows DLL wants cdylib.
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[dependencies]
+anvil-core = { workspace = true }
+tokio      = { workspace = true }
+tracing    = { workspace = true }
+
+[build-dependencies]
+# cbindgen generates the C header at build time. Wired up in Phase 3.
+# cbindgen = "0.27"

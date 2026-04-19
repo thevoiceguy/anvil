@@ -1,0 +1,33 @@
+[package]
+name = "anvil-brand"
+description = "FCP brand provisioning: HTTP fetch, filesystem cache, asset download."
+version.workspace      = true
+edition.workspace      = true
+rust-version.workspace = true
+license.workspace      = true
+authors.workspace      = true
+repository.workspace   = true
+homepage.workspace     = true
+
+[features]
+default = ["http", "fs-cache"]
+# HTTP-based BrandProvider using reqwest. Turn off on mobile if the host
+# supplies its own provider (URLSession / OkHttp).
+http     = ["dep:reqwest"]
+# Filesystem-backed BrandCache. Turn off on mobile if the host supplies its
+# own cache (platform-native, Keychain / Keystore for ETag tokens, etc.).
+fs-cache = ["dep:dirs"]
+
+[dependencies]
+anvil-core  = { workspace = true }
+tokio       = { workspace = true }
+async-trait = { workspace = true }
+thiserror   = { workspace = true }
+tracing     = { workspace = true }
+serde       = { workspace = true }
+serde_json  = { workspace = true }
+
+reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "json", "http2"], optional = true }
+dirs    = { version = "5",    optional = true }
+sha2    = "0.10"
+hex     = "0.4"

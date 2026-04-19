@@ -1,0 +1,80 @@
+[workspace]
+resolver = "2"
+members = [
+    "crates/anvil-core",
+    "crates/anvil-audio",
+    "crates/anvil-brand",
+    "crates/anvil-codec",
+    "crates/anvil-ffi",
+    "bins/anvil-cli",
+]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.75"
+license = "MIT OR Apache-2.0"
+authors = ["Anvil contributors"]
+repository = "https://github.com/thevoiceguy/anvil"
+homepage = "https://github.com/thevoiceguy/anvil"
+
+[workspace.dependencies]
+# Async runtime
+tokio = { version = "1", features = ["full"] }
+async-trait = "0.1"
+futures = "0.3"
+
+# Error handling
+thiserror = "1"
+anyhow = "1"
+
+# Observability
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+
+# Collections / sync
+dashmap = "5"
+parking_lot = "0.12"
+bytes = "1"
+
+# Serialization
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+
+# Audio I/O
+cpal = "0.15"
+
+# Codec
+opus = "0.3"
+
+# siphon-rs (SIP stack) — path deps while we iterate locally
+sip-core = { path = "../siphon-rs/crates/sip-core" }
+sip-transport = { path = "../siphon-rs/crates/sip-transport" }
+sip-transaction = { path = "../siphon-rs/crates/sip-transaction" }
+sip-dialog = { path = "../siphon-rs/crates/sip-dialog" }
+sip-uac = { path = "../siphon-rs/crates/sip-uac" }
+sip-uas = { path = "../siphon-rs/crates/sip-uas" }
+sip-sdp = { path = "../siphon-rs/crates/sip-sdp" }
+sip-auth = { path = "../siphon-rs/crates/sip-auth" }
+sip-dns = { path = "../siphon-rs/crates/sip-dns" }
+
+# forge-media — path deps while we iterate locally
+forge-core = { path = "../forge-media/crates/forge-core" }
+forge-rtp = { path = "../forge-media/crates/forge-rtp" }
+forge-engine = { path = "../forge-media/crates/forge-engine" }
+forge-codecs = { path = "../forge-media/crates/forge-codecs" }
+forge-dtmf = { path = "../forge-media/crates/forge-dtmf" }
+forge-sdp = { path = "../forge-media/crates/forge-sdp" }
+forge-injection = { path = "../forge-media/crates/forge-injection" }
+forge-resampler = { path = "../forge-media/crates/forge-resampler" }
+
+# Internal
+anvil-core  = { path = "crates/anvil-core"  }
+anvil-audio = { path = "crates/anvil-audio" }
+anvil-brand = { path = "crates/anvil-brand" }
+anvil-codec = { path = "crates/anvil-codec" }
+
+[profile.release]
+lto = "thin"
+codegen-units = 1
+strip = "symbols"

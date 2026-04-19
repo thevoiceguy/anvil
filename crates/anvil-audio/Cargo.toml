@@ -1,0 +1,26 @@
+[package]
+name = "anvil-audio"
+description = "Cross-platform microphone and speaker I/O for Anvil, backed by cpal."
+version.workspace      = true
+edition.workspace      = true
+rust-version.workspace = true
+license.workspace      = true
+authors.workspace      = true
+repository.workspace   = true
+homepage.workspace     = true
+
+[features]
+default = ["cpal-default"]
+cpal-default = ["dep:cpal"]
+# Link webrtc-audio-processing for AEC / NS / AGC. Off by default because
+# it's a C++ build; turn it on for desktop / Linux where it's reliable.
+apm = []
+
+[dependencies]
+anvil-core  = { workspace = true }
+tokio       = { workspace = true }
+async-trait = { workspace = true }
+thiserror   = { workspace = true }
+tracing     = { workspace = true }
+parking_lot = { workspace = true }
+cpal        = { workspace = true, optional = true }

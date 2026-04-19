@@ -1,0 +1,19 @@
+[package]
+name = "anvil-codec"
+description = "Opus codec wrapper for Anvil. forge-media supplies G.711 and G.722."
+version.workspace      = true
+edition.workspace      = true
+rust-version.workspace = true
+license.workspace      = true
+authors.workspace      = true
+repository.workspace   = true
+homepage.workspace     = true
+
+[features]
+default = ["opus"]
+opus = ["dep:opus"]
+
+[dependencies]
+anvil-core = { workspace = true }
+thiserror  = { workspace = true }
+opus       = { workspace = true, optional = true }

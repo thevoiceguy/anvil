@@ -1,0 +1,45 @@
+[package]
+name = "anvil-core"
+description = "Cross-platform softphone core: orchestrates siphon-rs signaling and forge-media."
+version.workspace      = true
+edition.workspace      = true
+rust-version.workspace = true
+license.workspace      = true
+authors.workspace      = true
+repository.workspace   = true
+homepage.workspace     = true
+
+[features]
+default = ["tls"]
+tls  = []
+srtp = []
+
+[dependencies]
+tokio        = { workspace = true }
+async-trait  = { workspace = true }
+futures      = { workspace = true }
+thiserror    = { workspace = true }
+tracing      = { workspace = true }
+bytes        = { workspace = true }
+dashmap      = { workspace = true }
+parking_lot  = { workspace = true }
+serde        = { workspace = true }
+
+# SIP stack
+sip-core        = { workspace = true }
+sip-transport   = { workspace = true }
+sip-transaction = { workspace = true }
+sip-dialog      = { workspace = true }
+sip-uac         = { workspace = true }
+sip-uas         = { workspace = true }
+sip-sdp         = { workspace = true }
+sip-auth        = { workspace = true }
+sip-dns         = { workspace = true }
+
+# Media engine
+forge-core   = { workspace = true }
+forge-rtp    = { workspace = true }
+forge-engine = { workspace = true }
+forge-codecs = { workspace = true }
+forge-dtmf   = { workspace = true }
+forge-sdp    = { workspace = true }

@@ -1,0 +1,14 @@
+/target
+**/*.rs.bk
+Cargo.lock.bak
+*.swp
+*.swo
+.idea/
+.vscode/
+.DS_Store
+
+# Platform build outputs
+*.xcframework
+*.framework
+/ios-build/
+/android-build/
