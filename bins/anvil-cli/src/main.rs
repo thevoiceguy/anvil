@@ -10,8 +10,7 @@ use std::sync::Arc;
 
 use anvil_audio::{CpalHost, ToneHost, ToneStats};
 use anvil_core::{
-    AccountConfig, Anvil, AnvilConfig, BrandConfig, CallId, EndReason, Event, MediaConfig,
-    Transport,
+    AccountConfig, Anvil, AnvilConfig, BrandConfig, CallId, Event, MediaConfig, Transport,
 };
 use anyhow::Result;
 use clap::Parser;
@@ -57,6 +56,11 @@ struct Cli {
     /// sink's peak RMS is printed at hangup.
     #[arg(long)]
     tone: bool,
+
+    /// Auto-answer incoming calls instead of rejecting them. Useful for
+    /// two-instance tests where one side calls and the other listens.
+    #[arg(long)]
+    auto_answer: bool,
 }
 
 #[tokio::main]
@@ -107,70 +111,93 @@ async fn main() -> Result<()> {
 }
 
 async fn run(cli: Cli, cfg: AnvilConfig, tone_stats: Option<Arc<ToneStats>>) -> Result<()> {
-
     tracing::info!("starting Anvil");
     let (anvil, mut events) = Anvil::start(cfg).await?;
-
-    // Event drainer. Signals `call_ended` when a CallEnded event arrives so
-    // the driver task can exit early if the remote hangs up first.
-    let (call_ended_tx, mut call_ended_rx) = tokio::sync::mpsc::unbounded_channel::<CallId>();
-    let printer = tokio::spawn(async move {
-        while let Some(event) = events.recv().await {
-            match &event {
-                Event::CallEnded { call, reason } => {
-                    println!("[event] CallEnded {{ call: {call:?}, reason: {reason:?} }}");
-                    match reason {
-                        EndReason::LocalHangup => {}
-                        _ => {
-                            let _ = call_ended_tx.send(*call);
-                        }
-                    }
-                }
-                Event::RegistrationChanged { state, reason } => {
-                    println!(
-                        "[reg] {state:?}{}",
-                        reason.as_ref().map(|r| format!(" ({r})")).unwrap_or_default()
-                    );
-                }
-                other => println!("[event] {other:?}"),
-            }
-        }
-    });
 
     tracing::info!("registering...");
     anvil.register().await?;
 
-    if let Some(target) = cli.call.clone() {
+    // Optionally place a call. Either way, we then run a single event-drain
+    // loop until the call ends / hold timer fires / Ctrl+C.
+    let outbound_id = if let Some(target) = cli.call.clone() {
         tracing::info!(%target, "placing call");
         match anvil.place_call(&target).await {
-            Ok(call_id) => {
-                tracing::info!(?call_id, "call placed; waiting");
-                tokio::select! {
-                    _ = tokio::time::sleep(Duration::from_secs(cli.talk)) => {
-                        tracing::info!("talk timer expired, hanging up");
-                        if let Err(e) = anvil.hangup(call_id).await {
-                            tracing::warn!(%e, "hangup failed");
-                        }
-                    }
-                    _ = tokio::signal::ctrl_c() => {
-                        tracing::info!("Ctrl+C, hanging up");
-                        if let Err(e) = anvil.hangup(call_id).await {
-                            tracing::warn!(%e, "hangup failed");
-                        }
-                    }
-                    ended = call_ended_rx.recv() => {
-                        tracing::info!(?ended, "call ended remotely");
-                    }
-                }
+            Ok(id) => {
+                tracing::info!(call_id = ?id, "call placed");
+                Some(id)
             }
-            Err(e) => tracing::error!(%e, "place_call failed"),
+            Err(e) => {
+                tracing::error!(%e, "place_call failed");
+                None
+            }
         }
     } else {
-        tracing::info!(hold_seconds = cli.hold, "registered; holding");
+        None
+    };
+
+    let deadline = if outbound_id.is_some() {
+        tokio::time::Instant::now() + Duration::from_secs(cli.talk)
+    } else {
+        tokio::time::Instant::now() + Duration::from_secs(cli.hold)
+    };
+
+    let mut active_call: Option<CallId> = outbound_id;
+
+    loop {
         tokio::select! {
-            _ = tokio::time::sleep(Duration::from_secs(cli.hold)) => {}
+            event = events.recv() => {
+                let Some(event) = event else { break };
+                match event {
+                    Event::RegistrationChanged { state, reason } => {
+                        println!(
+                            "[reg] {state:?}{}",
+                            reason.map(|r| format!(" ({r})")).unwrap_or_default()
+                        );
+                    }
+                    Event::IncomingCall { call, from, display_name } => {
+                        let label = display_name.as_deref().unwrap_or(&from);
+                        println!("[event] IncomingCall from {label}");
+                        if cli.auto_answer && active_call.is_none() {
+                            tracing::info!(?call, "auto-answering");
+                            if let Err(e) = anvil.answer(call).await {
+                                tracing::warn!(%e, "answer failed");
+                            } else {
+                                active_call = Some(call);
+                            }
+                        } else {
+                            tracing::info!(?call, "rejecting (auto-answer off or busy)");
+                            let _ = anvil.reject(call, 486).await;
+                        }
+                    }
+                    Event::CallEstablished { call, codec } => {
+                        println!("[event] CallEstablished {{ call: {call:?}, codec: {codec:?} }}");
+                    }
+                    Event::CallEnded { call, reason } => {
+                        println!("[event] CallEnded {{ call: {call:?}, reason: {reason:?} }}");
+                        if active_call == Some(call) {
+                            break;
+                        }
+                    }
+                    other => println!("[event] {other:?}"),
+                }
+            }
+            _ = tokio::time::sleep_until(deadline) => {
+                if let Some(id) = active_call {
+                    tracing::info!("talk timer expired, hanging up");
+                    if let Err(e) = anvil.hangup(id).await {
+                        tracing::warn!(%e, "hangup failed");
+                    }
+                }
+                break;
+            }
             _ = tokio::signal::ctrl_c() => {
-                tracing::info!("received Ctrl+C");
+                tracing::info!("Ctrl+C");
+                if let Some(id) = active_call {
+                    if let Err(e) = anvil.hangup(id).await {
+                        tracing::warn!(%e, "hangup failed");
+                    }
+                }
+                break;
             }
         }
     }
@@ -188,7 +215,7 @@ async fn run(cli: Cli, cfg: AnvilConfig, tone_stats: Option<Arc<ToneStats>>) -> 
     let _ = anvil.unregister().await;
     anvil.shutdown().await?;
 
-    printer.abort();
+    let _ = cli; // silence unused when there are no more flags to read
     Ok(())
 }
 

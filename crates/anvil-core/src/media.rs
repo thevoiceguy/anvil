@@ -190,6 +190,34 @@ pub(crate) fn extract_remote_rtp_addr(body: &[u8]) -> Option<SocketAddr> {
     Some(SocketAddr::new(ip, port))
 }
 
+/// Best-effort codec detection from an SDP offer body. Same rules as the
+/// answer path: first m= format byte, fall back to rtpmap lookup.
+pub(crate) fn extract_codec_from_offer(body: &[u8]) -> Option<crate::config::Codec> {
+    use crate::config::Codec;
+    let text = std::str::from_utf8(body).ok()?;
+    let sdp = sip_sdp::parse::parse_sdp(text).ok()?;
+    let media = sdp
+        .media
+        .iter()
+        .find(|m| m.media_type == sip_sdp::MediaType::Audio)?;
+    let first_pt: u8 = media.formats.first()?.parse().ok()?;
+    match first_pt {
+        0 => Some(Codec::Pcmu),
+        8 => Some(Codec::Pcma),
+        9 => Some(Codec::G722),
+        _ => {
+            let name = media.rtpmaps.get(&first_pt)?.encoding_name.as_str();
+            match name.to_ascii_lowercase().as_str() {
+                "opus" => Some(Codec::Opus),
+                "pcmu" => Some(Codec::Pcmu),
+                "pcma" => Some(Codec::Pcma),
+                "g722" => Some(Codec::G722),
+                _ => None,
+            }
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     //! End-to-end validation of the RTP pipeline: two sockets, two

@@ -18,6 +18,7 @@ pub mod error;
 pub mod event;
 pub(crate) mod media;
 pub(crate) mod transport;
+pub(crate) mod uas;
 
 pub use brand::{
     BrandAsset, BrandCache, BrandColors, BrandCredential, BrandFetchOutcome,
@@ -117,25 +118,6 @@ impl Anvil {
                 .map_err(|e| AnvilError::Internal(format!("UAC build: {e}")))?,
         );
 
-        // Inbound packet pump: feed every response into the transaction manager so
-        // `uac.register(...).await` can complete. Requests (incoming INVITE etc.)
-        // are ignored for Phase 1.
-        let pump = {
-            let transaction_mgr = Arc::clone(&transaction_mgr);
-            tokio::spawn(async move {
-                while let Some(packet) = inbound_rx.recv().await {
-                    let payload = packet.payload();
-                    if let Some(response) = sip_parse::parse_response(&payload) {
-                        transaction_mgr.receive_response(response).await;
-                    } else if sip_parse::parse_request(&payload).is_some() {
-                        tracing::debug!("inbound request received — not handled in Phase 1");
-                    } else {
-                        tracing::trace!(len = payload.len(), "inbound packet not SIP (keep-alive?)");
-                    }
-                }
-            })
-        };
-
         let registrar_uri = SipUri::parse(&cfg.account.registrar).map_err(|e| {
             AnvilError::Config(format!("invalid registrar {:?}: {e:?}", cfg.account.registrar))
         })?;
@@ -159,13 +141,49 @@ impl Anvil {
             .unwrap_or_else(|| "anvil".to_string());
 
         let audio: Arc<dyn AudioHost> = Arc::from(cfg.audio);
+        let calls: Arc<DashMap<CallId, CallEntry>> = Arc::new(DashMap::new());
+
+        // UAS handler — routed to directly from the packet pump rather than
+        // via IntegratedUAS. IntegratedUAS builds its own DialogManager that
+        // we can't share the created dialog with, so BYE lookups would miss.
+        // Routing directly lets us use our CallEntry map as the source of
+        // truth for dialog-to-call matching.
+        let uas_handler = Arc::new(uas::AnvilUasHandler {
+            events: event_tx.clone(),
+            calls: Arc::clone(&calls),
+            media_ip,
+            local_user: local_user.clone(),
+            local_sip_addr: bound_addr,
+        });
+
+        let pump = {
+            let transaction_mgr = Arc::clone(&transaction_mgr);
+            let uas_handler = Arc::clone(&uas_handler);
+            tokio::spawn(async move {
+                while let Some(packet) = inbound_rx.recv().await {
+                    let payload = packet.payload();
+                    if let Some(response) = sip_parse::parse_response(&payload) {
+                        transaction_mgr.receive_response(response).await;
+                    } else if let Some(request) = sip_parse::parse_request(&payload) {
+                        let ctx = sip_transaction::TransportContext::new(
+                            map_transport(packet.transport()),
+                            packet.peer(),
+                            packet.stream().cloned(),
+                        );
+                        dispatch_request(&transaction_mgr, &uas_handler, request, ctx).await;
+                    } else {
+                        tracing::trace!(len = payload.len(), "inbound packet not SIP (keep-alive?)");
+                    }
+                }
+            })
+        };
 
         Ok((
             Self {
                 uac,
                 registrar_uri,
                 events: event_tx,
-                calls: Arc::new(DashMap::new()),
+                calls,
                 audio,
                 media_ip,
                 local_user,
@@ -296,7 +314,9 @@ impl Anvil {
         self.calls.insert(
             call_id,
             CallEntry {
-                handle: Arc::clone(&handle),
+                outbound_handle: Some(Arc::clone(&handle)),
+                inbound: None,
+                dialog: None,
                 negotiated_codec: None,
                 rtp_socket: Arc::clone(&rtp_socket),
                 pipeline: None,
@@ -315,14 +335,29 @@ impl Anvil {
         Ok(call_id)
     }
 
-    /// Answer an incoming call. Phase 2.
-    pub async fn answer(&self, _call: CallId) -> Result<(), AnvilError> {
-        Err(AnvilError::Internal("answer not implemented in Phase 1 M1".into()))
+    /// Answer an incoming call that was signalled via `Event::IncomingCall`.
+    pub async fn answer(&self, call: CallId) -> Result<(), AnvilError> {
+        let codec = uas::send_answer_and_start_media(call, &self.calls, &self.audio, &self.events)
+            .await?;
+        let _ = self
+            .events
+            .send(Event::CallEstablished { call, codec })
+            .await;
+        Ok(())
     }
 
-    /// Reject an incoming call. Phase 2.
-    pub async fn reject(&self, _call: CallId, _code: u16) -> Result<(), AnvilError> {
-        Err(AnvilError::Internal("reject not implemented in Phase 1 M1".into()))
+    /// Reject an incoming call with the given SIP response code
+    /// (e.g. 486 Busy Here, 603 Decline).
+    pub async fn reject(&self, call: CallId, code: u16) -> Result<(), AnvilError> {
+        uas::reject_inbound(call, code, &self.calls).await?;
+        let _ = self
+            .events
+            .send(Event::CallEnded {
+                call,
+                reason: EndReason::LocalHangup,
+            })
+            .await;
+        Ok(())
     }
 
     /// Hang up an active call. Sends BYE on a confirmed dialog; for an
@@ -331,13 +366,29 @@ impl Anvil {
     /// `CallEstablished` before hanging up in Phase 1 M2. CANCEL support lands
     /// in Phase 2.
     pub async fn hangup(&self, call: CallId) -> Result<(), AnvilError> {
-        let entry = self
-            .calls
-            .get(&call)
-            .ok_or(AnvilError::NoSuchCall(call))?;
-
-        let dialog = entry.handle.dialog.read().await.clone();
-        drop(entry); // release the DashMap read guard before awaiting
+        // Pull out the dialog source, then release the DashMap guard before
+        // awaiting.
+        enum DialogSource {
+            Confirmed(sip_dialog::Dialog),
+            Outbound(Arc<sip_uac::integrated::CallHandle>),
+        }
+        let src = {
+            let entry = self
+                .calls
+                .get(&call)
+                .ok_or(AnvilError::NoSuchCall(call))?;
+            if let Some(dlg) = entry.dialog.clone() {
+                DialogSource::Confirmed(dlg)
+            } else if let Some(h) = entry.outbound_handle.clone() {
+                DialogSource::Outbound(h)
+            } else {
+                return Err(AnvilError::Internal(format!("{call:?} has no dialog")));
+            }
+        };
+        let dialog = match src {
+            DialogSource::Confirmed(d) => d,
+            DialogSource::Outbound(h) => h.dialog.read().await.clone(),
+        };
 
         match self.uac.bye(&dialog).await {
             Ok(resp) if (200..300).contains(&resp.code()) => {
@@ -380,6 +431,102 @@ impl Anvil {
             handle.abort();
         }
         Ok(())
+    }
+}
+
+/// Minimal UAS dispatch — invoke the right AnvilUasHandler method for each
+/// incoming request method. Replaces `IntegratedUAS::dispatch` because we
+/// need to own the DialogManager (see uas.rs for context).
+async fn dispatch_request(
+    transaction_mgr: &Arc<sip_transaction::TransactionManager>,
+    handler: &Arc<uas::AnvilUasHandler>,
+    request: sip_core::Request,
+    ctx: sip_transaction::TransportContext,
+) {
+    use sip_uas::integrated::UasRequestHandler;
+    use sip_uas::UserAgentServer;
+
+    // ACK doesn't create / update a server transaction in the same way and
+    // must be fed to the transaction manager directly so the INVITE's 2xx
+    // retransmission stops.
+    let handle = transaction_mgr
+        .receive_request(request.clone(), ctx.clone())
+        .await;
+
+    let method = request.method().as_str().to_string();
+    match method.as_str() {
+        "INVITE" => {
+            // 100 Trying so the caller stops retransmitting.
+            let trying = UserAgentServer::create_response(&request, 100, "Trying");
+            handle.send_provisional(trying).await;
+            if let Err(e) = handler.on_invite(&request, handle, &ctx, None).await {
+                tracing::warn!(%e, "on_invite failed");
+            }
+        }
+        "ACK" => {
+            // No response. Transaction manager has already promoted state.
+            let _ = handle;
+        }
+        "BYE" => {
+            let call_id = request
+                .headers()
+                .get("Call-ID")
+                .map(|s| s.to_string())
+                .unwrap_or_default();
+            if let Some(call) = uas::find_call_by_dialog_id(&handler.calls, &call_id) {
+                // Pull the dialog out of our CallEntry to pass to on_bye.
+                let dialog_opt = {
+                    let entry = handler.calls.get(&call);
+                    entry.and_then(|e| e.dialog.clone())
+                };
+                if let Some(dialog) = dialog_opt {
+                    if let Err(e) = handler.on_bye(&request, handle, &dialog).await {
+                        tracing::warn!(%e, "on_bye failed");
+                    }
+                } else {
+                    // Haven't stored a confirmed dialog — shouldn't happen
+                    // post-answer; respond 481 to be safe.
+                    let resp = UserAgentServer::create_response(
+                        &request,
+                        481,
+                        "Call/Transaction Does Not Exist",
+                    );
+                    handle.send_final(resp).await;
+                }
+            } else {
+                let resp = UserAgentServer::create_response(
+                    &request,
+                    481,
+                    "Call/Transaction Does Not Exist",
+                );
+                handle.send_final(resp).await;
+            }
+        }
+        "CANCEL" => {
+            if let Err(e) = handler.on_cancel(&request, handle).await {
+                tracing::warn!(%e, "on_cancel failed");
+            }
+        }
+        "OPTIONS" => {
+            let resp = UserAgentServer::create_response(&request, 200, "OK");
+            handle.send_final(resp).await;
+        }
+        _ => {
+            let resp = UserAgentServer::create_response(&request, 405, "Method Not Allowed");
+            handle.send_final(resp).await;
+        }
+    }
+}
+
+fn map_transport(kind: sip_transport::TransportKind) -> sip_transaction::TransportKind {
+    match kind {
+        sip_transport::TransportKind::Udp => sip_transaction::TransportKind::Udp,
+        sip_transport::TransportKind::Tcp => sip_transaction::TransportKind::Tcp,
+        sip_transport::TransportKind::Tls => sip_transaction::TransportKind::Tls,
+        sip_transport::TransportKind::Sctp => sip_transaction::TransportKind::Sctp,
+        sip_transport::TransportKind::TlsSctp => sip_transaction::TransportKind::TlsSctp,
+        sip_transport::TransportKind::Ws => sip_transaction::TransportKind::Ws,
+        sip_transport::TransportKind::Wss => sip_transaction::TransportKind::Wss,
     }
 }
 

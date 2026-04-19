@@ -2989,7 +2989,7 @@ dependencies = [
 
 [[package]]
 name = "sip-core"
-version = "0.7.1"
+version = "0.7.3"
 dependencies = [
  "bytes",
  "httpdate",
@@ -3038,7 +3038,7 @@ dependencies = [
 
 [[package]]
 name = "sip-parse"
-version = "0.3.1"
+version = "0.3.2"
 dependencies = [
  "bytes",
  "httpdate",
@@ -3087,7 +3087,7 @@ dependencies = [
 
 [[package]]
 name = "sip-transport"
-version = "0.2.4"
+version = "0.2.5"
 dependencies = [
  "anyhow",
  "bytes",
