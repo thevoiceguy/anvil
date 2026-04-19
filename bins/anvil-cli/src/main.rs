@@ -1,19 +1,20 @@
 //! anvil-cli — terminal softphone.
 //!
-//! Phase 1 Milestone 1: REGISTER smoke test. Connects to a SIP registrar,
-//! sends REGISTER with Digest auth, prints every event, then unregisters on
-//! Ctrl+C or after --hold seconds.
-//!
-//! Call handling, audio, and config files land with later milestones.
+//! Phase 1 M2: REGISTER, then place an outgoing call if `--call` is given.
+//! Prints every event. Hangs up on Ctrl+C. No media flow yet (the INVITE
+//! advertises an RTP port, but no audio frames cross the wire).
 
 use std::time::Duration;
 
-use anvil_core::{AccountConfig, Anvil, AnvilConfig, BrandConfig, Event, MediaConfig, Transport};
+use anvil_core::{
+    AccountConfig, Anvil, AnvilConfig, BrandConfig, CallId, EndReason, Event, MediaConfig,
+    Transport,
+};
 use anyhow::Result;
 use clap::Parser;
 
 #[derive(Parser, Debug)]
-#[command(name = "anvil-cli", about = "Anvil terminal softphone (Phase 1 M1 smoke test)")]
+#[command(name = "anvil-cli", about = "Anvil terminal softphone (Phase 1 M2)")]
 struct Cli {
     /// Address-of-record, e.g. `sip:alice@example.com`.
     #[arg(long)]
@@ -23,7 +24,7 @@ struct Cli {
     #[arg(long)]
     registrar: String,
 
-    /// SIP username (often the same as the AOR user-part).
+    /// SIP username.
     #[arg(long)]
     username: String,
 
@@ -31,7 +32,16 @@ struct Cli {
     #[arg(long, env = "ANVIL_PASSWORD")]
     password: String,
 
-    /// Seconds to stay registered before unregistering.
+    /// Optional target to call after registering, e.g. `sip:bob@example.com`.
+    /// If omitted, anvil-cli just holds the registration.
+    #[arg(long)]
+    call: Option<String>,
+
+    /// Seconds to stay in the call before hanging up.
+    #[arg(long, default_value = "10")]
+    talk: u64,
+
+    /// Seconds to stay registered before unregistering (when not calling).
     #[arg(long, default_value = "30")]
     hold: u64,
 
@@ -61,7 +71,7 @@ async fn main() -> Result<()> {
             outbound_proxy: None,
             stun: None,
             register_expires: Duration::from_secs(3600),
-            user_agent: format!("Anvil/{} (phase1-m1)", env!("CARGO_PKG_VERSION")),
+            user_agent: format!("Anvil/{} (phase1-m2)", env!("CARGO_PKG_VERSION")),
             bind_addr: cli.bind,
             provisioning_url: None,
         },
@@ -73,12 +83,26 @@ async fn main() -> Result<()> {
     tracing::info!("starting Anvil");
     let (anvil, mut events) = Anvil::start(cfg).await?;
 
-    // Drain events to the console in the background.
+    // Event drainer. Signals `call_ended` when a CallEnded event arrives so
+    // the driver task can exit early if the remote hangs up first.
+    let (call_ended_tx, mut call_ended_rx) = tokio::sync::mpsc::unbounded_channel::<CallId>();
     let printer = tokio::spawn(async move {
         while let Some(event) = events.recv().await {
-            match event {
+            match &event {
+                Event::CallEnded { call, reason } => {
+                    println!("[event] CallEnded {{ call: {call:?}, reason: {reason:?} }}");
+                    match reason {
+                        EndReason::LocalHangup => {}
+                        _ => {
+                            let _ = call_ended_tx.send(*call);
+                        }
+                    }
+                }
                 Event::RegistrationChanged { state, reason } => {
-                    println!("[reg] {state:?}{}", reason.map(|r| format!(" ({r})")).unwrap_or_default());
+                    println!(
+                        "[reg] {state:?}{}",
+                        reason.as_ref().map(|r| format!(" ({r})")).unwrap_or_default()
+                    );
                 }
                 other => println!("[event] {other:?}"),
             }
@@ -88,11 +112,38 @@ async fn main() -> Result<()> {
     tracing::info!("registering...");
     anvil.register().await?;
 
-    tracing::info!(hold_seconds = cli.hold, "registered; holding");
-    tokio::select! {
-        _ = tokio::time::sleep(Duration::from_secs(cli.hold)) => {}
-        _ = tokio::signal::ctrl_c()                           => {
-            tracing::info!("received Ctrl+C");
+    if let Some(target) = cli.call.clone() {
+        tracing::info!(%target, "placing call");
+        match anvil.place_call(&target).await {
+            Ok(call_id) => {
+                tracing::info!(?call_id, "call placed; waiting");
+                tokio::select! {
+                    _ = tokio::time::sleep(Duration::from_secs(cli.talk)) => {
+                        tracing::info!("talk timer expired, hanging up");
+                        if let Err(e) = anvil.hangup(call_id).await {
+                            tracing::warn!(%e, "hangup failed");
+                        }
+                    }
+                    _ = tokio::signal::ctrl_c() => {
+                        tracing::info!("Ctrl+C, hanging up");
+                        if let Err(e) = anvil.hangup(call_id).await {
+                            tracing::warn!(%e, "hangup failed");
+                        }
+                    }
+                    ended = call_ended_rx.recv() => {
+                        tracing::info!(?ended, "call ended remotely");
+                    }
+                }
+            }
+            Err(e) => tracing::error!(%e, "place_call failed"),
+        }
+    } else {
+        tracing::info!(hold_seconds = cli.hold, "registered; holding");
+        tokio::select! {
+            _ = tokio::time::sleep(Duration::from_secs(cli.hold)) => {}
+            _ = tokio::signal::ctrl_c() => {
+                tracing::info!("received Ctrl+C");
+            }
         }
     }
 
@@ -104,8 +155,7 @@ async fn main() -> Result<()> {
     Ok(())
 }
 
-// -- Phase 1 M1 doesn't open audio yet; provide a host that refuses everything.
-//    Replaced with anvil-audio::CpalHost once the audio milestone lands.
+// Phase 1 M2 doesn't stream audio. Replaced by `anvil-audio::CpalHost` later.
 struct NullAudioHost;
 
 impl anvil_core::audio::AudioHost for NullAudioHost {
@@ -113,14 +163,14 @@ impl anvil_core::audio::AudioHost for NullAudioHost {
         &self,
         _cfg: anvil_core::audio::AudioFormat,
     ) -> std::result::Result<Box<dyn anvil_core::audio::AudioSource>, anvil_core::AnvilError> {
-        Err(anvil_core::AnvilError::AudioDevice("no audio host in Phase 1 M1".into()))
+        Err(anvil_core::AnvilError::AudioDevice("no audio host in Phase 1 M2".into()))
     }
 
     fn make_playback(
         &self,
         _cfg: anvil_core::audio::AudioFormat,
     ) -> std::result::Result<Box<dyn anvil_core::audio::AudioSink>, anvil_core::AnvilError> {
-        Err(anvil_core::AnvilError::AudioDevice("no audio host in Phase 1 M1".into()))
+        Err(anvil_core::AnvilError::AudioDevice("no audio host in Phase 1 M2".into()))
     }
 
     fn devices(&self) -> Vec<anvil_core::audio::DeviceInfo> { Vec::new() }
