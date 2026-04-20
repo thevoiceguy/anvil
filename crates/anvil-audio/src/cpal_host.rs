@@ -21,22 +21,47 @@ use forge_resampler::Resampler;
 use parking_lot::Mutex;
 use tokio::sync::mpsc;
 
-use anvil_core::audio::{AudioFormat, AudioFrame, AudioHost, AudioSink, AudioSource, DeviceInfo};
+use anvil_core::audio::{
+    AudioFormat, AudioFrame, AudioHost, AudioProcessor, AudioSink, AudioSource, DeviceInfo,
+    NullProcessor,
+};
 use anvil_core::error::AnvilError;
 
+/// Factory that produces one fresh capture-side `AudioProcessor` per call.
+/// Held in `CpalHost` and invoked from `make_capture`.
+type ProcessorFactory = Box<dyn Fn() -> Box<dyn AudioProcessor> + Send + Sync>;
+
 /// Desktop audio host using cpal.
-pub struct CpalHost;
+pub struct CpalHost {
+    /// Per-call capture-side processor factory. Defaults to a no-op
+    /// passthrough; use `with_capture_processor` to attach AGC etc.
+    capture_processor: ProcessorFactory,
+}
 
 impl CpalHost {
-    /// Create a host using the system default input and output devices.
+    /// Create a host using the system default input and output devices,
+    /// with a no-op capture processor.
     pub fn new() -> Result<Self, AnvilError> {
-        Ok(Self)
+        Ok(Self {
+            capture_processor: Box::new(|| Box::new(NullProcessor)),
+        })
+    }
+
+    /// Replace the per-call capture-side processor factory. Each call
+    /// gets a fresh processor (AGC etc. don't share state across calls).
+    pub fn with_capture_processor<F>(mut self, factory: F) -> Self
+    where
+        F: Fn() -> Box<dyn AudioProcessor> + Send + Sync + 'static,
+    {
+        self.capture_processor = Box::new(factory);
+        self
     }
 }
 
 impl AudioHost for CpalHost {
     fn make_capture(&self, cfg: AudioFormat) -> Result<Box<dyn AudioSource>, AnvilError> {
-        CpalCapture::open(cfg).map(|h| Box::new(h) as Box<dyn AudioSource>)
+        let processor = (self.capture_processor)();
+        CpalCapture::open(cfg, processor).map(|h| Box::new(h) as Box<dyn AudioSource>)
     }
 
     fn make_playback(&self, cfg: AudioFormat) -> Result<Box<dyn AudioSink>, AnvilError> {
@@ -85,10 +110,16 @@ impl AudioHost for CpalHost {
 struct CpalCapture {
     frame_rx: mpsc::Receiver<AudioFrame>,
     _worker: thread::JoinHandle<()>,
+    /// Capture-side processor (AGC etc.). Applied on the async side so
+    /// the cpal callback stays lock-free.
+    processor: Box<dyn AudioProcessor>,
 }
 
 impl CpalCapture {
-    fn open(cfg: AudioFormat) -> Result<Self, AnvilError> {
+    fn open(
+        cfg: AudioFormat,
+        processor: Box<dyn AudioProcessor>,
+    ) -> Result<Self, AnvilError> {
         // 8 frames of headroom; beyond that we drop to avoid unbounded memory
         // growth if the RTP send task stalls.
         let (frame_tx, frame_rx) = mpsc::channel::<AudioFrame>(8);
@@ -98,14 +129,20 @@ impl CpalCapture {
             .spawn(move || run_capture(cfg, frame_tx))
             .map_err(|e| AnvilError::AudioDevice(format!("spawn capture thread: {e}")))?;
 
-        Ok(Self { frame_rx, _worker: worker })
+        Ok(Self {
+            frame_rx,
+            _worker: worker,
+            processor,
+        })
     }
 }
 
 #[async_trait]
 impl AudioSource for CpalCapture {
     async fn next_frame(&mut self) -> Option<AudioFrame> {
-        self.frame_rx.recv().await
+        let mut frame = self.frame_rx.recv().await?;
+        self.processor.process_capture(&mut frame);
+        Some(frame)
     }
 }
 

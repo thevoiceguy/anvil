@@ -47,19 +47,28 @@ served on second login.
 
 ## Phase 2 — codec + DTMF + NAT + quality
 
-- [ ] Opus via `anvil-codec` (20 ms, 16 kHz or 48 kHz)
-- [ ] G.722 end-to-end (already in forge-codecs; we just wire it)
-- [ ] RFC 2833 DTMF send/receive
-- [ ] In-band DTMF fallback
-- [ ] STUN for public RTP address discovery
-- [ ] Hold / resume via re-INVITE
-- [ ] `MediaStats` event every 2 s (jitter, loss, codec, RTT)
-- [ ] Acoustic echo cancellation + noise suppression + AGC via
-      `webrtc-audio-processing` behind the `apm` feature
-- [ ] TLS transport (siphon-rs already supports it; cert trust-store wiring)
+- [x] **M1**  Multi-codec pipeline + G.722 + SDP negotiation
+- [x] **M2**  `MediaStats` event every 2 s (jitter, loss, kbps; RTT pending RTCP)
+- [x] **M3**  Opus via `opus` crate (48 kHz fullband, voice mode)
+- [x] **M4**  RFC 2833 DTMF send/receive
+- [x] **M5**  Hold / resume via re-INVITE (sendonly / sendrecv mirroring)
+- [x] **M6**  INVITE auth retry (Digest, mirrors siphon-rs's non-INVITE retry)
+- [x] **M7**  TLS transport (sips:, system roots + extra-CA option, ring crypto)
+- [x] **M8a** STUN public-IP discovery (RFC 5389 binding request)
+- [x] **M8b** Pure-Rust capture-side AGC + `AudioProcessor` trait
 
-**Exit criterion:** a loud-speaker call with no echo between two laptops on different
-networks using Opus.
+Deferred (Phase 3+):
+- In-band DTMF fallback (Goertzel detector exists in `forge-dtmf`; deferred — every
+  modern SIP peer negotiates RFC 2833)
+- RTT in `MediaStats` (needs RTCP RR/SR)
+- Real AEC: platform-native on iOS / Android; `webrtc-audio-processing` for desktop
+  needs `libwebrtc-audio-processing-dev` (system pkg) and render-stream wiring
+- Per-call STUN / ICE proper for symmetric NAT (use `forge-ice`)
+- Auth retry for in-dialog non-INVITEs (BYE etc.)
+
+**Exit criterion (met):** two `anvil-cli` instances exchange Opus / G.722 / G.711 audio
+end to end with negotiated codec, DTMF, hold, and stats. TLS REGISTER works against a
+TLS-only registrar.
 
 ---
 

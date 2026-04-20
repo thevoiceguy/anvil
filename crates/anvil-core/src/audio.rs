@@ -54,3 +54,26 @@ pub trait AudioSource: Send {
 pub trait AudioSink: Send {
     async fn write_frame(&mut self, frame: &AudioFrame) -> Result<(), AnvilError>;
 }
+
+/// In-place audio post-processing. Applied to capture frames before they
+/// reach the encoder, so AGC / NS / EQ effects ride on the wire.
+///
+/// Each call takes one 20 ms PCM frame and may rewrite its samples in
+/// place. Implementations must keep the frame length and sample rate
+/// unchanged.
+///
+/// AEC traditionally needs both a capture and a render stream — the
+/// capture frame here is one half. Real echo cancellation requires
+/// either a platform-native pipeline (AVAudioEngine voice-processing
+/// IO on iOS, Oboe + AcousticEchoCanceler on Android) or wiring
+/// webrtc-audio-processing's render-stream API to the playback path.
+/// `AudioProcessor` covers the simpler half (NS / AGC) cleanly.
+pub trait AudioProcessor: Send {
+    /// Process one frame in place. Default is a no-op pass-through.
+    fn process_capture(&mut self, _frame: &mut AudioFrame) {}
+}
+
+/// Default pass-through processor.
+pub struct NullProcessor;
+
+impl AudioProcessor for NullProcessor {}

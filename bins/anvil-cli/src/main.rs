@@ -86,6 +86,11 @@ struct Cli {
     /// the `c=` line of outbound SDP. Example: `stun.l.google.com:19302`.
     #[arg(long)]
     stun: Option<String>,
+
+    /// Run captured mic frames through anvil-audio's SimpleAgc before
+    /// encoding. Off by default; turn on for noisy / quiet mics.
+    #[arg(long)]
+    agc: bool,
 }
 
 #[tokio::main]
@@ -127,8 +132,13 @@ async fn main() -> Result<()> {
             let stats = host.stats();
             (Box::new(host), Some(stats))
         } else {
-            let host = CpalHost::new()
+            let mut host = CpalHost::new()
                 .map_err(|e| anyhow::anyhow!("CpalHost init failed: {e}"))?;
+            if cli.agc {
+                host = host.with_capture_processor(|| {
+                    Box::new(anvil_audio::SimpleAgc::new())
+                });
+            }
             (Box::new(host), None)
         };
 

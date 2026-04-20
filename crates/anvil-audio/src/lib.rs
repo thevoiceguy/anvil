@@ -21,3 +21,6 @@ mod tone;
 
 #[cfg(feature = "tone")]
 pub use tone::{ToneHost, ToneStats};
+
+mod processor;
+pub use processor::SimpleAgc;
