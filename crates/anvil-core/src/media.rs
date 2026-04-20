@@ -13,10 +13,14 @@ use std::time::Instant;
 use bytes::Bytes;
 use forge_codecs::g711;
 use forge_codecs::g722::{G722BitRate, G722Decoder, G722Encoder};
+use forge_dtmf::dedup::DtmfDeduplicator;
+use forge_dtmf::rfc2833::{Rfc2833Detector, Rfc2833Generator};
+use forge_dtmf::DtmfDigit;
 use forge_rtp::rtp::RtpPacket;
 use parking_lot::Mutex;
 use rand::{thread_rng, RngCore};
 use tokio::net::UdpSocket;
+use tokio::sync::mpsc;
 use tokio::task::JoinHandle;
 
 use crate::audio::{AudioFormat, AudioFrame, AudioSink, AudioSource};
@@ -31,6 +35,9 @@ pub(crate) struct MediaPipeline {
     recv_task: JoinHandle<()>,
     stats_task: JoinHandle<()>,
     pub(crate) metrics: Arc<MediaMetrics>,
+    /// Queue for outgoing DTMF. `Anvil::send_dtmf` pushes; the send task
+    /// interleaves them into the RTP stream as RFC 2833 event packets.
+    pub(crate) dtmf_tx: mpsc::Sender<char>,
 }
 
 impl MediaPipeline {
@@ -158,6 +165,16 @@ struct SeqState {
 
 /// 20 ms frame duration across every codec we support today.
 const FRAME_MS: u32 = 20;
+
+/// Dynamic RTP payload type for RFC 2833 telephone-event. Negotiated
+/// implicitly via the fmtp:101 line in our SDP; we don't parse alternatives
+/// from the peer's answer because every SIP endpoint in the last 15 years
+/// uses 101.
+const DTMF_PAYLOAD_TYPE: u8 = 101;
+
+/// RTP clock rate used for the DTMF rtpmap regardless of audio codec
+/// (RFC 4733 §2.1 mandates 8 kHz for telephone-event).
+const DTMF_CLOCK_RATE: u32 = 8000;
 
 /// Static info about a codec: RTP payload type and clock, PCM sample rate.
 #[derive(Debug, Clone, Copy)]
@@ -479,7 +496,12 @@ pub(crate) fn start_pipeline(
 
     let metrics = MediaMetrics::new(send_spec.rtp_clock_rate);
 
+    // Channel for outbound DTMF requests. Keep a modest buffer — humans type
+    // slowly, but an IVR script might emit a burst. 16 is plenty.
+    let (dtmf_tx, mut dtmf_rx) = mpsc::channel::<char>(16);
+
     // Send task: pull frames from the mic, encode, RTP-wrap, send.
+    // Also interleaves RFC 2833 DTMF packets when the app queues a digit.
     let sock_send = Arc::clone(&rtp_socket);
     let metrics_send = Arc::clone(&metrics);
     let send_task = tokio::spawn(async move {
@@ -488,52 +510,84 @@ pub(crate) fn start_pipeline(
         let mut ts = initial_ts;
         let mut sent_any = false;
 
-        while let Some(frame) = capture.next_frame().await {
-            if frame.samples.len() != samples_per_frame {
-                tracing::warn!(
-                    got = frame.samples.len(),
-                    want = samples_per_frame,
-                    codec = ?codec,
-                    "capture frame size mismatch; skipping"
-                );
-                continue;
+        loop {
+            tokio::select! {
+                // Prefer pending DTMF over a captured frame so a queued digit
+                // goes out inside the same 20 ms tick as it was requested.
+                biased;
+
+                Some(ch) = dtmf_rx.recv() => {
+                    match send_dtmf_digit(
+                        ch,
+                        &sock_send,
+                        remote_rtp,
+                        &metrics_send,
+                        &mut seq,
+                        ts,
+                        ssrc,
+                        send_spec.rtp_clock_rate,
+                    ).await {
+                        Ok(advanced) => {
+                            ts = ts.wrapping_add(advanced);
+                        }
+                        Err(e) => tracing::warn!(%e, "DTMF send failed"),
+                    }
+                    sent_any = true;
+                }
+
+                maybe_frame = capture.next_frame() => {
+                    let Some(frame) = maybe_frame else { break };
+                    if frame.samples.len() != samples_per_frame {
+                        tracing::warn!(
+                            got = frame.samples.len(),
+                            want = samples_per_frame,
+                            codec = ?codec,
+                            "capture frame size mismatch; skipping"
+                        );
+                        continue;
+                    }
+
+                    let payload = driver.encode(&frame.samples);
+                    // RFC 3551: marker bit on first packet of a talkspurt.
+                    let marker = !sent_any;
+                    let packet = RtpPacket::build(
+                        payload_type,
+                        seq,
+                        ts,
+                        ssrc,
+                        Bytes::from(payload),
+                        marker,
+                    );
+                    let bytes = packet.to_bytes();
+                    match sock_send.send_to(&bytes, remote_rtp).await {
+                        Ok(_) => metrics_send.on_rtp_tx(bytes.len()),
+                        Err(e) => tracing::warn!(%e, %remote_rtp, "rtp send failed"),
+                    }
+
+                    seq = seq.wrapping_add(1);
+                    ts = ts.wrapping_add(ts_per_frame);
+                    sent_any = true;
+                }
             }
-
-            let payload = driver.encode(&frame.samples);
-
-            // RFC 3551: marker bit on first packet of a talkspurt. We don't do
-            // VAD yet, so set marker only on the very first packet.
-            let marker = !sent_any;
-            let packet = RtpPacket::build(
-                payload_type,
-                seq,
-                ts,
-                ssrc,
-                Bytes::from(payload),
-                marker,
-            );
-            let bytes = packet.to_bytes();
-
-            match sock_send.send_to(&bytes, remote_rtp).await {
-                Ok(_) => metrics_send.on_rtp_tx(bytes.len()),
-                Err(e) => tracing::warn!(%e, %remote_rtp, "rtp send failed"),
-            }
-
-            seq = seq.wrapping_add(1);
-            ts = ts.wrapping_add(ts_per_frame);
-            sent_any = true;
         }
 
         tracing::debug!(packets_sent = sent_any, "send task exiting");
     });
 
     // Receive task: read UDP, parse RTP, decode, push to speaker.
+    // Also picks RFC 2833 (PT 101) packets out of the stream and publishes
+    // DtmfReceived events on the end-of-digit transition.
     let sock_recv = Arc::clone(&rtp_socket);
     let recv_pt = recv_spec.payload_type;
     let recv_fmt = recv_spec.audio_format();
     let metrics_recv = Arc::clone(&metrics);
+    let dtmf_events = stats_sink
+        .as_ref()
+        .map(|s| (s.call, s.events.clone()));
     let recv_task = tokio::spawn(async move {
         let mut driver = recv_driver;
+        let mut dtmf_detector = Rfc2833Detector::new(DTMF_CLOCK_RATE);
+        let mut dtmf_dedup = DtmfDeduplicator::new();
         let mut buf = vec![0u8; 2048];
         loop {
             let (len, _peer) = match sock_recv.recv_from(&mut buf).await {
@@ -554,9 +608,21 @@ pub(crate) fn start_pipeline(
                 }
             };
 
-            if packet.header.payload_type() != recv_pt {
+            let pt = packet.header.payload_type();
+            if pt == DTMF_PAYLOAD_TYPE {
+                handle_inbound_dtmf(
+                    &mut dtmf_detector,
+                    &mut dtmf_dedup,
+                    &packet,
+                    dtmf_events.as_ref(),
+                )
+                .await;
+                continue;
+            }
+
+            if pt != recv_pt {
                 tracing::debug!(
-                    pt = packet.header.payload_type(),
+                    pt,
                     want = recv_pt,
                     "unexpected payload type; ignoring"
                 );
@@ -661,7 +727,120 @@ pub(crate) fn start_pipeline(
         recv_task,
         stats_task,
         metrics,
+        dtmf_tx,
     })
+}
+
+/// Emit one DTMF digit as an RFC 2833 event burst. Returns the number of
+/// RTP timestamp ticks the audio clock should advance past to account for
+/// the gap this digit consumed.
+///
+/// Structure:
+/// - 1 start packet (marker bit set, duration 0)
+/// - 3 continuation packets (duration accumulates)
+/// - 3 identical end packets (end bit set, final duration)
+///
+/// The 7 packets at 20 ms spacing = 140 ms total per digit, which is well
+/// within RFC 4733's recommendation (≥ 40 ms).
+async fn send_dtmf_digit(
+    ch: char,
+    socket: &UdpSocket,
+    remote: SocketAddr,
+    metrics: &MediaMetrics,
+    seq: &mut u16,
+    start_ts: u32,
+    ssrc: u32,
+    rtp_clock_rate: u32,
+) -> anyhow::Result<u32> {
+    let digit = DtmfDigit::from_char(ch)
+        .map_err(|e| anyhow::anyhow!("invalid DTMF digit {:?}: {:?}", ch, e))?;
+
+    // Generator uses a generic sample rate in samples/sec; the "packet
+    // interval" advances the duration field by `rate * 20 / 1000` ticks per
+    // call. Spec pins the rtpmap rate to 8 kHz for telephone-event, so we
+    // use that uniformly.
+    let mut gen = Rfc2833Generator::new(DTMF_CLOCK_RATE, FRAME_MS);
+
+    let mut events: Vec<forge_dtmf::rfc2833::Rfc2833Event> = Vec::new();
+    events.push(gen.start_digit(digit));
+    for _ in 0..3 {
+        if let Some(e) = gen.continue_digit() {
+            events.push(e);
+        }
+    }
+    if let Some(end_set) = gen.end_digit() {
+        events.extend(end_set);
+    }
+
+    let frame_period = std::time::Duration::from_millis(FRAME_MS as u64);
+    for (i, event) in events.iter().enumerate() {
+        let is_first = i == 0;
+        // End packets are sent back-to-back, not on the 20 ms beat.
+        let is_end_burst = event.is_end();
+
+        let payload = Bytes::from(event.to_bytes());
+        let packet = RtpPacket::build(
+            DTMF_PAYLOAD_TYPE,
+            *seq,
+            start_ts,
+            ssrc,
+            payload,
+            is_first,
+        );
+        let bytes = packet.to_bytes();
+        match socket.send_to(&bytes, remote).await {
+            Ok(_) => metrics.on_rtp_tx(bytes.len()),
+            Err(e) => tracing::warn!(%e, "DTMF send_to failed"),
+        }
+        *seq = seq.wrapping_add(1);
+
+        if !is_end_burst && i + 1 < events.len() {
+            tokio::time::sleep(frame_period).await;
+        }
+    }
+
+    // Account for the time the audio clock would have advanced during the
+    // digit's playout. `continues + start = 4 frames` at the audio rate.
+    // (End packets share the same timestamp, so they don't count.)
+    let audio_frames_consumed = 4u32;
+    Ok(rtp_clock_rate * FRAME_MS / 1000 * audio_frames_consumed)
+}
+
+async fn handle_inbound_dtmf(
+    detector: &mut Rfc2833Detector,
+    dedup: &mut DtmfDeduplicator,
+    packet: &RtpPacket,
+    dtmf_events: Option<&(crate::CallId, mpsc::Sender<crate::event::Event>)>,
+) {
+    let events = match detector
+        .process_with_timestamp(&packet.payload, packet.header.timestamp)
+    {
+        Ok(v) => v,
+        Err(e) => {
+            tracing::debug!(%e, "RFC 2833 parse failed");
+            return;
+        }
+    };
+    let Some((call, tx)) = dtmf_events else { return };
+    for event in events {
+        // Surface only the first End event per digit. RFC 2833 §3.3
+        // recommends three identical end packets for reliability, and we
+        // re-parse each as a fresh End. DtmfDeduplicator suppresses the
+        // repeats within its 100 ms window.
+        if event.event_type != forge_dtmf::DtmfEventType::End {
+            continue;
+        }
+        if !dedup.should_publish(&event) {
+            continue;
+        }
+        let digit_ch = event.digit.to_string().chars().next().unwrap_or('?');
+        let _ = tx
+            .send(crate::event::Event::DtmfReceived {
+                call: *call,
+                digit: digit_ch,
+            })
+            .await;
+    }
 }
 
 /// Sink for periodic `MediaStats` events.

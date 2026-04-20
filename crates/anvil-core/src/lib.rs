@@ -404,9 +404,25 @@ impl Anvil {
         }
     }
 
-    /// Send a DTMF digit. Phase 2.
-    pub async fn send_dtmf(&self, _call: CallId, _digit: char) -> Result<(), AnvilError> {
-        Err(AnvilError::Internal("send_dtmf not implemented in Phase 1 M1".into()))
+    /// Send a DTMF digit on an active call as an RFC 2833 event burst
+    /// (1 start + 3 continue + 3 end packets, ~140 ms total). The call must
+    /// have an active media pipeline; queue-pre-call digits aren't supported
+    /// in M4.
+    pub async fn send_dtmf(&self, call: CallId, digit: char) -> Result<(), AnvilError> {
+        let tx = {
+            let entry = self
+                .calls
+                .get(&call)
+                .ok_or(AnvilError::NoSuchCall(call))?;
+            entry
+                .pipeline
+                .as_ref()
+                .map(|p| p.dtmf_tx.clone())
+                .ok_or_else(|| AnvilError::Internal(format!("{call:?} has no media")))?
+        };
+        tx.send(digit)
+            .await
+            .map_err(|_| AnvilError::Internal("DTMF channel closed".into()))
     }
 
     /// Put a call on hold. Phase 2.

@@ -61,6 +61,11 @@ struct Cli {
     /// two-instance tests where one side calls and the other listens.
     #[arg(long)]
     auto_answer: bool,
+
+    /// Send these DTMF digits once the call is established, one per second.
+    /// Example: --dtmf "1*2#9". Allowed characters: 0-9, *, #, A-D.
+    #[arg(long)]
+    dtmf: Option<String>,
 }
 
 #[tokio::main]
@@ -171,6 +176,22 @@ async fn run(cli: Cli, cfg: AnvilConfig, tone_stats: Option<Arc<ToneStats>>) -> 
                     }
                     Event::CallEstablished { call, codec } => {
                         println!("[event] CallEstablished {{ call: {call:?}, codec: {codec:?} }}");
+                        if let Some(digits) = cli.dtmf.as_deref() {
+                            // One-shot inline burst. The event loop stalls
+                            // for `digits.len()` seconds while we send, which
+                            // is fine for a smoke test — no events arrive
+                            // during normal DTMF play.
+                            for d in digits.chars() {
+                                tokio::time::sleep(Duration::from_millis(1000)).await;
+                                match anvil.send_dtmf(call, d).await {
+                                    Ok(()) => println!("[dtmf] sent {d}"),
+                                    Err(e) => tracing::warn!(%e, digit = %d, "send_dtmf failed"),
+                                }
+                            }
+                        }
+                    }
+                    Event::DtmfReceived { call, digit } => {
+                        println!("[event] DtmfReceived {{ call: {call:?}, digit: {digit:?} }}");
                     }
                     Event::MediaStats { call, stats } => {
                         println!(
