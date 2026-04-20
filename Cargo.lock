@@ -207,6 +207,7 @@ dependencies = [
  "forge-rtp",
  "forge-sdp",
  "futures",
+ "opus",
  "parking_lot",
  "rand 0.8.6",
  "serde",
@@ -2967,7 +2968,7 @@ dependencies = [
 
 [[package]]
 name = "sip-auth"
-version = "0.2.3"
+version = "0.2.4"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -3001,7 +3002,7 @@ dependencies = [
 
 [[package]]
 name = "sip-dialog"
-version = "0.3.2"
+version = "0.3.3"
 dependencies = [
  "anyhow",
  "async-trait",

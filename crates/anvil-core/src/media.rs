@@ -241,6 +241,57 @@ impl CodecDriver for PcmaDriver {
     }
 }
 
+struct OpusDriver {
+    encoder: opus::Encoder,
+    decoder: opus::Decoder,
+    /// Samples expected per 20 ms frame, i.e. sample_rate * 20 / 1000.
+    frame_samples: usize,
+}
+
+impl OpusDriver {
+    fn new() -> anyhow::Result<Self> {
+        // Voip mode optimises for speech: aggressive VAD / DTX, lower
+        // bit-rate bias, bandlimited to fullband.
+        let spec = CodecSpec::for_codec(Codec::Opus);
+        let encoder = opus::Encoder::new(
+            spec.sample_rate,
+            opus::Channels::Mono,
+            opus::Application::Voip,
+        )?;
+        let decoder = opus::Decoder::new(spec.sample_rate, opus::Channels::Mono)?;
+        Ok(Self {
+            encoder,
+            decoder,
+            frame_samples: spec.samples_per_frame(),
+        })
+    }
+}
+
+impl CodecDriver for OpusDriver {
+    fn spec(&self) -> CodecSpec { CodecSpec::for_codec(Codec::Opus) }
+
+    fn encode(&mut self, pcm: &[i16]) -> Vec<u8> {
+        // 1 275 bytes is libopus's hard max for a 20 ms frame at 48 kHz.
+        // In practice voice payloads at reasonable bitrates stay well under
+        // 200 bytes.
+        self.encoder.encode_vec(pcm, 1275).unwrap_or_default()
+    }
+
+    fn decode(&mut self, bytes: &[u8]) -> Vec<i16> {
+        let mut out = vec![0i16; self.frame_samples];
+        match self.decoder.decode(bytes, &mut out, false) {
+            Ok(n) => {
+                out.truncate(n);
+                out
+            }
+            Err(e) => {
+                tracing::debug!(%e, "opus decode failed");
+                Vec::new()
+            }
+        }
+    }
+}
+
 struct G722DriverImpl {
     encoder: G722Encoder,
     decoder: G722Decoder,
@@ -265,24 +316,28 @@ impl CodecDriver for G722DriverImpl {
     }
 }
 
-/// Build a codec driver by name. Returns `None` for codecs we have no
-/// implementation for yet (Opus).
+/// Build a codec driver. Opus construction is fallible (libopus init); other
+/// codecs are infallible.
 fn make_driver(codec: Codec) -> Option<Box<dyn CodecDriver>> {
     Some(match codec {
         Codec::Pcmu => Box::new(PcmuDriver),
         Codec::Pcma => Box::new(PcmaDriver),
         Codec::G722 => Box::new(G722DriverImpl::new()),
-        Codec::Opus => return None,
+        Codec::Opus => match OpusDriver::new() {
+            Ok(d) => Box::new(d),
+            Err(e) => {
+                tracing::warn!(%e, "opus driver init failed");
+                return None;
+            }
+        },
     })
 }
 
-/// Codecs we support today, in the order we prefer to offer them. Opus is
-/// listed but rejected by `make_driver` until the P2-M3 milestone wires it up.
+/// Codecs we support today, in the order we prefer to offer them.
 pub(crate) fn supported_codecs() -> &'static [Codec] {
-    // G.722 first — wideband improves quality noticeably for voice and costs
-    // roughly the same bandwidth as PCMU. PCMU / PCMA follow as mandatory
-    // fallbacks per RFC 3551.
-    &[Codec::G722, Codec::Pcmu, Codec::Pcma]
+    // Opus first (48 kHz fullband, voice-optimised) → G.722 (16 kHz wideband)
+    // → PCMU / PCMA (8 kHz narrowband, mandatory per RFC 3551).
+    &[Codec::Opus, Codec::G722, Codec::Pcmu, Codec::Pcma]
 }
 
 fn rtpmap_name(codec: Codec) -> &'static str {
@@ -838,6 +893,12 @@ mod tests {
     #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
     async fn rtp_round_trip_pcma() {
         round_trip_for(Codec::Pcma, 8000).await;
+    }
+
+    /// Opus round-trip at 48 kHz fullband.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+    async fn rtp_round_trip_opus() {
+        round_trip_for(Codec::Opus, 48000).await;
     }
 
 }
