@@ -7,13 +7,23 @@
 use std::sync::Arc;
 
 use anvil_core::{Anvil, AnvilConfig, AnvilError, EventStream};
+use parking_lot::Mutex;
 use tokio::runtime::Runtime;
+
+use crate::events::CallbackSlot;
+
+/// Shared between `AnvilHandle` (which writes via
+/// `anvil_set_event_callback`) and the drain task (which reads on every
+/// event). `None` means no callback registered yet — events are
+/// silently dropped.
+pub(crate) type CallbackHolder = Arc<Mutex<Option<CallbackSlot>>>;
 
 /// Opaque to C; the inner type is `pub` so other modules in this crate
 /// can drive it.
 pub struct AnvilHandle {
     runtime: Arc<Runtime>,
     inner: Option<Anvil>,
+    callback: CallbackHolder,
     _events: tokio::task::JoinHandle<()>,
 }
 
@@ -29,15 +39,20 @@ impl AnvilHandle {
 
         let (anvil, events) = runtime.block_on(Anvil::start(cfg))?;
 
-        // Drain events into the void for now. P3-M2 will replace this
-        // with a forwarder that calls the user-registered C callback.
-        let drain = runtime.spawn(drain_events(events));
+        let callback: CallbackHolder = Arc::new(Mutex::new(None));
+        let drain = runtime.spawn(drain_events(events, Arc::clone(&callback)));
 
         Ok(Self {
             runtime,
             inner: Some(anvil),
+            callback,
             _events: drain,
         })
+    }
+
+    /// Register the C callback used by the drain task. `None` clears.
+    pub(crate) fn set_callback(&self, slot: Option<CallbackSlot>) {
+        *self.callback.lock() = slot;
     }
 
     /// Run a future to completion on the FFI runtime.
@@ -67,8 +82,13 @@ impl AnvilHandle {
     }
 }
 
-async fn drain_events(mut events: EventStream) {
+async fn drain_events(mut events: EventStream, callback: CallbackHolder) {
     while let Some(event) = events.recv().await {
-        tracing::trace!(?event, "ffi event drain");
+        let slot = *callback.lock();
+        if let Some(slot) = slot {
+            crate::events::dispatch(slot, &event);
+        } else {
+            tracing::trace!(?event, "ffi event drain (no callback)");
+        }
     }
 }

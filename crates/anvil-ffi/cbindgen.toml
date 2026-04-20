@@ -19,15 +19,12 @@ documentation_style = "doxy"
 style = "tag"
 
 [export]
-prefix = "Anvil"
+# All types already start with `Anvil` in Rust, so no `prefix` here —
+# adding one yields `AnvilAnvilEvent`. Just rename the trailing `C`
+# suffix on the config struct.
 item_types = ["enums", "structs", "opaque", "functions", "constants", "typedefs"]
-renaming_overrides_prefixing = true
 
 [export.rename]
-# Don't double-prefix the structs that already have Anvil in their name.
-"AnvilHandle" = "AnvilHandle"
-"AnvilStatus" = "AnvilStatus"
-"AnvilTransport" = "AnvilTransport"
 "AnvilConfigC" = "AnvilConfig"
 
 [enum]

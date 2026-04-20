@@ -237,6 +237,7 @@ dependencies = [
  "anvil-core",
  "async-trait",
  "cbindgen",
+ "parking_lot",
  "tokio",
  "tracing",
 ]
@@ -3076,7 +3077,7 @@ dependencies = [
 
 [[package]]
 name = "sip-core"
-version = "0.7.4"
+version = "0.7.5"
 dependencies = [
  "bytes",
  "httpdate",
@@ -3175,7 +3176,7 @@ dependencies = [
 
 [[package]]
 name = "sip-transport"
-version = "0.2.9"
+version = "0.2.10"
 dependencies = [
  "anyhow",
  "bytes",

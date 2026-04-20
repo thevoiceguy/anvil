@@ -15,10 +15,11 @@ homepage.workspace     = true
 crate-type = ["staticlib", "cdylib", "rlib"]
 
 [dependencies]
-anvil-core = { workspace = true }
-tokio      = { workspace = true }
-tracing    = { workspace = true }
+anvil-core  = { workspace = true }
+tokio       = { workspace = true }
+tracing     = { workspace = true }
 async-trait = { workspace = true }
+parking_lot = { workspace = true }
 
 [build-dependencies]
 cbindgen = "0.27"

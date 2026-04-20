@@ -31,7 +31,13 @@
 #![allow(clippy::missing_safety_doc)]
 
 mod audio;
+mod events;
 mod handle;
+
+pub use events::{
+    AnvilCodec, AnvilEndReason, AnvilEvent, AnvilEventCallback, AnvilEventKind,
+    AnvilMediaStats, AnvilRegState,
+};
 
 use std::ffi::{c_char, CStr};
 use std::panic::{catch_unwind, AssertUnwindSafe};
@@ -191,6 +197,35 @@ pub unsafe extern "C" fn anvil_register(handle: *mut AnvilHandle) -> AnvilStatus
             Ok(()) => AnvilStatus::Ok,
             Err(e) => map_anvil_err(&e),
         }
+    })
+}
+
+/// Register a callback to receive Anvil events. Pass `NULL` for `cb` to
+/// clear a previously-registered callback. `user_data` is passed
+/// through unchanged on every invocation; the caller is responsible for
+/// its lifetime.
+///
+/// The callback fires from a worker thread of the FFI runtime. Strings
+/// inside the `AnvilEvent` are valid only for the call's duration —
+/// copy them if needed past return. Calling other `anvil_*` functions
+/// from inside the callback is allowed but will burn a runtime worker;
+/// dispatch to your own thread for non-trivial work.
+///
+/// # Safety
+/// `handle` must be a valid pointer returned by `anvil_start`.
+#[no_mangle]
+pub unsafe extern "C" fn anvil_set_event_callback(
+    handle: *mut AnvilHandle,
+    cb: Option<unsafe extern "C" fn(event: *const events::AnvilEvent, user_data: *mut std::ffi::c_void)>,
+    user_data: *mut std::ffi::c_void,
+) -> AnvilStatus {
+    catch_ffi(|| unsafe {
+        let Some(handle) = handle.as_ref() else {
+            return AnvilStatus::NullArgument;
+        };
+        let slot = cb.map(|cb| events::CallbackSlot { cb, user_data });
+        handle.set_callback(slot);
+        AnvilStatus::Ok
     })
 }
 
