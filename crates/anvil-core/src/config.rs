@@ -45,7 +45,7 @@ pub enum DtmfMode { Rfc2833, Inband, Both }
 pub enum SrtpMode { Off, Optional, Required }
 
 /// Audio codec identifier.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum Codec { Pcmu, Pcma, G722, Opus }
 
 /// Media-plane configuration.

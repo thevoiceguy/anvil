@@ -34,7 +34,6 @@ use std::sync::Arc;
 use dashmap::DashMap;
 use sip_core::SipUri;
 use sip_dns::SipResolver;
-use sip_sdp::profiles::MediaProfileBuilder;
 use sip_transaction::TransactionManager;
 use sip_uac::integrated::IntegratedUAC;
 use tokio::sync::mpsc;
@@ -288,18 +287,13 @@ impl Anvil {
             .map_err(|e| AnvilError::Media(format!("rtp local_addr: {e}")))?
             .port();
 
-        // Minimal G.711 offer. Media direction defaults to sendrecv.
-        let sdp = MediaProfileBuilder::audio_only()
-            .add_audio_codec(0, "PCMU", 8000)
-            .add_audio_codec(8, "PCMA", 8000)
-            .telephone_event(true)
-            .build(
-                &self.local_user,
-                &self.media_ip.to_string(),
-                rtp_port,
-                None,
-            );
-        let sdp_body = sdp.to_string();
+        // Offer everything we can drive today, in preference order.
+        let sdp_body = media::build_sdp(
+            media::supported_codecs(),
+            &self.local_user,
+            &self.media_ip.to_string(),
+            rtp_port,
+        );
 
         tracing::debug!(%target, rtp_port, "sending INVITE");
         let handle = self
@@ -568,8 +562,10 @@ async fn drive_outgoing_call(
             // RFC 3551-compliant endpoints, so for Phase 1 M2 we just check
             // the first audio format byte. Proper negotiation (matching rtpmap
             // names, dropping unknown PTs) arrives with the codec milestone.
-            let codec = extract_codec_from_answer(resp.body().as_ref()).unwrap_or(Codec::Pcmu);
-            let remote_rtp = media::extract_remote_rtp_addr(resp.body().as_ref());
+            let answer_body = resp.body();
+            let body_slice: &[u8] = answer_body.as_ref();
+            let codec = extract_codec_from_answer(body_slice).unwrap_or(Codec::Pcmu);
+            let remote_rtp = media::extract_remote_rtp_addr(body_slice);
 
             // Start media: open audio host streams for this call, spawn the
             // send/receive tasks. Failures are logged but don't tear down the
@@ -577,7 +573,7 @@ async fn drive_outgoing_call(
             // before `CallEstablished` fires. Real AEC / renegotiation lands
             // in Phase 2.
             let pipeline = match remote_rtp {
-                Some(remote) => start_media(&audio, rtp_socket, remote).await,
+                Some(remote) => start_media(codec, &audio, rtp_socket, remote).await,
                 None => {
                     tracing::warn!("no remote RTP address in SDP answer; no media");
                     None
@@ -614,15 +610,16 @@ async fn drive_outgoing_call(
     }
 }
 
-/// Opens audio host streams and starts the RTP pipeline. Returns `None` if
-/// capture or playback cannot be opened; callers surface that as "no media"
-/// rather than failing the call.
+/// Opens audio host streams and starts the RTP pipeline for the given codec.
+/// Returns `None` if capture or playback cannot be opened; callers surface
+/// that as "no media" rather than failing the call.
 async fn start_media(
+    codec: Codec,
     audio: &Arc<dyn AudioHost>,
     rtp_socket: Arc<tokio::net::UdpSocket>,
     remote: std::net::SocketAddr,
 ) -> Option<media::MediaPipeline> {
-    let fmt = media::g711_format();
+    let fmt = media::CodecSpec::for_codec(codec).audio_format();
     let capture = match audio.make_capture(fmt) {
         Ok(c) => c,
         Err(e) => {
@@ -638,13 +635,13 @@ async fn start_media(
         }
     };
 
-    match media::start_pipeline(rtp_socket, remote, capture, playback) {
+    match media::start_pipeline(codec, rtp_socket, remote, capture, playback) {
         Ok(p) => {
-            tracing::info!(%remote, "media pipeline started");
+            tracing::info!(%remote, ?codec, "media pipeline started");
             Some(p)
         }
         Err(e) => {
-            tracing::warn!(%e, "media pipeline failed to start");
+            tracing::warn!(%e, ?codec, "media pipeline failed to start");
             None
         }
     }

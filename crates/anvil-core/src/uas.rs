@@ -18,7 +18,6 @@ use async_trait::async_trait;
 use dashmap::DashMap;
 use sip_core::Request;
 use sip_dialog::Dialog;
-use sip_sdp::profiles::MediaProfileBuilder;
 use sip_transaction::{ServerTransactionHandle, TransportContext};
 use sip_uas::integrated::UasRequestHandler;
 use sip_uas::UserAgentServer;
@@ -86,19 +85,33 @@ impl UasRequestHandler for AnvilUasHandler {
             }
         };
 
-        // Our answer: mirror the G.711 µ-law offer the caller made. We don't
-        // do codec negotiation here yet — just assume PCMU is in the offer
-        // (which it is for every Anvil caller and for every RFC 3551 peer).
-        let answer = MediaProfileBuilder::audio_only()
-            .add_audio_codec(0, "PCMU", 8000)
-            .telephone_event(true)
-            .build(
-                &self.local_user,
-                &self.media_ip.to_string(),
-                rtp_port,
-                None,
-            );
-        let sdp_body = answer.to_string();
+        // Negotiate codec from the offer against our preference list. If
+        // the peer offered nothing we support, reject with 488 rather than
+        // silently picking PCMU and hoping.
+        let offered_body = request.body();
+        let chosen = media::negotiate_answer_codec(offered_body, media::supported_codecs());
+        let chosen = match chosen {
+            Some(c) => c,
+            None => {
+                let resp = UserAgentServer::create_response(
+                    request,
+                    488,
+                    "Not Acceptable Here (no common codec)",
+                );
+                handle.send_final(resp).await;
+                return Ok(());
+            }
+        };
+
+        // Build an answer SDP carrying just the chosen codec. A more liberal
+        // implementation would echo back the full intersection; single-codec
+        // answers are simpler and sufficient for the offer/answer model.
+        let sdp_body = media::build_sdp(
+            &[chosen],
+            &self.local_user,
+            &self.media_ip.to_string(),
+            rtp_port,
+        );
 
         // Build the 200 OK now (including dialog) so `answer()` can send it
         // without re-deriving anything. Note: `accept_invite` inserts the
@@ -347,13 +360,16 @@ pub(crate) async fn send_answer_and_start_media(
     };
 
     let remote = media::extract_remote_rtp_addr(&offer_body);
-    let codec = media::extract_codec_from_offer(&offer_body).unwrap_or(Codec::Pcmu);
+    // Codec was already chosen when on_invite built the answer SDP; cheaper
+    // to re-derive from the offer here than to plumb it through.
+    let codec = media::negotiate_answer_codec(&offer_body, media::supported_codecs())
+        .unwrap_or(Codec::Pcmu);
 
     // Start the pipeline before sending 200 OK so that when the caller's
     // first RTP packet lands we already have a socket reading it. Losing the
     // first few packets isn't audible but is avoidable.
     let pipeline = if let Some(remote) = remote {
-        start_media_inbound(audio, rtp_socket, remote).await
+        start_media_inbound(codec, audio, rtp_socket, remote).await
     } else {
         tracing::warn!("no remote RTP address in offer; answering without media");
         None
@@ -403,12 +419,13 @@ pub(crate) async fn reject_inbound(
 }
 
 async fn start_media_inbound(
+    codec: Codec,
     audio: &Arc<dyn AudioHost>,
     rtp_socket: Arc<UdpSocket>,
     remote: std::net::SocketAddr,
 ) -> Option<media::MediaPipeline> {
-    let fmt = media::g711_format();
+    let fmt = media::CodecSpec::for_codec(codec).audio_format();
     let capture = audio.make_capture(fmt).ok()?;
     let playback = audio.make_playback(fmt).ok()?;
-    media::start_pipeline(rtp_socket, remote, capture, playback).ok()
+    media::start_pipeline(codec, rtp_socket, remote, capture, playback).ok()
 }

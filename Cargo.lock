@@ -3001,13 +3001,14 @@ dependencies = [
 
 [[package]]
 name = "sip-dialog"
-version = "0.3.1"
+version = "0.3.2"
 dependencies = [
  "anyhow",
  "async-trait",
  "bytes",
  "dashmap",
  "parking_lot",
+ "rand 0.8.6",
  "sip-core",
  "sip-parse",
  "smol_str",
@@ -3087,7 +3088,7 @@ dependencies = [
 
 [[package]]
 name = "sip-transport"
-version = "0.2.5"
+version = "0.2.6"
 dependencies = [
  "anyhow",
  "bytes",
