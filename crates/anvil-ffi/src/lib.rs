@@ -113,6 +113,11 @@ pub struct AnvilConfigC {
     pub stun: *const c_char,
     /// User-Agent header value. Pass NULL for the Anvil default.
     pub user_agent: *const c_char,
+    /// Optional audio host. Pass NULL for signaling-only (every audio
+    /// open call errors out cleanly). When non-NULL, the pointee is
+    /// read by value during `anvil_start` and the function pointers
+    /// inside it must remain valid for the handle's lifetime.
+    pub audio_host: *const audio::AnvilAudioHostC,
 }
 
 // ─── lifecycle ──────────────────────────────────────────────────────────────
@@ -140,10 +145,18 @@ pub unsafe extern "C" fn anvil_start(
             Err(s) => return s,
         };
 
+        // Pick an audio host: caller-supplied via the C struct, or the
+        // null host for signaling-only operation.
+        let audio: Box<dyn anvil_core::audio::AudioHost> = if cfg.audio_host.is_null() {
+            Box::new(audio::NullAudioHost)
+        } else {
+            Box::new(audio::CHostAudioHost::from_c(cfg.audio_host))
+        };
+
         let anvil_cfg = AnvilConfig {
             account,
             media: MediaConfig::default(),
-            audio: Box::new(audio::NullAudioHost),
+            audio,
             brand: BrandConfig::default(),
         };
 

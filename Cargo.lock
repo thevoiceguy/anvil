@@ -218,7 +218,7 @@ dependencies = [
  "sip-dialog",
  "sip-dns",
  "sip-parse",
- "sip-sdp",
+ "sip-sdp 0.2.1",
  "sip-transaction",
  "sip-transport",
  "sip-uac",
@@ -1182,7 +1182,7 @@ version = "0.2.0"
 dependencies = [
  "chrono",
  "forge-core",
- "sip-sdp",
+ "sip-sdp 0.2.0",
  "smol_str",
  "thiserror 2.0.18",
 ]
@@ -3077,7 +3077,7 @@ dependencies = [
 
 [[package]]
 name = "sip-core"
-version = "0.7.5"
+version = "0.7.6"
 dependencies = [
  "bytes",
  "httpdate",
@@ -3157,6 +3157,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "sip-sdp"
+version = "0.2.1"
+dependencies = [
+ "nom",
+ "smol_str",
+]
+
+[[package]]
 name = "sip-transaction"
 version = "0.4.3"
 dependencies = [
@@ -3193,7 +3201,7 @@ dependencies = [
 
 [[package]]
 name = "sip-uac"
-version = "0.4.1"
+version = "0.4.2"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -3206,7 +3214,7 @@ dependencies = [
  "sip-dialog",
  "sip-dns",
  "sip-parse",
- "sip-sdp",
+ "sip-sdp 0.2.1",
  "sip-transaction",
  "sip-transport",
  "smol_str",
@@ -3227,7 +3235,7 @@ dependencies = [
  "sip-core",
  "sip-dialog",
  "sip-parse",
- "sip-sdp",
+ "sip-sdp 0.2.1",
  "sip-transaction",
  "sip-transport",
  "smol_str",
