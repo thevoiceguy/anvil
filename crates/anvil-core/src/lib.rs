@@ -293,6 +293,7 @@ impl Anvil {
             &self.local_user,
             &self.media_ip.to_string(),
             rtp_port,
+            media::MediaDirection::Sendrecv,
         );
 
         tracing::debug!(%target, rtp_port, "sending INVITE");
@@ -425,9 +426,89 @@ impl Anvil {
             .map_err(|_| AnvilError::Internal("DTMF channel closed".into()))
     }
 
-    /// Put a call on hold. Phase 2.
-    pub async fn hold(&self, _call: CallId, _hold: bool) -> Result<(), AnvilError> {
-        Err(AnvilError::Internal("hold not implemented in Phase 1 M1".into()))
+    /// Put a call on hold (`on = true`) or resume it (`on = false`). Sends
+    /// an in-dialog re-INVITE with the appropriate direction attribute and
+    /// applies the state locally once the peer confirms with a 2xx.
+    pub async fn hold(&self, call: CallId, on: bool) -> Result<(), AnvilError> {
+        // Pull out what we need under the DashMap guard, then release it
+        // before awaiting.
+        struct Bundle {
+            dialog_src: DialogSource,
+            hold_state: Arc<media::HoldState>,
+            rtp_port: u16,
+            codec: Codec,
+        }
+        enum DialogSource {
+            Confirmed(sip_dialog::Dialog),
+            Outbound(Arc<sip_uac::integrated::CallHandle>),
+        }
+
+        let bundle = {
+            let entry = self.calls.get(&call).ok_or(AnvilError::NoSuchCall(call))?;
+            let pipeline = entry
+                .pipeline
+                .as_ref()
+                .ok_or_else(|| AnvilError::Internal(format!("{call:?} has no media")))?;
+            let hold_state = Arc::clone(&pipeline.hold);
+            let codec = entry
+                .negotiated_codec
+                .ok_or_else(|| AnvilError::Internal(format!("{call:?} has no codec")))?;
+            let rtp_port = entry
+                .rtp_socket
+                .local_addr()
+                .map_err(|e| AnvilError::Media(format!("rtp local_addr: {e}")))?
+                .port();
+            let dialog_src = if let Some(dlg) = entry.dialog.clone() {
+                DialogSource::Confirmed(dlg)
+            } else if let Some(h) = entry.outbound_handle.clone() {
+                DialogSource::Outbound(h)
+            } else {
+                return Err(AnvilError::Internal(format!("{call:?} has no dialog")));
+            };
+            Bundle { dialog_src, hold_state, rtp_port, codec }
+        };
+
+        let mut dialog = match bundle.dialog_src {
+            DialogSource::Confirmed(d) => d,
+            DialogSource::Outbound(h) => h.dialog.read().await.clone(),
+        };
+
+        let direction = if on {
+            media::MediaDirection::Sendonly
+        } else {
+            media::MediaDirection::Sendrecv
+        };
+
+        let sdp_body = media::build_sdp(
+            &[bundle.codec],
+            &self.local_user,
+            &self.media_ip.to_string(),
+            bundle.rtp_port,
+            direction,
+        );
+
+        let handle = self
+            .uac
+            .reinvite(&mut dialog, Some(&sdp_body))
+            .await
+            .map_err(|e| AnvilError::Transport(format!("re-INVITE: {e}")))?;
+
+        let resp = handle
+            .await_final()
+            .await
+            .map_err(|e| AnvilError::Transport(format!("re-INVITE await: {e}")))?;
+        if !(200..300).contains(&resp.code()) {
+            return Err(AnvilError::Transport(format!(
+                "re-INVITE rejected: {} {}",
+                resp.code(),
+                resp.reason()
+            )));
+        }
+
+        // Apply locally. Per RFC 3264, our direction in the offer is what
+        // we want to do; the answer confirms it and mirrors the peer's.
+        bundle.hold_state.apply(direction);
+        Ok(())
     }
 
     /// Blind-transfer a call. Phase 2.
@@ -469,7 +550,20 @@ async fn dispatch_request(
             // 100 Trying so the caller stops retransmitting.
             let trying = UserAgentServer::create_response(&request, 100, "Trying");
             handle.send_provisional(trying).await;
-            if let Err(e) = handler.on_invite(&request, handle, &ctx, None).await {
+            // If we already have a confirmed dialog for this Call-ID, this
+            // is a mid-dialog re-INVITE (hold / resume). Pass it through so
+            // on_invite can branch into the hold handler.
+            let call_id_str = request
+                .headers()
+                .get("Call-ID")
+                .map(|s| s.to_string())
+                .unwrap_or_default();
+            let existing_dialog = uas::find_call_by_dialog_id(&handler.calls, &call_id_str)
+                .and_then(|id| handler.calls.get(&id).and_then(|e| e.dialog.clone()));
+            if let Err(e) = handler
+                .on_invite(&request, handle, &ctx, existing_dialog.as_ref())
+                .await
+            {
                 tracing::warn!(%e, "on_invite failed");
             }
         }

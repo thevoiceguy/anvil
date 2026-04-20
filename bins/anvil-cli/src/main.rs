@@ -66,6 +66,11 @@ struct Cli {
     /// Example: --dtmf "1*2#9". Allowed characters: 0-9, *, #, A-D.
     #[arg(long)]
     dtmf: Option<String>,
+
+    /// Put the call on hold `hold_at` seconds after CallEstablished, then
+    /// resume at `hold_at + 2`. Omit to skip the hold probe.
+    #[arg(long)]
+    hold_at: Option<u64>,
 }
 
 #[tokio::main]
@@ -187,6 +192,18 @@ async fn run(cli: Cli, cfg: AnvilConfig, tone_stats: Option<Arc<ToneStats>>) -> 
                                     Ok(()) => println!("[dtmf] sent {d}"),
                                     Err(e) => tracing::warn!(%e, digit = %d, "send_dtmf failed"),
                                 }
+                            }
+                        }
+                        if let Some(secs) = cli.hold_at {
+                            tokio::time::sleep(Duration::from_secs(secs)).await;
+                            match anvil.hold(call, true).await {
+                                Ok(()) => println!("[hold] on"),
+                                Err(e) => tracing::warn!(%e, "hold on failed"),
+                            }
+                            tokio::time::sleep(Duration::from_secs(2)).await;
+                            match anvil.hold(call, false).await {
+                                Ok(()) => println!("[hold] off"),
+                                Err(e) => tracing::warn!(%e, "hold off failed"),
                             }
                         }
                     }

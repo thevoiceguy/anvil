@@ -6,7 +6,7 @@
 //! proper reorder / loss-conceal buffer.
 
 use std::net::SocketAddr;
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::Arc;
 use std::time::Instant;
 
@@ -38,6 +38,9 @@ pub(crate) struct MediaPipeline {
     /// Queue for outgoing DTMF. `Anvil::send_dtmf` pushes; the send task
     /// interleaves them into the RTP stream as RFC 2833 event packets.
     pub(crate) dtmf_tx: mpsc::Sender<char>,
+    /// Hold / direction state. Flipped by `Anvil::hold` (local hold) and
+    /// by the dispatcher's re-INVITE path (remote hold).
+    pub(crate) hold: Arc<HoldState>,
 }
 
 impl MediaPipeline {
@@ -165,6 +168,106 @@ struct SeqState {
 
 /// 20 ms frame duration across every codec we support today.
 const FRAME_MS: u32 = 20;
+
+/// RFC 4566 media direction. Controls whether the send / receive tasks
+/// push frames during a call. `Sendrecv` is the default; a hold re-INVITE
+/// flips to `Sendonly` on the holder or `Recvonly` on the peer being held.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum MediaDirection {
+    Sendrecv,
+    Sendonly,
+    Recvonly,
+    Inactive,
+}
+
+impl MediaDirection {
+    fn as_sdp_attr(self) -> &'static str {
+        match self {
+            Self::Sendrecv => "sendrecv",
+            Self::Sendonly => "sendonly",
+            Self::Recvonly => "recvonly",
+            Self::Inactive => "inactive",
+        }
+    }
+
+    /// Mirror the peer's direction onto ours for the answer side. If the
+    /// peer said `sendonly`, they'll send but expect us not to — i.e. we
+    /// answer `recvonly`. Symmetric for the other cases.
+    pub(crate) fn mirror(self) -> Self {
+        match self {
+            Self::Sendrecv => Self::Sendrecv,
+            Self::Sendonly => Self::Recvonly,
+            Self::Recvonly => Self::Sendonly,
+            Self::Inactive => Self::Inactive,
+        }
+    }
+
+    pub(crate) fn sends(self) -> bool {
+        matches!(self, Self::Sendrecv | Self::Sendonly)
+    }
+
+    pub(crate) fn receives(self) -> bool {
+        matches!(self, Self::Sendrecv | Self::Recvonly)
+    }
+}
+
+/// Two bits of hold state shared between the send and receive tasks: is
+/// audio transmission allowed, is audio reception allowed. Flipped by
+/// `Anvil::hold` and by inbound re-INVITE handling.
+pub(crate) struct HoldState {
+    pub(crate) send_enabled: AtomicBool,
+    pub(crate) recv_enabled: AtomicBool,
+}
+
+impl HoldState {
+    fn new(direction: MediaDirection) -> Arc<Self> {
+        Arc::new(Self {
+            send_enabled: AtomicBool::new(direction.sends()),
+            recv_enabled: AtomicBool::new(direction.receives()),
+        })
+    }
+
+    pub(crate) fn apply(&self, direction: MediaDirection) {
+        self.send_enabled
+            .store(direction.sends(), Ordering::Relaxed);
+        self.recv_enabled
+            .store(direction.receives(), Ordering::Relaxed);
+    }
+}
+
+/// Parse the `a=sendrecv` / `a=sendonly` / `a=recvonly` / `a=inactive`
+/// attribute from the first audio media description. Defaults to
+/// `Sendrecv` if no direction attribute is present.
+///
+/// Hand-parses rather than going through `sip_sdp::parse::parse_sdp`: that
+/// parser has a bug where property attributes (a= without a value) that
+/// appear before a later value attribute (a=name:value) get merged into
+/// the next attribute's name because its `take_till` doesn't stop on
+/// newlines. Line-by-line scanning is tiny here and sidesteps the issue.
+pub(crate) fn extract_direction(body: &[u8]) -> MediaDirection {
+    let Ok(text) = std::str::from_utf8(body) else { return MediaDirection::Sendrecv };
+
+    let mut in_audio_media = false;
+    for line in text.lines() {
+        let line = line.trim_end();
+        if let Some(rest) = line.strip_prefix("m=") {
+            in_audio_media = rest.starts_with("audio ");
+            continue;
+        }
+        if !in_audio_media { continue }
+        // RFC 4566 direction attributes are Property form: `a=<name>` with
+        // no `:<value>`.
+        let Some(attr) = line.strip_prefix("a=") else { continue };
+        match attr.trim() {
+            "sendrecv" => return MediaDirection::Sendrecv,
+            "sendonly" => return MediaDirection::Sendonly,
+            "recvonly" => return MediaDirection::Recvonly,
+            "inactive" => return MediaDirection::Inactive,
+            _ => {}
+        }
+    }
+    MediaDirection::Sendrecv
+}
 
 /// Dynamic RTP payload type for RFC 2833 telephone-event. Negotiated
 /// implicitly via the fmtp:101 line in our SDP; we don't parse alternatives
@@ -379,6 +482,7 @@ pub(crate) fn build_sdp(
     username: &str,
     addr: &str,
     rtp_port: u16,
+    direction: MediaDirection,
 ) -> String {
     use std::time::{SystemTime, UNIX_EPOCH};
     let session_id = SystemTime::now()
@@ -386,7 +490,9 @@ pub(crate) fn build_sdp(
         .map(|d| d.as_secs().to_string())
         .unwrap_or_else(|_| "0".to_string());
 
-    let mut media = sip_sdp::MediaDescription::audio(rtp_port);
+    let mut media = sip_sdp::MediaDescription::audio(rtp_port)
+        .direction(direction.as_sdp_attr())
+        .expect("valid direction");
     for codec in codecs {
         let spec = CodecSpec::for_codec(*codec);
         media = media
@@ -495,6 +601,7 @@ pub(crate) fn start_pipeline(
     let payload_type = send_spec.payload_type;
 
     let metrics = MediaMetrics::new(send_spec.rtp_clock_rate);
+    let hold = HoldState::new(MediaDirection::Sendrecv);
 
     // Channel for outbound DTMF requests. Keep a modest buffer — humans type
     // slowly, but an IVR script might emit a burst. 16 is plenty.
@@ -504,6 +611,7 @@ pub(crate) fn start_pipeline(
     // Also interleaves RFC 2833 DTMF packets when the app queues a digit.
     let sock_send = Arc::clone(&rtp_socket);
     let metrics_send = Arc::clone(&metrics);
+    let hold_send = Arc::clone(&hold);
     let send_task = tokio::spawn(async move {
         let mut driver = send_driver;
         let mut seq = initial_seq;
@@ -547,6 +655,16 @@ pub(crate) fn start_pipeline(
                         continue;
                     }
 
+                    // While on hold, still drain capture (keeps the audio
+                    // thread from backing up) but don't transmit. RTP seq
+                    // and timestamp continue advancing so the peer's
+                    // jitter / loss calc doesn't blow up when we resume.
+                    if !hold_send.send_enabled.load(Ordering::Relaxed) {
+                        seq = seq.wrapping_add(1);
+                        ts = ts.wrapping_add(ts_per_frame);
+                        continue;
+                    }
+
                     let payload = driver.encode(&frame.samples);
                     // RFC 3551: marker bit on first packet of a talkspurt.
                     let marker = !sent_any;
@@ -581,6 +699,7 @@ pub(crate) fn start_pipeline(
     let recv_pt = recv_spec.payload_type;
     let recv_fmt = recv_spec.audio_format();
     let metrics_recv = Arc::clone(&metrics);
+    let hold_recv = Arc::clone(&hold);
     let dtmf_events = stats_sink
         .as_ref()
         .map(|s| (s.call, s.events.clone()));
@@ -636,7 +755,15 @@ pub(crate) fn start_pipeline(
                 arrival,
             );
 
+            // When held, still decode (keeps the codec decoder state
+            // valid for when we resume) but swallow the frame instead of
+            // pushing to playback. Metrics were already updated above so
+            // a "held" call still shows accurate recv_kbps.
             let samples = driver.decode(&packet.payload);
+            if !hold_recv.recv_enabled.load(Ordering::Relaxed) {
+                continue;
+            }
+
             let frame = AudioFrame {
                 samples,
                 format: recv_fmt,
@@ -728,6 +855,7 @@ pub(crate) fn start_pipeline(
         stats_task,
         metrics,
         dtmf_tx,
+        hold,
     })
 }
 
@@ -1072,6 +1200,44 @@ mod tests {
     #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
     async fn rtp_round_trip_pcma() {
         round_trip_for(Codec::Pcma, 8000).await;
+    }
+
+    #[test]
+    fn extract_direction_finds_sendonly() {
+        let sdp = b"v=0\r\n\
+                    o=alice 1 0 IN IP4 127.0.0.1\r\n\
+                    s=anvil\r\n\
+                    c=IN IP4 127.0.0.1\r\n\
+                    t=0 0\r\n\
+                    m=audio 5000 RTP/AVP 9\r\n\
+                    a=sendonly\r\n\
+                    a=rtpmap:9 G722/8000\r\n";
+        assert_eq!(super::extract_direction(sdp), MediaDirection::Sendonly);
+    }
+
+    #[test]
+    fn extract_direction_defaults_sendrecv() {
+        let sdp = b"v=0\r\n\
+                    o=alice 1 0 IN IP4 127.0.0.1\r\n\
+                    s=anvil\r\n\
+                    c=IN IP4 127.0.0.1\r\n\
+                    t=0 0\r\n\
+                    m=audio 5000 RTP/AVP 0\r\n\
+                    a=rtpmap:0 PCMU/8000\r\n";
+        assert_eq!(super::extract_direction(sdp), MediaDirection::Sendrecv);
+    }
+
+    #[test]
+    fn extract_direction_roundtrips_through_build_sdp() {
+        for dir in [
+            MediaDirection::Sendrecv,
+            MediaDirection::Sendonly,
+            MediaDirection::Recvonly,
+            MediaDirection::Inactive,
+        ] {
+            let body = super::build_sdp(&[Codec::G722], "alice", "127.0.0.1", 5000, dir);
+            assert_eq!(super::extract_direction(body.as_bytes()), dir, "{dir:?}");
+        }
     }
 
     /// Opus round-trip at 48 kHz fullband.

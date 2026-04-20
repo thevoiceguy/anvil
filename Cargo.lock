@@ -2968,7 +2968,7 @@ dependencies = [
 
 [[package]]
 name = "sip-auth"
-version = "0.2.4"
+version = "0.2.5"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -3019,7 +3019,7 @@ dependencies = [
 
 [[package]]
 name = "sip-dns"
-version = "0.2.0"
+version = "0.2.1"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -3040,7 +3040,7 @@ dependencies = [
 
 [[package]]
 name = "sip-parse"
-version = "0.3.2"
+version = "0.3.3"
 dependencies = [
  "bytes",
  "httpdate",
@@ -3089,7 +3089,7 @@ dependencies = [
 
 [[package]]
 name = "sip-transport"
-version = "0.2.6"
+version = "0.2.8"
 dependencies = [
  "anyhow",
  "bytes",

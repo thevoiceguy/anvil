@@ -52,15 +52,12 @@ impl UasRequestHandler for AnvilUasHandler {
         _ctx: &TransportContext,
         dialog: Option<&Dialog>,
     ) -> anyhow::Result<()> {
-        // Re-INVITE (mid-dialog). Not handled in M4; reject 488 so callers
-        // know we refuse the re-negotiation rather than silently ignoring.
-        if dialog.is_some() {
-            let resp = UserAgentServer::create_response(
-                request,
-                488,
-                "Not Acceptable Here (re-INVITE unsupported in M4)",
-            );
-            handle.send_final(resp).await;
+        // Re-INVITE (mid-dialog, hold/resume from peer). Mirror the
+        // offer's direction onto our pipeline, answer with the mirrored
+        // direction, done.
+        if let Some(dlg) = dialog {
+            handle_reinvite(request, handle, dlg, &self.calls, &self.local_user, self.media_ip)
+                .await;
             return Ok(());
         }
 
@@ -106,11 +103,16 @@ impl UasRequestHandler for AnvilUasHandler {
         // Build an answer SDP carrying just the chosen codec. A more liberal
         // implementation would echo back the full intersection; single-codec
         // answers are simpler and sufficient for the offer/answer model.
+        //
+        // Initial INVITE only — no re-INVITE flows through here, so the
+        // direction is always `sendrecv`. Hold handling lives in a separate
+        // `dispatch_request` path.
         let sdp_body = media::build_sdp(
             &[chosen],
             &self.local_user,
             &self.media_ip.to_string(),
             rtp_port,
+            media::MediaDirection::Sendrecv,
         );
 
         // Build the 200 OK now (including dialog) so `answer()` can send it
@@ -416,6 +418,95 @@ pub(crate) async fn reject_inbound(
 
     calls.remove(&call);
     Ok(())
+}
+
+/// Handle an in-dialog re-INVITE: direction-only SDP change (hold / resume).
+/// Mirrors the peer's direction onto our pipeline's hold state, answers
+/// with the mirrored direction at the same RTP port, and 200 OKs.
+async fn handle_reinvite(
+    request: &Request,
+    handle: ServerTransactionHandle,
+    dialog: &Dialog,
+    calls: &DashMap<CallId, CallEntry>,
+    local_user: &str,
+    media_ip: std::net::IpAddr,
+) {
+    let peer_direction = media::extract_direction(request.body());
+    let our_direction = peer_direction.mirror();
+
+    // Look up the call so we can reuse its RTP port and flip hold state.
+    let call_id = find_call_by_dialog_id(calls, dialog.id().call_id());
+    let (rtp_port, codec, hold_state) = match call_id {
+        Some(id) => {
+            let entry = match calls.get(&id) {
+                Some(e) => e,
+                None => {
+                    let resp = UserAgentServer::create_response(
+                        request,
+                        481,
+                        "Call/Transaction Does Not Exist",
+                    );
+                    handle.send_final(resp).await;
+                    return;
+                }
+            };
+            let rtp_port = match entry.rtp_socket.local_addr() {
+                Ok(a) => a.port(),
+                Err(_) => {
+                    let resp = UserAgentServer::create_response(request, 500, "Server Error");
+                    handle.send_final(resp).await;
+                    return;
+                }
+            };
+            let codec = entry.negotiated_codec.unwrap_or(Codec::Pcmu);
+            let hold = entry.pipeline.as_ref().map(|p| Arc::clone(&p.hold));
+            (rtp_port, codec, hold)
+        }
+        None => {
+            let resp = UserAgentServer::create_response(
+                request,
+                481,
+                "Call/Transaction Does Not Exist",
+            );
+            handle.send_final(resp).await;
+            return;
+        }
+    };
+
+    let sdp_body = media::build_sdp(
+        &[codec],
+        local_user,
+        &media_ip.to_string(),
+        rtp_port,
+        our_direction,
+    );
+
+    // Build 200 OK with our SDP answer. Skip `UserAgentServer::accept_invite`
+    // because it creates a fresh Dialog; we're re-using the existing one.
+    let _ = media_ip; // silence unused when extract_direction path is taken
+    let mut response = UserAgentServer::create_response(request, 200, "OK");
+    if response
+        .set_body(bytes::Bytes::from(sdp_body.into_bytes()))
+        .is_err()
+    {
+        let err = UserAgentServer::create_response(request, 500, "Server Error");
+        handle.send_final(err).await;
+        return;
+    }
+    response
+        .headers_mut()
+        .push("Content-Type", "application/sdp")
+        .ok();
+    handle.send_final(response).await;
+
+    if let Some(hs) = hold_state {
+        hs.apply(our_direction);
+        tracing::info!(
+            ?peer_direction,
+            ?our_direction,
+            "re-INVITE applied hold state"
+        );
+    }
 }
 
 async fn start_media_inbound(
