@@ -17,6 +17,7 @@ pub mod config;
 pub mod error;
 pub mod event;
 pub(crate) mod media;
+pub(crate) mod stun;
 pub(crate) mod transport;
 pub(crate) mod uas;
 
@@ -160,16 +161,33 @@ impl Anvil {
 
         let (event_tx, event_rx) = mpsc::channel::<Event>(64);
 
-        // Pick the media IP. For Phase 1 M2 we derive it from the bind address
-        // if the caller pinned one; otherwise fall back to loopback. Production
-        // deployments will need STUN or an explicit public IP (Phase 2).
-        let media_ip = cfg
-            .account
-            .bind_addr
-            .as_deref()
-            .and_then(|s| s.rsplit_once(':').map(|(host, _)| host))
-            .and_then(|host| host.parse::<IpAddr>().ok())
-            .unwrap_or_else(call::default_media_ip);
+        // Pick the media IP. Order:
+        //   1. STUN reflexive address if `account.stun` is configured and
+        //      reachable. Best for clients behind NAT.
+        //   2. Pinned host from `account.bind_addr` (`1.2.3.4:5060` → 1.2.3.4).
+        //   3. Loopback. Useful for tests; useless on the open net.
+        let stun_ip = if let Some(server) = cfg.account.stun.as_deref() {
+            match stun::discover_public_addr(server, std::time::Duration::from_secs(3)).await {
+                Ok(addr) => {
+                    tracing::info!(public_addr = %addr, server, "STUN discovered public IP");
+                    Some(addr.ip())
+                }
+                Err(e) => {
+                    tracing::warn!(%e, server, "STUN discovery failed; falling back to bind_addr");
+                    None
+                }
+            }
+        } else {
+            None
+        };
+        let media_ip = stun_ip.unwrap_or_else(|| {
+            cfg.account
+                .bind_addr
+                .as_deref()
+                .and_then(|s| s.rsplit_once(':').map(|(host, _)| host))
+                .and_then(|host| host.parse::<IpAddr>().ok())
+                .unwrap_or_else(call::default_media_ip)
+        });
 
         let local_user = local_uri
             .user()

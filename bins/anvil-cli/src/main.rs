@@ -81,6 +81,11 @@ struct Cli {
     /// self-signed or private-CA cert.
     #[arg(long)]
     tls_ca: Option<std::path::PathBuf>,
+
+    /// STUN server (`host:port`) for public-IP discovery. Result populates
+    /// the `c=` line of outbound SDP. Example: `stun.l.google.com:19302`.
+    #[arg(long)]
+    stun: Option<String>,
 }
 
 #[tokio::main]
@@ -107,7 +112,7 @@ async fn main() -> Result<()> {
         password: cli.password.clone(),
         transport: if cli.tls { Transport::Tls } else { Transport::Udp },
         outbound_proxy: None,
-        stun: None,
+        stun: cli.stun.clone(),
         register_expires: Duration::from_secs(3600),
         user_agent: format!("Anvil/{} (phase1-m3)", env!("CARGO_PKG_VERSION")),
         bind_addr: cli.bind.clone(),
