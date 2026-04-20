@@ -88,10 +88,32 @@ impl Anvil {
             .as_deref()
             .unwrap_or("0.0.0.0:0");
 
-        let (dispatcher, _udp_socket, mut inbound_rx) =
-            transport::start_udp_transport(local_addr)
-                .await
-                .map_err(|e| AnvilError::Transport(format!("start UDP: {e}")))?;
+        // Build the TLS client config if the account is configured for TLS.
+        // Even if the account uses UDP, dispatching to a sips: target later
+        // would still need the config — but we keep the policy simple: TLS
+        // is on iff Transport::Tls.
+        #[cfg(feature = "tls")]
+        let tls_config: Option<transport::TlsConfigArc> = if matches!(
+            cfg.account.transport,
+            crate::config::Transport::Tls
+        ) {
+            Some(
+                transport::build_tls_client_config(cfg.account.tls_extra_ca_pem.as_deref())
+                    .map_err(|e| AnvilError::Transport(format!("TLS config: {e}")))?,
+            )
+        } else {
+            None
+        };
+
+        let (dispatcher, _udp_socket, mut inbound_rx) = transport::start_transports(
+            local_addr,
+            #[cfg(feature = "tls")]
+            tls_config,
+            #[cfg(not(feature = "tls"))]
+            None,
+        )
+        .await
+        .map_err(|e| AnvilError::Transport(format!("start transports: {e}")))?;
 
         let transaction_mgr = Arc::new(TransactionManager::new(Arc::clone(&dispatcher)));
 

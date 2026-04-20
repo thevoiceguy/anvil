@@ -11,7 +11,7 @@ homepage.workspace     = true
 
 [features]
 default = ["tls"]
-tls  = []
+tls  = ["dep:rustls", "dep:tokio-rustls", "dep:webpki-roots", "dep:rustls-pemfile"]
 srtp = []
 
 [dependencies]
@@ -48,6 +48,13 @@ forge-sdp    = { workspace = true }
 anyhow = { workspace = true }
 rand   = "0.8"
 opus   = { workspace = true }
+
+# TLS client. Pinned to the same versions sip-transport uses to avoid
+# rustls duplication via cargo's resolver.
+rustls         = { version = "0.23", default-features = false, features = ["std", "ring"], optional = true }
+tokio-rustls   = { version = "0.26", default-features = false, features = ["ring"],        optional = true }
+webpki-roots   = { version = "0.26", optional = true }
+rustls-pemfile = { version = "2",    optional = true }
 
 [dev-dependencies]
 tokio = { workspace = true, features = ["test-util"] }

@@ -29,6 +29,10 @@ pub struct AccountConfig {
     /// Local UDP bind address. `None` defaults to `0.0.0.0:0` (any interface,
     /// ephemeral port). Set this if the user wants to pin the SIP port.
     pub bind_addr: Option<String>,
+    /// Optional PEM-encoded extra CA certificates to trust for TLS,
+    /// in addition to the system root store. Useful for self-signed
+    /// PBX deployments. Only consulted when `transport == Transport::Tls`.
+    pub tls_extra_ca_pem: Option<Vec<u8>>,
     /// Base URL of the FCP provisioning service. If `None`, Anvil attempts
     /// auto-discovery from the REGISTER 200 OK `X-FCP-Provisioning-Url`
     /// header; if that's also absent, branding is skipped and the UI falls

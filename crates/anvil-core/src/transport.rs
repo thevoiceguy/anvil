@@ -1,13 +1,12 @@
 //! SIP transport setup for Anvil.
 //!
-//! siphon-rs exposes the `TransportDispatcher` trait and primitives (`run_udp`,
-//! `send_udp`, etc.) but does not ship a concrete cross-transport dispatcher —
-//! `siphond` implements its own. We port that implementation here so
-//! `anvil-core` can stand up a UDP-first transport for the softphone with
-//! TCP/TLS arriving alongside Phase 2 TLS work.
+//! UDP is always on. TLS is opt-in via `Anvil`'s start flow and the `tls`
+//! feature; when enabled, outbound TLS dispatches go through siphon-rs's
+//! `TlsPool`, which keeps connections alive (RFC 5626 flow re-use) and
+//! routes inbound responses on the same socket back into our packet pump.
 //!
-//! Phase 1 scope: UDP only. The TCP and TLS arms return an error; the
-//! registrar / target must be reachable over UDP.
+//! No TCP yet (rare in modern SIP deployments) and no listening TLS
+//! socket — the softphone is a client, not a server.
 
 use std::sync::Arc;
 
@@ -20,15 +19,65 @@ use sip_transport::{
     TransportPolicy,
 };
 use tokio::{net::UdpSocket, sync::mpsc};
-use tracing::warn;
 
-/// Bring up the local UDP listener and return a dispatcher that can send on it.
-///
-/// Callers drain the returned `mpsc::Receiver<InboundPacket>` and feed each
-/// packet's payload into the `TransactionManager` via `receive_response` /
-/// request dispatch.
-pub(crate) async fn start_udp_transport(
+#[cfg(feature = "tls")]
+use sip_transport::pool::{TlsClientConfig, TlsPool};
+
+/// TLS client configuration. Wraps `Arc<rustls::ClientConfig>` so callers
+/// don't need to depend on rustls themselves.
+#[cfg(feature = "tls")]
+pub(crate) type TlsConfigArc = Arc<TlsClientConfig>;
+
+/// Build a TLS client config trusting the system root CAs (via
+/// `webpki-roots`). If `extra_ca_pem` is supplied, its certs are added to
+/// the trust store on top of the defaults — useful for self-signed PBX
+/// environments.
+#[cfg(feature = "tls")]
+pub(crate) fn build_tls_client_config(extra_ca_pem: Option<&[u8]>) -> Result<TlsConfigArc> {
+    use rustls::{ClientConfig, RootCertStore};
+
+    // rustls 0.23 requires a CryptoProvider be installed process-wide
+    // before any ClientConfig is built. We have only the `ring` provider
+    // compiled in. Install once; subsequent calls are no-ops.
+    install_default_crypto_provider();
+
+    let mut roots = RootCertStore::empty();
+    roots.extend(webpki_roots::TLS_SERVER_ROOTS.iter().cloned());
+
+    if let Some(pem) = extra_ca_pem {
+        let mut cursor = std::io::BufReader::new(pem);
+        for cert in rustls_pemfile::certs(&mut cursor) {
+            let cert = cert.map_err(|e| anyhow!("parsing extra CA cert PEM: {e}"))?;
+            roots
+                .add(cert)
+                .map_err(|e| anyhow!("adding extra CA cert: {e}"))?;
+        }
+    }
+
+    let config = ClientConfig::builder()
+        .with_root_certificates(roots)
+        .with_no_client_auth();
+
+    Ok(Arc::new(config))
+}
+
+#[cfg(feature = "tls")]
+fn install_default_crypto_provider() {
+    use std::sync::Once;
+    static ONCE: Once = Once::new();
+    ONCE.call_once(|| {
+        let _ = rustls::crypto::ring::default_provider().install_default();
+    });
+}
+
+/// Bring up the local UDP socket and the optional TLS pool, return a
+/// dispatcher that handles both. Inbound packets from either transport
+/// land on the returned `mpsc::Receiver<InboundPacket>` so the packet
+/// pump only has to read one channel.
+pub(crate) async fn start_transports(
     bind_addr: &str,
+    #[cfg(feature = "tls")] tls_config: Option<TlsConfigArc>,
+    #[cfg(not(feature = "tls"))] _tls_config: Option<()>,
 ) -> Result<(
     Arc<dyn TransportDispatcher>,
     Arc<UdpSocket>,
@@ -37,13 +86,27 @@ pub(crate) async fn start_udp_transport(
     let (tx, rx) = mpsc::channel::<InboundPacket>(1024);
 
     let udp_socket = Arc::new(UdpSocket::bind(bind_addr).await?);
-
     let tcp_pool = Arc::new(ConnectionPool::new());
+
+    #[cfg(feature = "tls")]
+    let tls_pool: Option<Arc<TlsPool>> = if tls_config.is_some() {
+        let pool = Arc::new(TlsPool::new());
+        // Route inbound TLS responses (200 OK to REGISTER, etc.) back into
+        // the same packet pump as UDP.
+        pool.set_inbound_tx(tx.clone()).await;
+        Some(pool)
+    } else {
+        None
+    };
 
     let dispatcher: Arc<dyn TransportDispatcher> = Arc::new(AnvilTransportDispatcher {
         udp_socket: Arc::clone(&udp_socket),
         policy: Arc::new(DefaultTransportPolicy::default()),
         tcp_pool,
+        #[cfg(feature = "tls")]
+        tls_pool,
+        #[cfg(feature = "tls")]
+        tls_config,
     });
 
     // Spawn the UDP inbound loop. The receiver end is returned to the caller.
@@ -62,8 +125,12 @@ pub(crate) async fn start_udp_transport(
 struct AnvilTransportDispatcher {
     udp_socket: Arc<UdpSocket>,
     policy: Arc<dyn TransportPolicy>,
-    #[allow(dead_code)] // wired up when TCP lands
+    #[allow(dead_code)] // TCP is reserved for future use
     tcp_pool: Arc<ConnectionPool>,
+    #[cfg(feature = "tls")]
+    tls_pool: Option<Arc<TlsPool>>,
+    #[cfg(feature = "tls")]
+    tls_config: Option<TlsConfigArc>,
 }
 
 #[async_trait]
@@ -83,13 +150,10 @@ impl TransportDispatcher for AnvilTransportDispatcher {
             sip_transport::TransportKind::Tcp | sip_transport::TransportKind::Tls
                 if ctx.stream().is_none() =>
             {
-                warn!(
-                    ?selected,
-                    ?desired,
-                    peer = %ctx.peer(),
-                    "Policy requested stream transport but no stream available; falling back to desired"
-                );
-                desired
+                // siphon-rs's policy may pick a stream transport for big
+                // payloads; if there's no existing stream we still want to
+                // open one, so don't fall back. Drop through to the pool.
+                selected
             }
             other => other,
         };
@@ -99,14 +163,37 @@ impl TransportDispatcher for AnvilTransportDispatcher {
                 send_udp(self.udp_socket.as_ref(), &ctx.peer(), &payload).await?;
                 Ok(())
             }
+            #[cfg(feature = "tls")]
+            sip_transport::TransportKind::Tls => {
+                let pool = self
+                    .tls_pool
+                    .as_ref()
+                    .ok_or_else(|| anyhow!("TLS dispatch requested but tls_pool is unset"))?;
+                let cfg = self
+                    .tls_config
+                    .clone()
+                    .ok_or_else(|| anyhow!("TLS dispatch requested but tls_config is unset"))?;
+                let server_name = ctx
+                    .server_name()
+                    .map(String::from)
+                    .unwrap_or_else(|| ctx.peer().ip().to_string());
+                pool.send_tls(ctx.peer(), server_name, cfg, payload).await?;
+                Ok(())
+            }
             sip_transport::TransportKind::Tcp
-            | sip_transport::TransportKind::Tls
             | sip_transport::TransportKind::Ws
             | sip_transport::TransportKind::Wss
             | sip_transport::TransportKind::Sctp
             | sip_transport::TransportKind::TlsSctp => {
-                Err(anyhow!("transport {:?} not yet implemented in anvil-core (Phase 1 is UDP only)", target))
+                Err(anyhow!(
+                    "transport {:?} not implemented in anvil-core",
+                    target
+                ))
             }
+            #[cfg(not(feature = "tls"))]
+            sip_transport::TransportKind::Tls => Err(anyhow!(
+                "TLS dispatch requested but anvil-core was built without the `tls` feature"
+            )),
         }
     }
 }

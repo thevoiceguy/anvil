@@ -71,6 +71,16 @@ struct Cli {
     /// resume at `hold_at + 2`. Omit to skip the hold probe.
     #[arg(long)]
     hold_at: Option<u64>,
+
+    /// Use TLS (sips:) for SIP signaling. Default is UDP.
+    #[arg(long)]
+    tls: bool,
+
+    /// Path to a PEM file holding extra trusted CA certs for TLS, on top
+    /// of the system root store. Useful when the registrar uses a
+    /// self-signed or private-CA cert.
+    #[arg(long)]
+    tls_ca: Option<std::path::PathBuf>,
 }
 
 #[tokio::main]
@@ -84,17 +94,24 @@ async fn main() -> Result<()> {
 
     let cli = Cli::parse();
 
+    let tls_extra_ca_pem = if let Some(path) = cli.tls_ca.as_ref() {
+        Some(std::fs::read(path).map_err(|e| anyhow::anyhow!("read --tls-ca: {e}"))?)
+    } else {
+        None
+    };
+
     let account = AccountConfig {
         aor: cli.aor.clone(),
         registrar: cli.registrar.clone(),
         username: cli.username.clone(),
         password: cli.password.clone(),
-        transport: Transport::Udp,
+        transport: if cli.tls { Transport::Tls } else { Transport::Udp },
         outbound_proxy: None,
         stun: None,
         register_expires: Duration::from_secs(3600),
         user_agent: format!("Anvil/{} (phase1-m3)", env!("CARGO_PKG_VERSION")),
         bind_addr: cli.bind.clone(),
+        tls_extra_ca_pem,
         provisioning_url: None,
     };
 

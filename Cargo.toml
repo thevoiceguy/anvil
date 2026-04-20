@@ -50,7 +50,7 @@ opus = "0.3"
 # siphon-rs (SIP stack) — path deps while we iterate locally
 sip-core = { path = "../siphon-rs/crates/sip-core" }
 sip-parse = { path = "../siphon-rs/crates/sip-parse" }
-sip-transport = { path = "../siphon-rs/crates/sip-transport" }
+sip-transport = { path = "../siphon-rs/crates/sip-transport", features = ["tls"] }
 sip-transaction = { path = "../siphon-rs/crates/sip-transaction" }
 sip-dialog = { path = "../siphon-rs/crates/sip-dialog" }
 sip-uac = { path = "../siphon-rs/crates/sip-uac" }
