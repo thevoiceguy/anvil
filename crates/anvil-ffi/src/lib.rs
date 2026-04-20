@@ -229,6 +229,159 @@ pub unsafe extern "C" fn anvil_set_event_callback(
     })
 }
 
+// ─── call control ───────────────────────────────────────────────────────────
+
+/// Place an outgoing call to `target` (a SIP URI). On success writes the
+/// call's runtime ID to `*out_call_id` for later use with
+/// `anvil_hangup` / `anvil_send_dtmf` / `anvil_hold`.
+///
+/// Returns as soon as the INVITE transaction is started; observe
+/// `CallRinging`, `CallEstablished`, and `CallEnded` events to track
+/// the lifecycle.
+///
+/// # Safety
+/// `handle` must be valid; `target` must be a NUL-terminated UTF-8
+/// string; `out_call_id` must point to writable `uint64_t` storage.
+#[no_mangle]
+pub unsafe extern "C" fn anvil_place_call(
+    handle: *mut AnvilHandle,
+    target: *const c_char,
+    out_call_id: *mut u64,
+) -> AnvilStatus {
+    catch_ffi(|| unsafe {
+        let Some(handle) = handle.as_mut() else {
+            return AnvilStatus::NullArgument;
+        };
+        if out_call_id.is_null() {
+            return AnvilStatus::NullArgument;
+        }
+        let target = match cstr_to_string(target) {
+            Ok(s) => s,
+            Err(s) => return s,
+        };
+        match handle.block_on(handle.anvil().place_call(&target)) {
+            Ok(call) => {
+                *out_call_id = call.0;
+                AnvilStatus::Ok
+            }
+            Err(e) => map_anvil_err(&e),
+        }
+    })
+}
+
+/// Answer an incoming call signalled by `IncomingCall`.
+///
+/// # Safety
+/// `handle` must be valid; `call_id` must come from an `IncomingCall`
+/// event delivered via the registered callback.
+#[no_mangle]
+pub unsafe extern "C" fn anvil_answer(
+    handle: *mut AnvilHandle,
+    call_id: u64,
+) -> AnvilStatus {
+    catch_ffi(|| unsafe {
+        let Some(handle) = handle.as_mut() else {
+            return AnvilStatus::NullArgument;
+        };
+        match handle.block_on(handle.anvil().answer(anvil_core::CallId(call_id))) {
+            Ok(()) => AnvilStatus::Ok,
+            Err(e) => map_anvil_err(&e),
+        }
+    })
+}
+
+/// Reject an incoming call with `code` (typical: 486 Busy Here, 603 Decline).
+///
+/// # Safety
+/// `handle` must be valid; `call_id` must match an `IncomingCall`.
+#[no_mangle]
+pub unsafe extern "C" fn anvil_reject(
+    handle: *mut AnvilHandle,
+    call_id: u64,
+    code: u16,
+) -> AnvilStatus {
+    catch_ffi(|| unsafe {
+        let Some(handle) = handle.as_mut() else {
+            return AnvilStatus::NullArgument;
+        };
+        match handle.block_on(handle.anvil().reject(anvil_core::CallId(call_id), code)) {
+            Ok(()) => AnvilStatus::Ok,
+            Err(e) => map_anvil_err(&e),
+        }
+    })
+}
+
+/// End an active call by sending BYE.
+///
+/// # Safety
+/// `handle` must be valid; `call_id` must refer to an established call.
+#[no_mangle]
+pub unsafe extern "C" fn anvil_hangup(
+    handle: *mut AnvilHandle,
+    call_id: u64,
+) -> AnvilStatus {
+    catch_ffi(|| unsafe {
+        let Some(handle) = handle.as_mut() else {
+            return AnvilStatus::NullArgument;
+        };
+        match handle.block_on(handle.anvil().hangup(anvil_core::CallId(call_id))) {
+            Ok(()) => AnvilStatus::Ok,
+            Err(e) => map_anvil_err(&e),
+        }
+    })
+}
+
+/// Put a call on hold (`on != 0`) or resume it (`on == 0`). Drives a
+/// re-INVITE under the hood.
+///
+/// # Safety
+/// `handle` must be valid; `call_id` must refer to an established call.
+#[no_mangle]
+pub unsafe extern "C" fn anvil_hold(
+    handle: *mut AnvilHandle,
+    call_id: u64,
+    on: u8,
+) -> AnvilStatus {
+    catch_ffi(|| unsafe {
+        let Some(handle) = handle.as_mut() else {
+            return AnvilStatus::NullArgument;
+        };
+        match handle.block_on(handle.anvil().hold(anvil_core::CallId(call_id), on != 0)) {
+            Ok(()) => AnvilStatus::Ok,
+            Err(e) => map_anvil_err(&e),
+        }
+    })
+}
+
+/// Send a DTMF digit (`'0'`..`'9'`, `'*'`, `'#'`, `'A'`..`'D'`) on a
+/// call as a single RFC 2833 event burst (~140 ms).
+///
+/// `digit` is a UTF-32 code point — pass the literal char value, e.g.
+/// `'1'` from C, not its ASCII code 0x31 directly (they happen to be
+/// the same for ASCII).
+///
+/// # Safety
+/// `handle` must be valid; `call_id` must refer to an established call.
+#[no_mangle]
+pub unsafe extern "C" fn anvil_send_dtmf(
+    handle: *mut AnvilHandle,
+    call_id: u64,
+    digit: u32,
+) -> AnvilStatus {
+    let Some(ch) = char::from_u32(digit) else {
+        return AnvilStatus::Config;
+    };
+    catch_ffi(|| unsafe {
+        let Some(handle) = handle.as_mut() else {
+            return AnvilStatus::NullArgument;
+        };
+        match handle.block_on(handle.anvil().send_dtmf(anvil_core::CallId(call_id), ch)) {
+            Ok(()) => AnvilStatus::Ok,
+            Err(e) => map_anvil_err(&e),
+        }
+    })
+}
+
 /// Send REGISTER with `Expires: 0`.
 ///
 /// # Safety
