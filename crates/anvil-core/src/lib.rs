@@ -59,6 +59,21 @@ pub struct Anvil {
     media_ip: IpAddr,
     /// AOR user component, used as the SDP origin username.
     local_user: String,
+    /// Stashed for INVITE auth retry: IntegratedUAC doesn't auto-retry
+    /// INVITEs on 401/407 the way it does for non-INVITE methods, so the
+    /// outgoing-call driver builds the authenticated retry itself using the
+    /// transaction manager + dispatcher directly.
+    transaction_mgr: Arc<TransactionManager>,
+    dispatcher: Arc<dyn sip_transaction::TransportDispatcher>,
+    resolver: Arc<SipResolver>,
+    /// Stashed credentials so the retry path can build a `UserAgentClient`
+    /// with the same digest creds as the main UAC.
+    sip_username: String,
+    sip_password: String,
+    sip_aor: String,
+    /// Our SIP bind address; needed to construct a TransportContext for
+    /// the retry transaction.
+    local_sip_addr: std::net::SocketAddr,
     /// Handles to the packet-pump task and any other long-running tasks.
     /// Dropped on shutdown.
     tasks: Vec<JoinHandle<()>>,
@@ -186,6 +201,13 @@ impl Anvil {
                 audio,
                 media_ip,
                 local_user,
+                transaction_mgr: Arc::clone(&transaction_mgr),
+                dispatcher: Arc::clone(&dispatcher),
+                resolver: Arc::clone(&resolver),
+                sip_username: cfg.account.username.clone(),
+                sip_password: cfg.account.password.clone(),
+                sip_aor: cfg.account.aor.clone(),
+                local_sip_addr: bound_addr,
                 tasks: vec![pump],
             },
             event_rx,
@@ -319,12 +341,24 @@ impl Anvil {
         );
 
         // Spawn a task to drive the call's state machine: drain provisionals,
-        // await final, start the media pipeline, emit events.
+        // await final, retry on auth challenge, start the media pipeline,
+        // emit events.
         let events = self.events.clone();
         let calls = Arc::clone(&self.calls);
         let audio = Arc::clone(&self.audio);
+        let retry = AuthRetryCtx {
+            transaction_mgr: Arc::clone(&self.transaction_mgr),
+            dispatcher: Arc::clone(&self.dispatcher),
+            resolver: Arc::clone(&self.resolver),
+            local_aor: self.sip_aor.clone(),
+            local_addr: self.local_sip_addr,
+            username: self.sip_username.clone(),
+            password: self.sip_password.clone(),
+            target: target.to_string(),
+            sdp: sdp_body.clone(),
+        };
         tokio::spawn(async move {
-            drive_outgoing_call(call_id, handle, rtp_socket, audio, calls, events).await;
+            drive_outgoing_call(call_id, handle, rtp_socket, audio, calls, events, retry).await;
         });
 
         Ok(call_id)
@@ -622,6 +656,196 @@ async fn dispatch_request(
     }
 }
 
+/// Build an authenticated retry of `original_request` and submit it through
+/// the transaction manager. Returns the final response from the retry
+/// transaction (which may itself be non-2xx; only the auth challenge is
+/// handled, no further retries).
+async fn attempt_invite_auth_retry(
+    ctx: &AuthRetryCtx,
+    original_request: &sip_core::Request,
+    challenge: &sip_core::Response,
+) -> anyhow::Result<sip_core::Response> {
+    use sip_uac::UserAgentClient;
+    use std::time::Duration;
+    use tokio::sync::oneshot;
+
+    // Local UAC just for computing Digest. The dialog manager / subscription
+    // manager that come along with this UAC are unused.
+    let local_uri = sip_core::SipUri::parse(&ctx.local_aor)
+        .map_err(|e| anyhow::anyhow!("local AOR parse: {e:?}"))?;
+    let user = local_uri.user().unwrap_or("anvil");
+    let contact = sip_core::SipUri::parse(&format!(
+        "sip:{}@{}:{}",
+        user,
+        ctx.local_addr.ip(),
+        ctx.local_addr.port()
+    ))
+    .map_err(|e| anyhow::anyhow!("contact parse: {e:?}"))?;
+    let mut helper = UserAgentClient::new(local_uri.clone(), contact)
+        .with_credentials(&ctx.username, &ctx.password);
+
+    let mut auth_request = helper.create_authenticated_request(original_request, challenge)?;
+
+    // Resolve target via the shared resolver, build a transport context.
+    let target_uri = sip_core::SipUri::parse(&ctx.target)
+        .map_err(|e| anyhow::anyhow!("target URI parse: {e:?}"))?;
+    let _ = ctx.resolver; // resolver not currently used; future SRV/NAPTR
+    let host = target_uri.host();
+    let port = target_uri.port().unwrap_or(5060);
+    let addr_str = format!("{host}:{port}");
+    let peer_addr: std::net::SocketAddr = match addr_str.parse() {
+        Ok(addr) => addr,
+        Err(_) => {
+            // SRV / hostname target — fall back to OS DNS.
+            tokio::net::lookup_host(&addr_str)
+                .await
+                .map_err(|e| anyhow::anyhow!("DNS lookup {addr_str}: {e}"))?
+                .next()
+                .ok_or_else(|| anyhow::anyhow!("no addrs for {addr_str}"))?
+        }
+    };
+
+    // Transport context: UDP only for M6 (matches the rest of the stack).
+    let txp_ctx = sip_transaction::TransportContext::new(
+        sip_transaction::TransportKind::Udp,
+        peer_addr,
+        None,
+    );
+
+    // Auto-fill Via with our local address. The retry's branch comes from
+    // create_authenticated_request itself; we just need the sent-by host.
+    rewrite_top_via(&mut auth_request, ctx.local_addr);
+
+    let (final_tx, final_rx) = oneshot::channel();
+    let (term_tx, term_rx) = oneshot::channel();
+    let (prov_tx, _prov_rx) = tokio::sync::mpsc::channel::<sip_core::Response>(8);
+    let tu = Arc::new(InviteRetryTu {
+        final_tx: tokio::sync::Mutex::new(Some(final_tx)),
+        term_tx: tokio::sync::Mutex::new(Some(term_tx)),
+        prov_tx,
+    });
+
+    ctx.transaction_mgr
+        .start_client_transaction(auth_request, txp_ctx, tu)
+        .await?;
+
+    // Bound the wait. Timer B per RFC 3261 is 64*T1 = 32 s; give a little
+    // slack so we never out-wait the transaction layer's own timeout.
+    let outcome = tokio::time::timeout(
+        Duration::from_secs(35),
+        async {
+            tokio::select! {
+                Ok(resp) = final_rx => Ok(resp),
+                Ok(reason) = term_rx => Err(anyhow::anyhow!("retry txn terminated: {reason}")),
+                else => Err(anyhow::anyhow!("retry channels closed")),
+            }
+        },
+    )
+    .await
+    .map_err(|_| anyhow::anyhow!("retry timed out"))??;
+
+    let _ = ctx.dispatcher; // currently unused (transaction manager owns the dispatcher already)
+    Ok(outcome)
+}
+
+/// Rewrite the top Via's sent-by host:port to the given socket address.
+/// `create_authenticated_request` carries Via from the original request,
+/// which still has our placeholder. The transaction manager normally fixes
+/// this in `auto_fill_headers`, but we're submitting the request directly.
+fn rewrite_top_via(request: &mut sip_core::Request, local_addr: std::net::SocketAddr) {
+    let new_via_value = request.headers().get("Via").map(|via| {
+        if let Some(idx) = via.find(';') {
+            let prefix = &via[..idx];
+            let params = &via[idx..];
+            if let Some(space) = prefix.rfind(' ') {
+                format!("{}{}{}", &prefix[..=space], local_addr, params)
+            } else {
+                via.to_string()
+            }
+        } else if let Some(space) = via.rfind(' ') {
+            format!("{}{}", &via[..=space], local_addr)
+        } else {
+            via.to_string()
+        }
+    });
+    if let Some(new_via) = new_via_value {
+        request.headers_mut().remove("Via");
+        let _ = request.headers_mut().push("Via", new_via.as_str());
+    }
+}
+
+/// Receives the response to an authenticated INVITE retry. Mirrors
+/// siphon-rs's internal `SimpleTransactionUser`. The auth-retry path
+/// doesn't need dialog tracking or ACK handling — the transaction
+/// manager sends ACK to non-2xx automatically, and a 2xx triggers an
+/// ACK we send manually below.
+struct InviteRetryTu {
+    final_tx: tokio::sync::Mutex<Option<tokio::sync::oneshot::Sender<sip_core::Response>>>,
+    term_tx: tokio::sync::Mutex<Option<tokio::sync::oneshot::Sender<String>>>,
+    prov_tx: tokio::sync::mpsc::Sender<sip_core::Response>,
+}
+
+#[async_trait::async_trait]
+impl sip_transaction::ClientTransactionUser for InviteRetryTu {
+    async fn on_provisional(
+        &self,
+        _key: &sip_transaction::TransactionKey,
+        response: &sip_core::Response,
+    ) {
+        let _ = self.prov_tx.try_send(response.clone());
+    }
+
+    async fn on_final(
+        &self,
+        _key: &sip_transaction::TransactionKey,
+        response: &sip_core::Response,
+    ) {
+        let mut tx = self.final_tx.lock().await;
+        if let Some(tx) = tx.take() {
+            let _ = tx.send(response.clone());
+        }
+    }
+
+    async fn on_terminated(
+        &self,
+        _key: &sip_transaction::TransactionKey,
+        reason: &str,
+    ) {
+        let mut tx = self.term_tx.lock().await;
+        if let Some(tx) = tx.take() {
+            let _ = tx.send(reason.to_string());
+        }
+    }
+
+    async fn send_ack(
+        &self,
+        _key: &sip_transaction::TransactionKey,
+        _response: sip_core::Response,
+        _ctx: &sip_transaction::TransportContext,
+        _is_2xx: bool,
+    ) {
+        // The transaction manager handles ACK for non-2xx automatically.
+        // For 2xx, the dialog logic in `drive_outgoing_call` is what cares
+        // about the response — we just deliver it via `final_tx`.
+    }
+
+    async fn send_prack(
+        &self,
+        _key: &sip_transaction::TransactionKey,
+        _response: sip_core::Response,
+        _ctx: &sip_transaction::TransportContext,
+    ) {
+        // PRACK (RFC 3262) is unused for the auth retry path.
+    }
+
+    async fn on_transport_error(&self, _key: &sip_transaction::TransactionKey) {
+        let mut tx = self.term_tx.lock().await;
+        if let Some(tx) = tx.take() {
+            let _ = tx.send("transport error".into());
+        }
+    }
+}
+
 fn map_transport(kind: sip_transport::TransportKind) -> sip_transaction::TransportKind {
     match kind {
         sip_transport::TransportKind::Udp => sip_transaction::TransportKind::Udp,
@@ -634,6 +858,22 @@ fn map_transport(kind: sip_transport::TransportKind) -> sip_transaction::Transpo
     }
 }
 
+/// Context for INVITE auth retry. Held by the call driver so that on a
+/// 401/407 response the driver can build an authenticated retry locally
+/// without going back through `Anvil::place_call` (which would fork a
+/// fresh CallId / event chain).
+struct AuthRetryCtx {
+    transaction_mgr: Arc<TransactionManager>,
+    dispatcher: Arc<dyn sip_transaction::TransportDispatcher>,
+    resolver: Arc<SipResolver>,
+    local_aor: String,
+    local_addr: std::net::SocketAddr,
+    username: String,
+    password: String,
+    target: String,
+    sdp: String,
+}
+
 /// Drives an outgoing call's lifecycle: drains provisional responses and
 /// awaits the final response. Emits `CallRinging`, `CallEstablished`, and
 /// `CallEnded` events; leaves the `CallEntry` in place for the app to `hangup`.
@@ -644,6 +884,7 @@ async fn drive_outgoing_call(
     audio: Arc<dyn AudioHost>,
     calls: Arc<DashMap<CallId, CallEntry>>,
     events: mpsc::Sender<Event>,
+    retry_ctx: AuthRetryCtx,
 ) {
     // Drain provisional responses in parallel with await_final. We only care
     // about 180 Ringing at this milestone; other 1xx responses (100, 183)
@@ -665,7 +906,30 @@ async fn drive_outgoing_call(
         }
     });
 
-    match handle.await_final().await {
+    // First attempt's final response. May be 2xx (success), 401/407 (retry
+    // with auth), or another failure.
+    let mut final_resp = handle.await_final().await;
+
+    // INVITE auth retry. siphon-rs's IntegratedUAC auto-retries non-INVITE
+    // requests but punts INVITE auth back to the caller (early dialog and
+    // ACK semantics make in-place retry inside InviteTransactionUser
+    // non-trivial). We do it here: build an authenticated request via the
+    // public `UserAgentClient::create_authenticated_request` and submit
+    // through the transaction manager directly.
+    if let Ok(ref resp) = final_resp {
+        if matches!(resp.code(), 401 | 407) {
+            tracing::info!(code = resp.code(), "INVITE challenged, retrying with auth");
+            match attempt_invite_auth_retry(&retry_ctx, handle.invite_request(), resp).await {
+                Ok(new_resp) => final_resp = Ok(new_resp),
+                Err(e) => {
+                    tracing::warn!(%e, "INVITE auth retry failed");
+                    // Fall through with the original 401 / 407 response.
+                }
+            }
+        }
+    }
+
+    match final_resp {
         Ok(resp) if (200..300).contains(&resp.code()) => {
             // Extract the negotiated codec from the answer. The payload-type
             // table is small (0 = PCMU, 8 = PCMA) and both are mandatory for
