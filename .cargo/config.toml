@@ -1,0 +1,46 @@
+# Workspace-wide cargo overrides.
+#
+# Cross-compilation to mobile targets needs each platform's C toolchain;
+# `cargo install` won't get you there. See `docs/MOBILE_BUILDS.md` for
+# the full setup.
+#
+# The blocks below describe the env vars and linker pinning each target
+# needs. They're commented out so a host-only `cargo build` doesn't fail
+# trying to invoke a missing tool. Uncomment + edit per your local NDK /
+# Xcode install when building for that target.
+
+# ─── Android arm64 (production phones) ─────────────────────────────────
+#
+# Requires the Android NDK (r25+). Set ANDROID_NDK_HOME to its root.
+# `cargo-ndk` (cargo install cargo-ndk) wraps the env-var dance:
+#   cargo ndk -t arm64-v8a build -p anvil-ffi --release
+#
+# Or, manual:
+#
+# [target.aarch64-linux-android]
+# ar       = "$ANDROID_NDK_HOME/toolchains/llvm/prebuilt/linux-x86_64/bin/llvm-ar"
+# linker   = "$ANDROID_NDK_HOME/toolchains/llvm/prebuilt/linux-x86_64/bin/aarch64-linux-android24-clang"
+#
+# [env]
+# CC_aarch64-linux-android  = "$ANDROID_NDK_HOME/toolchains/llvm/prebuilt/linux-x86_64/bin/aarch64-linux-android24-clang"
+# CXX_aarch64-linux-android = "$ANDROID_NDK_HOME/toolchains/llvm/prebuilt/linux-x86_64/bin/aarch64-linux-android24-clang++"
+# AR_aarch64-linux-android  = "$ANDROID_NDK_HOME/toolchains/llvm/prebuilt/linux-x86_64/bin/llvm-ar"
+
+# ─── Android armv7 (older phones / wearables) ──────────────────────────
+#
+# Same as above; substitute armv7a-linux-androideabi for the toolchain
+# binaries. Use `cargo ndk -t armeabi-v7a` for the cargo-ndk path.
+
+# ─── iOS device ────────────────────────────────────────────────────────
+#
+# Apple's clang is part of Xcode and only ships for macOS. From a macOS
+# host with Xcode + Command Line Tools installed:
+#
+#   cargo build -p anvil-ffi --target aarch64-apple-ios --release
+#
+# No env vars needed when xcrun is on PATH (the cc crate finds the SDK
+# automatically).
+
+# ─── iOS simulator (Apple Silicon Mac) ─────────────────────────────────
+#
+#   cargo build -p anvil-ffi --target aarch64-apple-ios-sim --release
