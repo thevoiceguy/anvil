@@ -18,7 +18,7 @@ crate-type = ["staticlib", "cdylib", "rlib"]
 anvil-core = { workspace = true }
 tokio      = { workspace = true }
 tracing    = { workspace = true }
+async-trait = { workspace = true }
 
 [build-dependencies]
-# cbindgen generates the C header at build time. Wired up in Phase 3.
-# cbindgen = "0.27"
+cbindgen = "0.27"
