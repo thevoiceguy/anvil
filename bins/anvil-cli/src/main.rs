@@ -172,6 +172,16 @@ async fn run(cli: Cli, cfg: AnvilConfig, tone_stats: Option<Arc<ToneStats>>) -> 
                     Event::CallEstablished { call, codec } => {
                         println!("[event] CallEstablished {{ call: {call:?}, codec: {codec:?} }}");
                     }
+                    Event::MediaStats { call, stats } => {
+                        println!(
+                            "[stats] call={call:?} codec={:?} jitter={:.1}ms loss={:.1}% rx={:.1}kbps tx={:.1}kbps",
+                            stats.codec,
+                            stats.jitter_ms,
+                            stats.packet_loss_pct,
+                            stats.recv_kbps,
+                            stats.send_kbps,
+                        );
+                    }
                     Event::CallEnded { call, reason } => {
                         println!("[event] CallEnded {{ call: {call:?}, reason: {reason:?} }}");
                         if active_call == Some(call) {

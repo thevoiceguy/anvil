@@ -573,7 +573,9 @@ async fn drive_outgoing_call(
             // before `CallEstablished` fires. Real AEC / renegotiation lands
             // in Phase 2.
             let pipeline = match remote_rtp {
-                Some(remote) => start_media(codec, &audio, rtp_socket, remote).await,
+                Some(remote) => {
+                    start_media(call_id, codec, &audio, rtp_socket, remote, events.clone()).await
+                }
                 None => {
                     tracing::warn!("no remote RTP address in SDP answer; no media");
                     None
@@ -614,10 +616,12 @@ async fn drive_outgoing_call(
 /// Returns `None` if capture or playback cannot be opened; callers surface
 /// that as "no media" rather than failing the call.
 async fn start_media(
+    call: CallId,
     codec: Codec,
     audio: &Arc<dyn AudioHost>,
     rtp_socket: Arc<tokio::net::UdpSocket>,
     remote: std::net::SocketAddr,
+    events: mpsc::Sender<Event>,
 ) -> Option<media::MediaPipeline> {
     let fmt = media::CodecSpec::for_codec(codec).audio_format();
     let capture = match audio.make_capture(fmt) {
@@ -635,7 +639,13 @@ async fn start_media(
         }
     };
 
-    match media::start_pipeline(codec, rtp_socket, remote, capture, playback) {
+    let sink = media::StatsSink {
+        call,
+        codec,
+        interval: std::time::Duration::from_secs(2),
+        events,
+    };
+    match media::start_pipeline(codec, rtp_socket, remote, capture, playback, Some(sink)) {
         Ok(p) => {
             tracing::info!(%remote, ?codec, "media pipeline started");
             Some(p)

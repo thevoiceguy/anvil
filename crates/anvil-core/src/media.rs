@@ -6,12 +6,15 @@
 //! proper reorder / loss-conceal buffer.
 
 use std::net::SocketAddr;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
+use std::time::Instant;
 
 use bytes::Bytes;
 use forge_codecs::g711;
 use forge_codecs::g722::{G722BitRate, G722Decoder, G722Encoder};
 use forge_rtp::rtp::RtpPacket;
+use parking_lot::Mutex;
 use rand::{thread_rng, RngCore};
 use tokio::net::UdpSocket;
 use tokio::task::JoinHandle;
@@ -20,17 +23,21 @@ use crate::audio::{AudioFormat, AudioFrame, AudioSink, AudioSource};
 use crate::config::Codec;
 use crate::error::AnvilError;
 
-/// Handles to the two tasks driving a single call's media. Dropped (and
-/// aborted) when the call ends.
+/// Handles to the three tasks driving a single call's media (send, receive,
+/// stats sampler) plus the atomic counters they share. Dropped (and aborted)
+/// when the call ends.
 pub(crate) struct MediaPipeline {
     send_task: JoinHandle<()>,
     recv_task: JoinHandle<()>,
+    stats_task: JoinHandle<()>,
+    pub(crate) metrics: Arc<MediaMetrics>,
 }
 
 impl MediaPipeline {
     pub(crate) fn abort(&self) {
         self.send_task.abort();
         self.recv_task.abort();
+        self.stats_task.abort();
     }
 }
 
@@ -38,6 +45,115 @@ impl Drop for MediaPipeline {
     fn drop(&mut self) {
         self.abort();
     }
+}
+
+/// Per-call counters shared between send task, receive task, and the
+/// periodic stats sampler. Everything is atomic or behind a small mutex so
+/// the RTP hot paths never block each other.
+pub(crate) struct MediaMetrics {
+    pub packets_rx: AtomicU64,
+    pub packets_tx: AtomicU64,
+    pub bytes_rx: AtomicU64,
+    pub bytes_tx: AtomicU64,
+    /// RFC 3550 §6.4.1 jitter accumulator plus the last packet's transit
+    /// time, in RTP timestamp units. The `Mutex` is only touched on RTP
+    /// receive; consumption reads a snapshot under the same lock.
+    jitter: Mutex<JitterState>,
+    /// Sequence-number bookkeeping per RFC 3550 §A.1, used to derive a
+    /// packet-loss count.
+    seq: Mutex<SeqState>,
+    /// Audio clock, used to convert the jitter accumulator from RTP units
+    /// to milliseconds when reporting.
+    rtp_clock_rate: u32,
+}
+
+impl MediaMetrics {
+    fn new(rtp_clock_rate: u32) -> Arc<Self> {
+        Arc::new(Self {
+            packets_rx: AtomicU64::new(0),
+            packets_tx: AtomicU64::new(0),
+            bytes_rx: AtomicU64::new(0),
+            bytes_tx: AtomicU64::new(0),
+            jitter: Mutex::new(JitterState::default()),
+            seq: Mutex::new(SeqState::default()),
+            rtp_clock_rate,
+        })
+    }
+
+    fn on_rtp_rx(&self, seq: u16, rtp_ts: u32, bytes: usize, arrival: Instant) {
+        self.packets_rx.fetch_add(1, Ordering::Relaxed);
+        self.bytes_rx.fetch_add(bytes as u64, Ordering::Relaxed);
+
+        // Jitter. RFC 3550: D(i,j) = (Rj-Ri) - (Sj-Si), then
+        //   J(i) = J(i-1) + (|D(i-1,i)| - J(i-1)) / 16.
+        // We work in RTP timestamp units; arrival time is converted from
+        // Instant by scaling elapsed seconds by rtp_clock_rate. `arrival_ts`
+        // can be any monotonic value with rtp_clock_rate ticks / s.
+        let arrival_ticks = self.arrival_ticks(arrival);
+        let transit = arrival_ticks.wrapping_sub(rtp_ts as i64);
+        let mut j = self.jitter.lock();
+        if let Some(last) = j.last_transit {
+            let d = transit.wrapping_sub(last).unsigned_abs() as f64;
+            j.current += (d - j.current) / 16.0;
+        }
+        j.last_transit = Some(transit);
+        drop(j);
+
+        // Sequence tracking (RFC 3550 §A.1, simplified).
+        let mut s = self.seq.lock();
+        s.received = s.received.saturating_add(1);
+        if s.first.is_none() {
+            s.first = Some(seq);
+            s.highest = seq;
+            return;
+        }
+        // Signed difference handles 16-bit wraparound.
+        let delta = (seq as i32).wrapping_sub(s.highest as i32);
+        if delta > 0 && delta < 32_768 {
+            s.highest = seq;
+        } else if delta < -32_768 {
+            // Forward wrap.
+            s.cycles = s.cycles.saturating_add(1);
+            s.highest = seq;
+        }
+        // Out-of-order packets don't advance `highest`; they're still
+        // counted via `received` above so the expected - received delta
+        // works out.
+    }
+
+    fn on_rtp_tx(&self, bytes: usize) {
+        self.packets_tx.fetch_add(1, Ordering::Relaxed);
+        self.bytes_tx.fetch_add(bytes as u64, Ordering::Relaxed);
+    }
+
+    fn arrival_ticks(&self, arrival: Instant) -> i64 {
+        // Anchor to the first call (doesn't matter what time zero is, as long
+        // as it's monotonic). Cache the anchor via a OnceCell-ish trick: use
+        // the `SeqState`'s Instant-on-first-packet... For now just use the
+        // absolute nanoseconds since an epoch we don't need to be stable
+        // across runs. `elapsed_since_unix` isn't needed — we only compare
+        // deltas, so use an arbitrary fixed reference.
+        static ANCHOR: std::sync::OnceLock<Instant> = std::sync::OnceLock::new();
+        let anchor = *ANCHOR.get_or_init(Instant::now);
+        let elapsed = arrival.saturating_duration_since(anchor).as_nanos() as i64;
+        // Convert to RTP clock units: ticks = elapsed_ns * clock_rate / 1e9.
+        elapsed.saturating_mul(self.rtp_clock_rate as i64) / 1_000_000_000
+    }
+}
+
+#[derive(Default)]
+struct JitterState {
+    last_transit: Option<i64>,
+    current: f64,
+}
+
+#[derive(Default)]
+struct SeqState {
+    first: Option<u16>,
+    highest: u16,
+    cycles: u32,
+    /// Total packets received (including out-of-order, including duplicates).
+    received: u32,
 }
 
 /// 20 ms frame duration across every codec we support today.
@@ -276,12 +392,19 @@ fn codec_from_pt(pt: u8, rtpmaps: &std::collections::HashMap<u8, sip_sdp::RtpMap
 }
 
 /// Start the media pipeline for an established call using the negotiated codec.
+///
+/// `stats` is the channel the per-call stats sampler emits `MediaStats`
+/// events to, tagged with `call_id`. `stats_interval` controls cadence
+/// (use `std::time::Duration::ZERO` to disable sampling for tests that
+/// don't care about it).
+#[allow(clippy::too_many_arguments)]
 pub(crate) fn start_pipeline(
     codec: Codec,
     rtp_socket: Arc<UdpSocket>,
     remote_rtp: SocketAddr,
     mut capture: Box<dyn AudioSource>,
     mut playback: Box<dyn AudioSink>,
+    stats_sink: Option<StatsSink>,
 ) -> Result<MediaPipeline, AnvilError> {
     let send_driver =
         make_driver(codec).ok_or_else(|| AnvilError::Codec(format!("no driver for {codec:?}")))?;
@@ -299,8 +422,11 @@ pub(crate) fn start_pipeline(
     let ts_per_frame = send_spec.rtp_timestamp_per_frame();
     let payload_type = send_spec.payload_type;
 
+    let metrics = MediaMetrics::new(send_spec.rtp_clock_rate);
+
     // Send task: pull frames from the mic, encode, RTP-wrap, send.
     let sock_send = Arc::clone(&rtp_socket);
+    let metrics_send = Arc::clone(&metrics);
     let send_task = tokio::spawn(async move {
         let mut driver = send_driver;
         let mut seq = initial_seq;
@@ -333,8 +459,9 @@ pub(crate) fn start_pipeline(
             );
             let bytes = packet.to_bytes();
 
-            if let Err(e) = sock_send.send_to(&bytes, remote_rtp).await {
-                tracing::warn!(%e, %remote_rtp, "rtp send failed");
+            match sock_send.send_to(&bytes, remote_rtp).await {
+                Ok(_) => metrics_send.on_rtp_tx(bytes.len()),
+                Err(e) => tracing::warn!(%e, %remote_rtp, "rtp send failed"),
             }
 
             seq = seq.wrapping_add(1);
@@ -349,6 +476,7 @@ pub(crate) fn start_pipeline(
     let sock_recv = Arc::clone(&rtp_socket);
     let recv_pt = recv_spec.payload_type;
     let recv_fmt = recv_spec.audio_format();
+    let metrics_recv = Arc::clone(&metrics);
     let recv_task = tokio::spawn(async move {
         let mut driver = recv_driver;
         let mut buf = vec![0u8; 2048];
@@ -360,6 +488,7 @@ pub(crate) fn start_pipeline(
                     break;
                 }
             };
+            let arrival = Instant::now();
 
             let data = Bytes::copy_from_slice(&buf[..len]);
             let packet = match RtpPacket::parse(data) {
@@ -379,6 +508,13 @@ pub(crate) fn start_pipeline(
                 continue;
             }
 
+            metrics_recv.on_rtp_rx(
+                packet.header.sequence_number,
+                packet.header.timestamp,
+                len,
+                arrival,
+            );
+
             let samples = driver.decode(&packet.payload);
             let frame = AudioFrame {
                 samples,
@@ -392,10 +528,93 @@ pub(crate) fn start_pipeline(
         }
     });
 
+    // Stats task: periodically snapshot the counters and emit MediaStats.
+    let stats_task = {
+        let metrics = Arc::clone(&metrics);
+        let clock = send_spec.rtp_clock_rate;
+        tokio::spawn(async move {
+            let Some(sink) = stats_sink else { return };
+            let mut ticker = tokio::time::interval(sink.interval);
+            ticker.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+            // First tick fires immediately — skip it so we report on real
+            // elapsed intervals.
+            ticker.tick().await;
+
+            let mut prev_bytes_tx = 0u64;
+            let mut prev_bytes_rx = 0u64;
+            let mut prev_wall = Instant::now();
+
+            loop {
+                ticker.tick().await;
+                let now = Instant::now();
+                let elapsed = now.saturating_duration_since(prev_wall).as_secs_f32().max(0.001);
+                prev_wall = now;
+
+                let bytes_tx = metrics.bytes_tx.load(Ordering::Relaxed);
+                let bytes_rx = metrics.bytes_rx.load(Ordering::Relaxed);
+                let send_kbps = (bytes_tx.saturating_sub(prev_bytes_tx) as f32 * 8.0)
+                    / elapsed
+                    / 1000.0;
+                let recv_kbps = (bytes_rx.saturating_sub(prev_bytes_rx) as f32 * 8.0)
+                    / elapsed
+                    / 1000.0;
+                prev_bytes_tx = bytes_tx;
+                prev_bytes_rx = bytes_rx;
+
+                let jitter_ticks = metrics.jitter.lock().current;
+                let jitter_ms = jitter_ticks as f32 * 1000.0 / clock as f32;
+
+                let (expected, received) = {
+                    let s = metrics.seq.lock();
+                    let expected = match s.first {
+                        Some(first) => {
+                            (s.cycles as u64) * 65_536
+                                + (s.highest as u64).wrapping_sub(first as u64)
+                                + 1
+                        }
+                        None => 0,
+                    };
+                    (expected, s.received as u64)
+                };
+                let packet_loss_pct = if expected == 0 {
+                    0.0
+                } else {
+                    let lost = expected.saturating_sub(received);
+                    (lost as f32 * 100.0) / expected as f32
+                };
+
+                let stats = crate::event::MediaStats {
+                    codec: sink.codec,
+                    jitter_ms,
+                    packet_loss_pct,
+                    rtt_ms: None, // RTT needs RTCP — Phase 2 later milestone.
+                    recv_kbps,
+                    send_kbps,
+                };
+                // Drop silently if the event stream is full; stats are
+                // strictly advisory.
+                let _ = sink
+                    .events
+                    .send(crate::event::Event::MediaStats { call: sink.call, stats })
+                    .await;
+            }
+        })
+    };
+
     Ok(MediaPipeline {
         send_task,
         recv_task,
+        stats_task,
+        metrics,
     })
+}
+
+/// Sink for periodic `MediaStats` events.
+pub(crate) struct StatsSink {
+    pub call: crate::CallId,
+    pub codec: Codec,
+    pub interval: std::time::Duration,
+    pub events: tokio::sync::mpsc::Sender<crate::event::Event>,
 }
 
 /// Parse the SDP answer body and extract the remote `(host, port)` of the
@@ -568,6 +787,7 @@ mod tests {
                 frames: Arc::clone(&frames_a),
                 peak_rms_q: Arc::clone(&rms_a),
             }),
+            None,
         )
         .expect("pipeline A");
 
@@ -580,6 +800,7 @@ mod tests {
                 frames: Arc::clone(&frames_b),
                 peak_rms_q: Arc::clone(&rms_b),
             }),
+            None,
         )
         .expect("pipeline B");
 

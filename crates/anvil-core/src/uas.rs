@@ -335,7 +335,7 @@ pub(crate) async fn send_answer_and_start_media(
     call: CallId,
     calls: &DashMap<CallId, CallEntry>,
     audio: &Arc<dyn AudioHost>,
-    _events: &mpsc::Sender<Event>,
+    events: &mpsc::Sender<Event>,
 ) -> Result<Codec, crate::error::AnvilError> {
     let (server_handle, answer_response, dialog, rtp_socket, offer_body) = {
         let mut entry = calls
@@ -369,7 +369,7 @@ pub(crate) async fn send_answer_and_start_media(
     // first RTP packet lands we already have a socket reading it. Losing the
     // first few packets isn't audible but is avoidable.
     let pipeline = if let Some(remote) = remote {
-        start_media_inbound(codec, audio, rtp_socket, remote).await
+        start_media_inbound(call, codec, audio, rtp_socket, remote, events.clone()).await
     } else {
         tracing::warn!("no remote RTP address in offer; answering without media");
         None
@@ -419,13 +419,21 @@ pub(crate) async fn reject_inbound(
 }
 
 async fn start_media_inbound(
+    call: CallId,
     codec: Codec,
     audio: &Arc<dyn AudioHost>,
     rtp_socket: Arc<UdpSocket>,
     remote: std::net::SocketAddr,
+    events: mpsc::Sender<Event>,
 ) -> Option<media::MediaPipeline> {
     let fmt = media::CodecSpec::for_codec(codec).audio_format();
     let capture = audio.make_capture(fmt).ok()?;
     let playback = audio.make_playback(fmt).ok()?;
-    media::start_pipeline(codec, rtp_socket, remote, capture, playback).ok()
+    let sink = media::StatsSink {
+        call,
+        codec,
+        interval: std::time::Duration::from_secs(2),
+        events,
+    };
+    media::start_pipeline(codec, rtp_socket, remote, capture, playback, Some(sink)).ok()
 }
