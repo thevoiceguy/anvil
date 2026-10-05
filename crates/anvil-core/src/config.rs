@@ -10,7 +10,11 @@ use crate::brand::{BrandCache, BrandCredential, BrandProvider};
 
 /// SIP transport protocol.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-pub enum Transport { Udp, Tcp, Tls }
+pub enum Transport {
+    Udp,
+    Tcp,
+    Tls,
+}
 
 /// SIP account / registrar credentials.
 #[derive(Debug, Clone)]
@@ -22,6 +26,8 @@ pub struct AccountConfig {
     pub username: String,
     pub password: String,
     pub transport: Transport,
+    /// A SIP URI every out-of-dialog request is sent through, e.g.
+    /// `sip:pbx.example.com:5060;transport=tcp` (RFC 3261 §8.1.2).
     pub outbound_proxy: Option<String>,
     pub stun: Option<String>,
     pub register_expires: Duration,
@@ -42,15 +48,28 @@ pub struct AccountConfig {
 
 /// DTMF transmission mode.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum DtmfMode { Rfc2833, Inband, Both }
+pub enum DtmfMode {
+    Rfc2833,
+    Inband,
+    Both,
+}
 
 /// SRTP policy.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum SrtpMode { Off, Optional, Required }
+pub enum SrtpMode {
+    Off,
+    Optional,
+    Required,
+}
 
 /// Audio codec identifier.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub enum Codec { Pcmu, Pcma, G722, Opus }
+pub enum Codec {
+    Pcmu,
+    Pcma,
+    G722,
+    Opus,
+}
 
 /// Media-plane configuration.
 #[derive(Debug, Clone)]
@@ -78,7 +97,7 @@ impl Default for MediaConfig {
 /// fetch branding and hosts render with their built-in theme.
 pub struct BrandConfig {
     pub provider: Option<Box<dyn BrandProvider>>,
-    pub cache:    Option<Box<dyn BrandCache>>,
+    pub cache: Option<Box<dyn BrandCache>>,
     /// How to authenticate to the provisioning endpoint. Typically derived
     /// from the account credentials, but exposed separately because some
     /// deployments hand out a short-lived token after SIP auth.
@@ -87,14 +106,18 @@ pub struct BrandConfig {
 
 impl Default for BrandConfig {
     fn default() -> Self {
-        Self { provider: None, cache: None, credential: BrandCredential::None }
+        Self {
+            provider: None,
+            cache: None,
+            credential: BrandCredential::None,
+        }
     }
 }
 
 /// Top-level configuration.
 pub struct AnvilConfig {
     pub account: AccountConfig,
-    pub media:   MediaConfig,
-    pub audio:   Box<dyn AudioHost>,
-    pub brand:   BrandConfig,
+    pub media: MediaConfig,
+    pub audio: Box<dyn AudioHost>,
+    pub brand: BrandConfig,
 }

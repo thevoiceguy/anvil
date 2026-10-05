@@ -2,7 +2,7 @@
 //! `assets/` directory keyed by sha256 so multiple tenants can share common
 //! assets (e.g. the FCP default ringtone). Phase 2 target — stub today.
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use async_trait::async_trait;
 
@@ -17,13 +17,22 @@ pub struct FsBrandCache {
 impl FsBrandCache {
     /// Cache in the default per-user location.
     pub fn new() -> Result<Self, AnvilError> {
-        let base = dirs::cache_dir()
-            .ok_or_else(|| AnvilError::Config("no platform cache dir".into()))?;
-        Ok(Self { root: base.join("anvil").join("brand") })
+        let base =
+            dirs::cache_dir().ok_or_else(|| AnvilError::Config("no platform cache dir".into()))?;
+        Ok(Self {
+            root: base.join("anvil").join("brand"),
+        })
     }
 
     /// Cache in an explicit location. Useful for tests or portable installs.
-    pub fn at(root: impl Into<PathBuf>) -> Self { Self { root: root.into() } }
+    pub fn at(root: impl Into<PathBuf>) -> Self {
+        Self { root: root.into() }
+    }
+
+    /// Where the cache lives.
+    pub fn root(&self) -> &Path {
+        &self.root
+    }
 }
 
 #[async_trait]

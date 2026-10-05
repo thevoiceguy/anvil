@@ -5,8 +5,10 @@
 //! `TlsPool`, which keeps connections alive (RFC 5626 flow re-use) and
 //! routes inbound responses on the same socket back into our packet pump.
 //!
-//! No TCP yet (rare in modern SIP deployments) and no listening TLS
-//! socket — the softphone is a client, not a server.
+//! TCP listens on the UDP socket's port, so a server may send a request too
+//! big for UDP (RFC 3261 §18.1.1) over TCP, and outbound TCP goes through a
+//! connection pool. A request that arrived on a connection is answered on
+//! it. No listening TLS socket — the softphone is a client, not a server.
 
 use std::sync::Arc;
 
@@ -15,8 +17,8 @@ use async_trait::async_trait;
 use bytes::Bytes;
 use sip_transaction::{TransportContext, TransportDispatcher, TransportKind};
 use sip_transport::{
-    pool::ConnectionPool, run_udp, send_udp, DefaultTransportPolicy, InboundPacket,
-    TransportPolicy,
+    pool::ConnectionPool, run_tcp, run_udp, send_stream, send_udp, DefaultTransportPolicy,
+    InboundPacket, TransportPolicy,
 };
 use tokio::{net::UdpSocket, sync::mpsc};
 
@@ -70,8 +72,9 @@ fn install_default_crypto_provider() {
     });
 }
 
-/// Bring up the local UDP socket and the optional TLS pool, return a
-/// dispatcher that handles both. Inbound packets from either transport
+/// Bring up the local UDP socket, the TCP listener and pool, and the
+/// optional TLS pool; return a dispatcher that handles them all, and the
+/// TCP pool for the transaction manager to share (it sends TCP itself). Inbound packets from either transport
 /// land on the returned `mpsc::Receiver<InboundPacket>` so the packet
 /// pump only has to read one channel.
 pub(crate) async fn start_transports(
@@ -81,12 +84,26 @@ pub(crate) async fn start_transports(
 ) -> Result<(
     Arc<dyn TransportDispatcher>,
     Arc<UdpSocket>,
+    Arc<ConnectionPool>,
     mpsc::Receiver<InboundPacket>,
 )> {
     let (tx, rx) = mpsc::channel::<InboundPacket>(1024);
 
     let udp_socket = Arc::new(UdpSocket::bind(bind_addr).await?);
     let tcp_pool = Arc::new(ConnectionPool::new());
+    // Responses on connections we open come back to the same pump.
+    tcp_pool.set_inbound_tx(tx.clone()).await;
+
+    // TCP on the same address and port as UDP.
+    let tcp_bind = udp_socket.local_addr()?.to_string();
+    tokio::spawn({
+        let tx = tx.clone();
+        async move {
+            if let Err(e) = run_tcp(&tcp_bind, tx).await {
+                tracing::warn!(%e, bind = %tcp_bind, "TCP listener exited");
+            }
+        }
+    });
 
     #[cfg(feature = "tls")]
     let tls_pool: Option<Arc<TlsPool>> = if tls_config.is_some() {
@@ -102,7 +119,7 @@ pub(crate) async fn start_transports(
     let dispatcher: Arc<dyn TransportDispatcher> = Arc::new(AnvilTransportDispatcher {
         udp_socket: Arc::clone(&udp_socket),
         policy: Arc::new(DefaultTransportPolicy::default()),
-        tcp_pool,
+        tcp_pool: Arc::clone(&tcp_pool),
         #[cfg(feature = "tls")]
         tls_pool,
         #[cfg(feature = "tls")]
@@ -119,13 +136,12 @@ pub(crate) async fn start_transports(
         }
     });
 
-    Ok((dispatcher, udp_socket, rx))
+    Ok((dispatcher, udp_socket, tcp_pool, rx))
 }
 
 struct AnvilTransportDispatcher {
     udp_socket: Arc<UdpSocket>,
     policy: Arc<dyn TransportPolicy>,
-    #[allow(dead_code)] // TCP is reserved for future use
     tcp_pool: Arc<ConnectionPool>,
     #[cfg(feature = "tls")]
     tls_pool: Option<Arc<TlsPool>>,
@@ -145,6 +161,16 @@ impl TransportDispatcher for AnvilTransportDispatcher {
                 TransportKind::Tls | TransportKind::Wss | TransportKind::TlsSctp
             ),
         );
+
+        // On the connection the request came in on, if it did.
+        if let Some(stream) = ctx.stream() {
+            if matches!(
+                selected,
+                sip_transport::TransportKind::Tcp | sip_transport::TransportKind::Tls
+            ) {
+                return send_stream(selected, stream, payload).await;
+            }
+        }
 
         let target = match selected {
             sip_transport::TransportKind::Tcp | sip_transport::TransportKind::Tls
@@ -180,16 +206,17 @@ impl TransportDispatcher for AnvilTransportDispatcher {
                 pool.send_tls(ctx.peer(), server_name, cfg, payload).await?;
                 Ok(())
             }
-            sip_transport::TransportKind::Tcp
-            | sip_transport::TransportKind::Ws
+            sip_transport::TransportKind::Tcp => {
+                self.tcp_pool.send_tcp(ctx.peer(), payload).await?;
+                Ok(())
+            }
+            sip_transport::TransportKind::Ws
             | sip_transport::TransportKind::Wss
             | sip_transport::TransportKind::Sctp
-            | sip_transport::TransportKind::TlsSctp => {
-                Err(anyhow!(
-                    "transport {:?} not implemented in anvil-core",
-                    target
-                ))
-            }
+            | sip_transport::TransportKind::TlsSctp => Err(anyhow!(
+                "transport {:?} not implemented in anvil-core",
+                target
+            )),
             #[cfg(not(feature = "tls"))]
             sip_transport::TransportKind::Tls => Err(anyhow!(
                 "TLS dispatch requested but anvil-core was built without the `tls` feature"

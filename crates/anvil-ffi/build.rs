@@ -19,8 +19,7 @@ fn main() {
     // Skip header generation if cbindgen errors out (e.g. cross-compiling
     // without the host's libclang). Build still proceeds; the header is a
     // convenience artifact, not a build dependency.
-    let config = cbindgen::Config::from_file(crate_dir.join("cbindgen.toml"))
-        .unwrap_or_default();
+    let config = cbindgen::Config::from_file(crate_dir.join("cbindgen.toml")).unwrap_or_default();
 
     match cbindgen::Builder::new()
         .with_crate(&crate_dir)

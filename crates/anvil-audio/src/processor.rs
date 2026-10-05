@@ -79,8 +79,7 @@ impl AudioProcessor for SimpleAgc {
         if frame_peak > self.smoothed_peak {
             self.smoothed_peak = frame_peak;
         } else {
-            self.smoothed_peak = self.smoothed_peak * self.decay
-                + frame_peak * (1.0 - self.decay);
+            self.smoothed_peak = self.smoothed_peak * self.decay + frame_peak * (1.0 - self.decay);
         }
 
         // Compute target gain. Floor the smoothed peak so we don't divide
@@ -167,8 +166,7 @@ mod tests {
             samples: (0..n)
                 .map(|i| {
                     let t = (i as f32) / 8000.0;
-                    let s =
-                        (2.0 * std::f32::consts::PI * 1000.0 * t).sin() * scale;
+                    let s = (2.0 * std::f32::consts::PI * 1000.0 * t).sin() * scale;
                     s as i16
                 })
                 .collect(),

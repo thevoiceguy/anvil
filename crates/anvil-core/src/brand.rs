@@ -20,20 +20,25 @@ use crate::error::AnvilError;
 
 /// RGBA color, components 0–255.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-pub struct Rgba { pub r: u8, pub g: u8, pub b: u8, pub a: u8 }
+pub struct Rgba {
+    pub r: u8,
+    pub g: u8,
+    pub b: u8,
+    pub a: u8,
+}
 
 /// Color tokens a UI needs to theme the shell. Modelled loosely on Material 3
 /// so Flutter / Jetpack hosts can map directly; native hosts (SwiftUI, AppKit)
 /// pick the subset they use.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct BrandColors {
-    pub primary:     Rgba,
-    pub accent:      Rgba,
-    pub background:  Rgba,
-    pub surface:     Rgba,
-    pub on_primary:  Rgba,
-    pub on_surface:  Rgba,
-    pub error:       Rgba,
+    pub primary: Rgba,
+    pub accent: Rgba,
+    pub background: Rgba,
+    pub surface: Rgba,
+    pub on_primary: Rgba,
+    pub on_surface: Rgba,
+    pub error: Rgba,
 }
 
 /// A binary asset (logo, icon, ringtone) shipped with a brand profile.
@@ -43,12 +48,12 @@ pub struct BrandColors {
 /// source of truth.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct BrandAsset {
-    pub url:  String,
+    pub url: String,
     pub mime: String,
     pub sha256: String,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub bytes: Vec<u8>,
-    pub width:  Option<u32>,
+    pub width: Option<u32>,
     pub height: Option<u32>,
 }
 
@@ -110,7 +115,7 @@ pub struct Ringtone {
 pub struct BrandLinks {
     pub support: Option<String>,
     pub privacy: Option<String>,
-    pub terms:   Option<String>,
+    pub terms: Option<String>,
     pub website: Option<String>,
 }
 
@@ -142,7 +147,7 @@ pub enum BrandCredential {
 
 /// Result of a fetch. `NotModified` preserves the cached profile.
 pub enum BrandFetchOutcome {
-    Updated(BrandProfile),
+    Updated(Box<BrandProfile>),
     NotModified,
 }
 

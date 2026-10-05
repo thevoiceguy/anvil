@@ -73,7 +73,11 @@ impl ToneHost {
 
 impl AudioHost for ToneHost {
     fn make_capture(&self, fmt: AudioFormat) -> Result<Box<dyn AudioSource>, AnvilError> {
-        Ok(Box::new(ToneCapture::new(fmt, self.frequency_hz, self.amplitude)))
+        Ok(Box::new(ToneCapture::new(
+            fmt,
+            self.frequency_hz,
+            self.amplitude,
+        )))
     }
 
     fn make_playback(&self, fmt: AudioFormat) -> Result<Box<dyn AudioSink>, AnvilError> {
@@ -169,19 +173,13 @@ impl AudioSink for ToneSink {
     async fn write_frame(&mut self, frame: &AudioFrame) -> Result<(), AnvilError> {
         let _ = self.fmt;
         let n = frame.samples.len().max(1) as f64;
-        let sum_sq: f64 = frame
-            .samples
-            .iter()
-            .map(|&s| (s as f64) * (s as f64))
-            .sum();
+        let sum_sq: f64 = frame.samples.iter().map(|&s| (s as f64) * (s as f64)).sum();
         let rms = (sum_sq / n).sqrt() as f32;
         let q = (rms * 1000.0 / i16::MAX as f32 * 1000.0) as u64;
 
         self.stats.frames_rx.fetch_add(1, Ordering::Relaxed);
         self.stats.last_rms_q.store(q, Ordering::Relaxed);
-        self.stats
-            .peak_rms_q
-            .fetch_max(q, Ordering::Relaxed);
+        self.stats.peak_rms_q.fetch_max(q, Ordering::Relaxed);
         Ok(())
     }
 }

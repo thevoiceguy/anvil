@@ -72,9 +72,7 @@ impl AudioHost for CpalHost {
         let host = cpal::default_host();
         let mut out = Vec::new();
         if let Ok(inputs) = host.input_devices() {
-            let default_name = host
-                .default_input_device()
-                .and_then(|d| d.name().ok());
+            let default_name = host.default_input_device().and_then(|d| d.name().ok());
             for dev in inputs {
                 if let Ok(name) = dev.name() {
                     out.push(DeviceInfo {
@@ -87,9 +85,7 @@ impl AudioHost for CpalHost {
             }
         }
         if let Ok(outputs) = host.output_devices() {
-            let default_name = host
-                .default_output_device()
-                .and_then(|d| d.name().ok());
+            let default_name = host.default_output_device().and_then(|d| d.name().ok());
             for dev in outputs {
                 if let Ok(name) = dev.name() {
                     out.push(DeviceInfo {
@@ -116,10 +112,7 @@ struct CpalCapture {
 }
 
 impl CpalCapture {
-    fn open(
-        cfg: AudioFormat,
-        processor: Box<dyn AudioProcessor>,
-    ) -> Result<Self, AnvilError> {
+    fn open(cfg: AudioFormat, processor: Box<dyn AudioProcessor>) -> Result<Self, AnvilError> {
         // 8 frames of headroom; beyond that we drop to avoid unbounded memory
         // growth if the RTP send task stalls.
         let (frame_tx, frame_rx) = mpsc::channel::<AudioFrame>(8);
@@ -198,18 +191,22 @@ fn run_capture(cfg: AudioFormat, frame_tx: mpsc::Sender<AudioFrame>) {
         let buf = Arc::clone(&buf_for_cb);
         move |data: &[f32], _info: &cpal::InputCallbackInfo| {
             let mono = downmix_f32(data, channels);
-            push_frames(&mut resampler, mono, &buf, frame_samples, fmt_for_frames, &tx);
+            push_frames(
+                &mut resampler,
+                mono,
+                &buf,
+                frame_samples,
+                fmt_for_frames,
+                &tx,
+            );
         }
     };
 
     // cpal can deliver samples in several formats depending on the driver.
     let stream = match sample_format {
-        SampleFormat::F32 => device.build_input_stream(
-            &stream_config,
-            callback_f32,
-            report_input_err,
-            None,
-        ),
+        SampleFormat::F32 => {
+            device.build_input_stream(&stream_config, callback_f32, report_input_err, None)
+        }
         SampleFormat::I16 => {
             let tx = tx.clone();
             let buf = Arc::clone(&buf_for_cb);
@@ -249,10 +246,7 @@ fn run_capture(cfg: AudioFormat, frame_tx: mpsc::Sender<AudioFrame>) {
                     let mono: Vec<i16> = data
                         .chunks(channels as usize)
                         .map(|frame| {
-                            let sum: i32 = frame
-                                .iter()
-                                .map(|&s| (s as i32) - 32768)
-                                .sum();
+                            let sum: i32 = frame.iter().map(|&s| (s as i32) - 32768).sum();
                             (sum / channels as i32).clamp(-32768, 32767) as i16
                         })
                         .collect();
@@ -312,7 +306,10 @@ impl CpalPlayback {
             .spawn(move || run_playback(cfg, frame_rx))
             .map_err(|e| AnvilError::AudioDevice(format!("spawn playback thread: {e}")))?;
 
-        Ok(Self { frame_tx, _worker: worker })
+        Ok(Self {
+            frame_tx,
+            _worker: worker,
+        })
     }
 }
 
@@ -373,12 +370,9 @@ fn run_playback(cfg: AudioFormat, mut frame_rx: mpsc::Receiver<AudioFrame>) {
     };
 
     let stream = match sample_format {
-        SampleFormat::F32 => device.build_output_stream(
-            &stream_config,
-            callback_f32,
-            report_output_err,
-            None,
-        ),
+        SampleFormat::F32 => {
+            device.build_output_stream(&stream_config, callback_f32, report_output_err, None)
+        }
         SampleFormat::I16 => {
             let buf = Arc::clone(&out_buf);
             device.build_output_stream(
@@ -504,7 +498,13 @@ fn push_frames(
     guard.extend(resampled);
     while guard.len() >= frame_samples {
         let frame: Vec<i16> = guard.drain(..frame_samples).collect();
-        if tx.try_send(AudioFrame { samples: frame, format: fmt }).is_err() {
+        if tx
+            .try_send(AudioFrame {
+                samples: frame,
+                format: fmt,
+            })
+            .is_err()
+        {
             // Consumer stalled; drop the frame to keep moving forward.
             // A warning would spam the log.
         }

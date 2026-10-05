@@ -2,9 +2,7 @@
 
 use async_trait::async_trait;
 
-use anvil_core::{
-    AnvilError, BrandFetchOutcome, BrandProvider, BrandRequest,
-};
+use anvil_core::{AnvilError, BrandFetchOutcome, BrandProvider, BrandRequest};
 
 /// Fetches brand profiles over HTTPS from an FCP provisioning endpoint.
 ///
@@ -25,6 +23,8 @@ impl HttpBrandProvider {
 #[async_trait]
 impl BrandProvider for HttpBrandProvider {
     async fn fetch(&self, _req: BrandRequest) -> Result<BrandFetchOutcome, AnvilError> {
-        Err(AnvilError::Internal("HttpBrandProvider::fetch not yet implemented".into()))
+        Err(AnvilError::Internal(
+            "HttpBrandProvider::fetch not yet implemented".into(),
+        ))
     }
 }

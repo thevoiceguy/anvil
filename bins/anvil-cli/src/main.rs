@@ -82,6 +82,12 @@ struct Cli {
     #[arg(long)]
     tls_ca: Option<std::path::PathBuf>,
 
+    /// Outbound proxy every out-of-dialog request goes through, e.g.
+    /// `sip:pbx.example.com:5060` — how an account in a domain reaches its
+    /// provider's server (FCP's call manager).
+    #[arg(long)]
+    outbound_proxy: Option<String>,
+
     /// STUN server (`host:port`) for public-IP discovery. Result populates
     /// the `c=` line of outbound SDP. Example: `stun.l.google.com:19302`.
     #[arg(long)]
@@ -115,32 +121,35 @@ async fn main() -> Result<()> {
         registrar: cli.registrar.clone(),
         username: cli.username.clone(),
         password: cli.password.clone(),
-        transport: if cli.tls { Transport::Tls } else { Transport::Udp },
-        outbound_proxy: None,
+        transport: if cli.tls {
+            Transport::Tls
+        } else {
+            Transport::Udp
+        },
+        outbound_proxy: cli.outbound_proxy.clone(),
         stun: cli.stun.clone(),
         register_expires: Duration::from_secs(3600),
-        user_agent: format!("Anvil/{} (phase1-m3)", env!("CARGO_PKG_VERSION")),
+        user_agent: format!("Anvil/{}", env!("CARGO_PKG_VERSION")),
         bind_addr: cli.bind.clone(),
         tls_extra_ca_pem,
         provisioning_url: None,
     };
 
-    let (audio, tone_stats): (Box<dyn anvil_core::audio::AudioHost>, Option<Arc<ToneStats>>) =
-        if cli.tone {
-            tracing::info!("using synthetic tone audio host");
-            let host = ToneHost::new();
-            let stats = host.stats();
-            (Box::new(host), Some(stats))
-        } else {
-            let mut host = CpalHost::new()
-                .map_err(|e| anyhow::anyhow!("CpalHost init failed: {e}"))?;
-            if cli.agc {
-                host = host.with_capture_processor(|| {
-                    Box::new(anvil_audio::SimpleAgc::new())
-                });
-            }
-            (Box::new(host), None)
-        };
+    let (audio, tone_stats): (
+        Box<dyn anvil_core::audio::AudioHost>,
+        Option<Arc<ToneStats>>,
+    ) = if cli.tone {
+        tracing::info!("using synthetic tone audio host");
+        let host = ToneHost::new();
+        let stats = host.stats();
+        (Box::new(host), Some(stats))
+    } else {
+        let mut host = CpalHost::new().map_err(|e| anyhow::anyhow!("CpalHost init failed: {e}"))?;
+        if cli.agc {
+            host = host.with_capture_processor(|| Box::new(anvil_audio::SimpleAgc::new()));
+        }
+        (Box::new(host), None)
+    };
 
     let cfg = AnvilConfig {
         account,
@@ -298,4 +307,3 @@ async fn run(cli: Cli, cfg: AnvilConfig, tone_stats: Option<Arc<ToneStats>>) -> 
     let _ = cli; // silence unused when there are no more flags to read
     Ok(())
 }
-

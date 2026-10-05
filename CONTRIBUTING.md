@@ -14,8 +14,8 @@ Thanks for your interest. Anvil is in pre-alpha; the design is still in motion.
 
 ```bash
 cargo fmt --all
-cargo clippy --all-targets -- -D warnings
-cargo test --workspace
+cargo clippy --workspace --all-targets -- -D warnings
+cargo test --workspace   # see CLAUDE.md for the tests against a running FCP
 cargo run  -p anvil-cli
 ```
 

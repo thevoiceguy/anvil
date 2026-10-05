@@ -180,7 +180,11 @@ pub(crate) fn dispatch(slot: CallbackSlot, event: &Event) {
                 ev.reason = push_cstr(&mut keep_alive, s);
             }
         }
-        Event::IncomingCall { call, from, display_name } => {
+        Event::IncomingCall {
+            call,
+            from,
+            display_name,
+        } => {
             ev.kind = AnvilEventKind::IncomingCall;
             ev.call_id = call.0;
             ev.from = push_cstr(&mut keep_alive, from);
@@ -239,7 +243,10 @@ pub(crate) fn dispatch(slot: CallbackSlot, event: &Event) {
             // colour tokens, link list). Out of scope for M2; surface as a
             // generic Error-with-message until P3-M5/M6.
             ev.kind = AnvilEventKind::Error;
-            ev.reason = push_cstr(&mut keep_alive, "BrandUpdated event not yet exposed via FFI");
+            ev.reason = push_cstr(
+                &mut keep_alive,
+                "BrandUpdated event not yet exposed via FFI",
+            );
         }
         // `Event` is `#[non_exhaustive]`; cover any future variants
         // gracefully by emitting an Error rather than panicking.

@@ -28,13 +28,12 @@ use crate::config::Codec;
 use crate::error::AnvilError;
 
 /// Handles to the three tasks driving a single call's media (send, receive,
-/// stats sampler) plus the atomic counters they share. Dropped (and aborted)
+/// stats sampler). Dropped (and aborted)
 /// when the call ends.
 pub(crate) struct MediaPipeline {
     send_task: JoinHandle<()>,
     recv_task: JoinHandle<()>,
     stats_task: JoinHandle<()>,
-    pub(crate) metrics: Arc<MediaMetrics>,
     /// Queue for outgoing DTMF. `Anvil::send_dtmf` pushes; the send task
     /// interleaves them into the RTP stream as RFC 2833 event packets.
     pub(crate) dtmf_tx: mpsc::Sender<char>,
@@ -245,7 +244,9 @@ impl HoldState {
 /// the next attribute's name because its `take_till` doesn't stop on
 /// newlines. Line-by-line scanning is tiny here and sidesteps the issue.
 pub(crate) fn extract_direction(body: &[u8]) -> MediaDirection {
-    let Ok(text) = std::str::from_utf8(body) else { return MediaDirection::Sendrecv };
+    let Ok(text) = std::str::from_utf8(body) else {
+        return MediaDirection::Sendrecv;
+    };
 
     let mut in_audio_media = false;
     for line in text.lines() {
@@ -254,10 +255,14 @@ pub(crate) fn extract_direction(body: &[u8]) -> MediaDirection {
             in_audio_media = rest.starts_with("audio ");
             continue;
         }
-        if !in_audio_media { continue }
+        if !in_audio_media {
+            continue;
+        }
         // RFC 4566 direction attributes are Property form: `a=<name>` with
         // no `:<value>`.
-        let Some(attr) = line.strip_prefix("a=") else { continue };
+        let Some(attr) = line.strip_prefix("a=") else {
+            continue;
+        };
         match attr.trim() {
             "sendrecv" => return MediaDirection::Sendrecv,
             "sendonly" => return MediaDirection::Sendonly,
@@ -282,7 +287,6 @@ const DTMF_CLOCK_RATE: u32 = 8000;
 /// Static info about a codec: RTP payload type and clock, PCM sample rate.
 #[derive(Debug, Clone, Copy)]
 pub(crate) struct CodecSpec {
-    pub codec: Codec,
     /// RTP payload type as it appears in the m= line and in RTP packets.
     pub payload_type: u8,
     /// RTP timestamp clock rate (Hz). Equals PCM `sample_rate` for every codec
@@ -296,13 +300,29 @@ pub(crate) struct CodecSpec {
 impl CodecSpec {
     pub(crate) fn for_codec(codec: Codec) -> Self {
         match codec {
-            Codec::Pcmu => Self { codec, payload_type: 0, rtp_clock_rate: 8000, sample_rate: 8000 },
-            Codec::Pcma => Self { codec, payload_type: 8, rtp_clock_rate: 8000, sample_rate: 8000 },
-            Codec::G722 => Self { codec, payload_type: 9, rtp_clock_rate: 8000, sample_rate: 16000 },
+            Codec::Pcmu => Self {
+                payload_type: 0,
+                rtp_clock_rate: 8000,
+                sample_rate: 8000,
+            },
+            Codec::Pcma => Self {
+                payload_type: 8,
+                rtp_clock_rate: 8000,
+                sample_rate: 8000,
+            },
+            Codec::G722 => Self {
+                payload_type: 9,
+                rtp_clock_rate: 8000,
+                sample_rate: 16000,
+            },
             // Opus arrives with P2-M3. Slot reserved so sdp_offer_codecs
             // below compiles exhaustively, but start_pipeline will reject it
             // until the driver exists.
-            Codec::Opus => Self { codec, payload_type: 111, rtp_clock_rate: 48000, sample_rate: 48000 },
+            Codec::Opus => Self {
+                payload_type: 111,
+                rtp_clock_rate: 48000,
+                sample_rate: 48000,
+            },
         }
     }
 
@@ -326,11 +346,6 @@ impl CodecSpec {
     }
 }
 
-/// Kept for backward compatibility; returns the G.711 µ-law format.
-pub(crate) fn g711_format() -> AudioFormat {
-    CodecSpec::for_codec(Codec::Pcmu).audio_format()
-}
-
 /// Codec plugin — encodes PCM-16 frames to the RTP payload format, decodes
 /// them back. G.711 implementations are stateless; G.722 is stateful.
 trait CodecDriver: Send {
@@ -341,7 +356,9 @@ trait CodecDriver: Send {
 
 struct PcmuDriver;
 impl CodecDriver for PcmuDriver {
-    fn spec(&self) -> CodecSpec { CodecSpec::for_codec(Codec::Pcmu) }
+    fn spec(&self) -> CodecSpec {
+        CodecSpec::for_codec(Codec::Pcmu)
+    }
     fn encode(&mut self, pcm: &[i16]) -> Vec<u8> {
         pcm.iter().map(|&s| g711::encode_ulaw(s)).collect()
     }
@@ -352,7 +369,9 @@ impl CodecDriver for PcmuDriver {
 
 struct PcmaDriver;
 impl CodecDriver for PcmaDriver {
-    fn spec(&self) -> CodecSpec { CodecSpec::for_codec(Codec::Pcma) }
+    fn spec(&self) -> CodecSpec {
+        CodecSpec::for_codec(Codec::Pcma)
+    }
     fn encode(&mut self, pcm: &[i16]) -> Vec<u8> {
         pcm.iter().map(|&s| g711::encode_alaw(s)).collect()
     }
@@ -388,7 +407,9 @@ impl OpusDriver {
 }
 
 impl CodecDriver for OpusDriver {
-    fn spec(&self) -> CodecSpec { CodecSpec::for_codec(Codec::Opus) }
+    fn spec(&self) -> CodecSpec {
+        CodecSpec::for_codec(Codec::Opus)
+    }
 
     fn encode(&mut self, pcm: &[i16]) -> Vec<u8> {
         // 1 275 bytes is libopus's hard max for a 20 ms frame at 48 kHz.
@@ -427,7 +448,9 @@ impl G722DriverImpl {
 }
 
 impl CodecDriver for G722DriverImpl {
-    fn spec(&self) -> CodecSpec { CodecSpec::for_codec(Codec::G722) }
+    fn spec(&self) -> CodecSpec {
+        CodecSpec::for_codec(Codec::G722)
+    }
     fn encode(&mut self, pcm: &[i16]) -> Vec<u8> {
         self.encoder.encode(pcm).unwrap_or_default()
     }
@@ -491,14 +514,19 @@ pub(crate) fn build_sdp(
         .unwrap_or_else(|_| "0".to_string());
 
     let mut media = sip_sdp::MediaDescription::audio(rtp_port)
-        .direction(direction.as_sdp_attr())
+        .with_direction(direction.as_sdp_attr())
         .expect("valid direction");
     for codec in codecs {
         let spec = CodecSpec::for_codec(*codec);
         media = media
             .add_format(spec.payload_type)
             .expect("valid format")
-            .add_rtpmap(spec.payload_type, rtpmap_name(*codec), spec.rtp_clock_rate, None)
+            .add_rtpmap(
+                spec.payload_type,
+                rtpmap_name(*codec),
+                spec.rtp_clock_rate,
+                None,
+            )
             .expect("valid rtpmap");
     }
     // RFC 2833 DTMF. Phase 2 M4 wires up send/receive; advertising it
@@ -551,7 +579,10 @@ pub(crate) fn negotiate_answer_codec(offer: &[u8], prefer: &[Codec]) -> Option<C
     prefer.iter().copied().find(|c| offered.contains(c))
 }
 
-fn codec_from_pt(pt: u8, rtpmaps: &std::collections::HashMap<u8, sip_sdp::RtpMap>) -> Option<Codec> {
+fn codec_from_pt(
+    pt: u8,
+    rtpmaps: &std::collections::HashMap<u8, sip_sdp::RtpMap>,
+) -> Option<Codec> {
     match pt {
         0 => Some(Codec::Pcmu),
         8 => Some(Codec::Pcma),
@@ -700,9 +731,7 @@ pub(crate) fn start_pipeline(
     let recv_fmt = recv_spec.audio_format();
     let metrics_recv = Arc::clone(&metrics);
     let hold_recv = Arc::clone(&hold);
-    let dtmf_events = stats_sink
-        .as_ref()
-        .map(|s| (s.call, s.events.clone()));
+    let dtmf_events = stats_sink.as_ref().map(|s| (s.call, s.events.clone()));
     let recv_task = tokio::spawn(async move {
         let mut driver = recv_driver;
         let mut dtmf_detector = Rfc2833Detector::new(DTMF_CLOCK_RATE);
@@ -740,11 +769,7 @@ pub(crate) fn start_pipeline(
             }
 
             if pt != recv_pt {
-                tracing::debug!(
-                    pt,
-                    want = recv_pt,
-                    "unexpected payload type; ignoring"
-                );
+                tracing::debug!(pt, want = recv_pt, "unexpected payload type; ignoring");
                 continue;
             }
 
@@ -795,17 +820,18 @@ pub(crate) fn start_pipeline(
             loop {
                 ticker.tick().await;
                 let now = Instant::now();
-                let elapsed = now.saturating_duration_since(prev_wall).as_secs_f32().max(0.001);
+                let elapsed = now
+                    .saturating_duration_since(prev_wall)
+                    .as_secs_f32()
+                    .max(0.001);
                 prev_wall = now;
 
                 let bytes_tx = metrics.bytes_tx.load(Ordering::Relaxed);
                 let bytes_rx = metrics.bytes_rx.load(Ordering::Relaxed);
-                let send_kbps = (bytes_tx.saturating_sub(prev_bytes_tx) as f32 * 8.0)
-                    / elapsed
-                    / 1000.0;
-                let recv_kbps = (bytes_rx.saturating_sub(prev_bytes_rx) as f32 * 8.0)
-                    / elapsed
-                    / 1000.0;
+                let send_kbps =
+                    (bytes_tx.saturating_sub(prev_bytes_tx) as f32 * 8.0) / elapsed / 1000.0;
+                let recv_kbps =
+                    (bytes_rx.saturating_sub(prev_bytes_rx) as f32 * 8.0) / elapsed / 1000.0;
                 prev_bytes_tx = bytes_tx;
                 prev_bytes_rx = bytes_rx;
 
@@ -843,7 +869,10 @@ pub(crate) fn start_pipeline(
                 // strictly advisory.
                 let _ = sink
                     .events
-                    .send(crate::event::Event::MediaStats { call: sink.call, stats })
+                    .send(crate::event::Event::MediaStats {
+                        call: sink.call,
+                        stats,
+                    })
                     .await;
             }
         })
@@ -853,7 +882,6 @@ pub(crate) fn start_pipeline(
         send_task,
         recv_task,
         stats_task,
-        metrics,
         dtmf_tx,
         hold,
     })
@@ -870,6 +898,7 @@ pub(crate) fn start_pipeline(
 ///
 /// The 7 packets at 20 ms spacing = 140 ms total per digit, which is well
 /// within RFC 4733's recommendation (≥ 40 ms).
+#[allow(clippy::too_many_arguments)] // one RFC 2833 event's whole context
 async fn send_dtmf_digit(
     ch: char,
     socket: &UdpSocket,
@@ -907,14 +936,7 @@ async fn send_dtmf_digit(
         let is_end_burst = event.is_end();
 
         let payload = Bytes::from(event.to_bytes());
-        let packet = RtpPacket::build(
-            DTMF_PAYLOAD_TYPE,
-            *seq,
-            start_ts,
-            ssrc,
-            payload,
-            is_first,
-        );
+        let packet = RtpPacket::build(DTMF_PAYLOAD_TYPE, *seq, start_ts, ssrc, payload, is_first);
         let bytes = packet.to_bytes();
         match socket.send_to(&bytes, remote).await {
             Ok(_) => metrics.on_rtp_tx(bytes.len()),
@@ -940,16 +962,16 @@ async fn handle_inbound_dtmf(
     packet: &RtpPacket,
     dtmf_events: Option<&(crate::CallId, mpsc::Sender<crate::event::Event>)>,
 ) {
-    let events = match detector
-        .process_with_timestamp(&packet.payload, packet.header.timestamp)
-    {
+    let events = match detector.process_with_timestamp(&packet.payload, packet.header.timestamp) {
         Ok(v) => v,
         Err(e) => {
             tracing::debug!(%e, "RFC 2833 parse failed");
             return;
         }
     };
-    let Some((call, tx)) = dtmf_events else { return };
+    let Some((call, tx)) = dtmf_events else {
+        return;
+    };
     for event in events {
         // Surface only the first End event per digit. RFC 2833 §3.3
         // recommends three identical end packets for reliability, and we
@@ -994,41 +1016,10 @@ pub(crate) fn extract_remote_rtp_addr(body: &[u8]) -> Option<SocketAddr> {
     let port = media.port;
 
     // Prefer media-level c= if present, otherwise session-level.
-    let conn = media
-        .connection
-        .as_ref()
-        .or(sdp.connection.as_ref())?;
+    let conn = media.connection.as_ref().or(sdp.connection.as_ref())?;
     let ip: std::net::IpAddr = conn.connection_address.parse().ok()?;
 
     Some(SocketAddr::new(ip, port))
-}
-
-/// Best-effort codec detection from an SDP offer body. Same rules as the
-/// answer path: first m= format byte, fall back to rtpmap lookup.
-pub(crate) fn extract_codec_from_offer(body: &[u8]) -> Option<crate::config::Codec> {
-    use crate::config::Codec;
-    let text = std::str::from_utf8(body).ok()?;
-    let sdp = sip_sdp::parse::parse_sdp(text).ok()?;
-    let media = sdp
-        .media
-        .iter()
-        .find(|m| m.media_type == sip_sdp::MediaType::Audio)?;
-    let first_pt: u8 = media.formats.first()?.parse().ok()?;
-    match first_pt {
-        0 => Some(Codec::Pcmu),
-        8 => Some(Codec::Pcma),
-        9 => Some(Codec::G722),
-        _ => {
-            let name = media.rtpmaps.get(&first_pt)?.encoding_name.as_str();
-            match name.to_ascii_lowercase().as_str() {
-                "opus" => Some(Codec::Opus),
-                "pcmu" => Some(Codec::Pcmu),
-                "pcma" => Some(Codec::Pcma),
-                "g722" => Some(Codec::G722),
-                _ => None,
-            }
-        }
-    }
 }
 
 #[cfg(test)]
@@ -1052,7 +1043,6 @@ mod tests {
     use crate::error::AnvilError;
 
     const FRAME_MS: u32 = 20;
-    const SAMPLE_RATE: u32 = 8000;
 
     struct ToneSource {
         sample_rate: u32,
@@ -1117,11 +1107,7 @@ mod tests {
         async fn write_frame(&mut self, frame: &AudioFrame) -> Result<(), AnvilError> {
             self.frames.fetch_add(1, Ordering::Relaxed);
             let n = frame.samples.len().max(1) as f64;
-            let sum_sq: f64 = frame
-                .samples
-                .iter()
-                .map(|&s| (s as f64) * (s as f64))
-                .sum();
+            let sum_sq: f64 = frame.samples.iter().map(|&s| (s as f64) * (s as f64)).sum();
             let rms = (sum_sq / n).sqrt() as u64;
             self.peak_rms_q.fetch_max(rms, Ordering::Relaxed);
             Ok(())
@@ -1245,6 +1231,4 @@ mod tests {
     async fn rtp_round_trip_opus() {
         round_trip_for(Codec::Opus, 48000).await;
     }
-
 }
-

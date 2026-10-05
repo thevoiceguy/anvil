@@ -27,4 +27,4 @@ tracing     = { workspace = true }
 parking_lot = { workspace = true }
 cpal        = { workspace = true, optional = true }
 # Resampling from device rate (typically 48 kHz) to G.711 8 kHz.
-forge-resampler = { path = "../../../forge-media/crates/forge-resampler", optional = true }
+forge-resampler = { workspace = true, optional = true }
