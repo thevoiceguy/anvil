@@ -24,7 +24,11 @@ live in FCP: `docs/SOFTPHONE.md` in `thevoiceguy/fcp`. Anvil's phases:
       into an `AccountConfig`, a new SIP password, sign-out); `anvil-cli login`
       / `logout` and runs from the session. The CLI's interactive commands
       move to A3, with the features they drive
-- [ ] **A2** Branding from FCP (`anvil-brand` filled in)
+- [x] **A2** Branding from FCP: `anvil-brand`'s HTTP provider and
+      filesystem cache, the driver in `anvil-core` (cached then fetched,
+      `X-FCP-Provisioning-Url`, hourly, `refresh_brand`, `BrandCleared`),
+      `anvil_fcp::brand_config`, the CLI and the FFI events
+      (`docs/BRANDING.md` §9a)
 - [ ] **A3** Calling features over SIP: MWI, BLF, presence, transfer, park, call waiting
 - [ ] **A4** The app's data: call history, directory, voicemail, settings, live events
 - [ ] **A5** SDES-SRTP, and the cross-repo suite completed

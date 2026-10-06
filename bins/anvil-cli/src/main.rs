@@ -206,17 +206,23 @@ fn open_browser(url: &str) {
         .spawn();
 }
 
-/// The account from the FCP session, refreshed and kept.
-async fn fcp_account(cli: &Cli) -> Result<AccountConfig> {
+/// The account from the FCP session, refreshed and kept, and the tenant's
+/// brand fetched with it.
+async fn fcp_account(cli: &Cli) -> Result<(AccountConfig, BrandConfig)> {
     use anvil_fcp::TokenStore;
     let store = Arc::new(anvil_fcp::FileTokenStore::new(session_path(cli)));
     let session = store.load()?.ok_or_else(|| {
         anyhow::anyhow!("not signed in: run `anvil-cli login <server>` or give --aor")
     })?;
-    let client = anvil_fcp::FcpClient::new(session, Some(store as Arc<dyn TokenStore>));
+    let client = Arc::new(anvil_fcp::FcpClient::new(
+        session,
+        Some(store as Arc<dyn TokenStore>),
+    ));
     let config = client.softphone().await?;
     tracing::info!(aor = %config.account.aor, proxy = ?config.account.outbound_proxy, "account from FCP");
-    Ok(client.account_config(&config).await?)
+    let account = client.account_config(&config).await?;
+    let brand = anvil_fcp::brand_config(Arc::clone(&client), None)?;
+    Ok((account, brand))
 }
 
 #[tokio::main]
@@ -265,31 +271,34 @@ async fn main() -> Result<()> {
         None
     };
 
-    let account = match (&cli.aor, &cli.registrar, &cli.username, &cli.password) {
-        (Some(aor), Some(registrar), Some(username), Some(password)) => AccountConfig {
-            aor: aor.clone(),
-            registrar: registrar.clone(),
-            username: username.clone(),
-            password: password.clone(),
-            transport: if cli.tls {
-                Transport::Tls
-            } else {
-                Transport::Udp
+    let (account, brand) = match (&cli.aor, &cli.registrar, &cli.username, &cli.password) {
+        (Some(aor), Some(registrar), Some(username), Some(password)) => (
+            AccountConfig {
+                aor: aor.clone(),
+                registrar: registrar.clone(),
+                username: username.clone(),
+                password: password.clone(),
+                transport: if cli.tls {
+                    Transport::Tls
+                } else {
+                    Transport::Udp
+                },
+                outbound_proxy: cli.outbound_proxy.clone(),
+                stun: cli.stun.clone(),
+                register_expires: Duration::from_secs(3600),
+                user_agent: format!("Anvil/{}", env!("CARGO_PKG_VERSION")),
+                bind_addr: cli.bind.clone(),
+                tls_extra_ca_pem,
+                provisioning_url: None,
             },
-            outbound_proxy: cli.outbound_proxy.clone(),
-            stun: cli.stun.clone(),
-            register_expires: Duration::from_secs(3600),
-            user_agent: format!("Anvil/{}", env!("CARGO_PKG_VERSION")),
-            bind_addr: cli.bind.clone(),
-            tls_extra_ca_pem,
-            provisioning_url: None,
-        },
+            BrandConfig::default(),
+        ),
         (None, None, None, None) => {
-            let mut account = fcp_account(&cli).await?;
+            let (mut account, brand) = fcp_account(&cli).await?;
             account.bind_addr = cli.bind.clone();
             account.stun = cli.stun.clone();
             account.tls_extra_ca_pem = tls_extra_ca_pem;
-            account
+            (account, brand)
         }
         _ => anyhow::bail!(
             "give all of --aor, --registrar, --username and --password, or none (signed in to FCP)"
@@ -316,7 +325,7 @@ async fn main() -> Result<()> {
         account,
         media: MediaConfig::default(),
         audio,
-        brand: BrandConfig::default(),
+        brand,
     };
 
     run(cli, cfg, tone_stats).await
@@ -428,6 +437,16 @@ async fn run(cli: Cli, cfg: AnvilConfig, tone_stats: Option<Arc<ToneStats>>) -> 
                             break;
                         }
                     }
+                    Event::BrandUpdated { profile } => {
+                        println!(
+                            "[brand] {} (primary {}, logo {} bytes, {} ringtone(s))",
+                            profile.app_name,
+                            profile.colors.primary.map(|c| c.to_hex()).unwrap_or_else(|| "-".into()),
+                            profile.logo.as_ref().map_or(0, |l| l.bytes.len()),
+                            profile.ringtones.len(),
+                        );
+                    }
+                    Event::BrandCleared => println!("[brand] none: the default theme"),
                     other => println!("[event] {other:?}"),
                 }
             }

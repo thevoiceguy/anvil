@@ -11,6 +11,8 @@ homepage.workspace     = true
 
 [dependencies]
 anvil-core = { workspace = true }
+anvil-brand = { workspace = true }
+async-trait = { workspace = true }
 tokio      = { workspace = true }
 thiserror  = { workspace = true }
 tracing    = { workspace = true }

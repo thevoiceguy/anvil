@@ -69,6 +69,8 @@ pub struct Anvil {
     codecs: Arc<[Codec]>,
     /// The task keeping the registration alive, while registered.
     refresh: parking_lot::Mutex<Option<JoinHandle<()>>>,
+    /// The tenant's brand, when a provider is configured.
+    branding: Option<Arc<brand::Branding>>,
     /// Handles to the packet-pump task and any other long-running tasks.
     /// Dropped on shutdown.
     tasks: Vec<JoinHandle<()>>,
@@ -219,6 +221,23 @@ impl Anvil {
             .max(1);
 
         let audio: Arc<dyn AudioHost> = Arc::from(cfg.audio);
+        let branding = brand::Branding::new(
+            cfg.brand,
+            cfg.account.aor.clone(),
+            cfg.account.provisioning_url.clone(),
+            event_tx.clone(),
+        )
+        .map(Arc::new);
+        let mut tasks = Vec::new();
+        if let Some(branding) = &branding {
+            // The cached profile at once, then a fresh one: concurrently with
+            // REGISTER (docs/BRANDING.md §1).
+            let branding = Arc::clone(branding);
+            tasks.push(tokio::spawn(async move {
+                branding.load_cached().await;
+                let _ = branding.refresh().await;
+            }));
+        }
         let calls: Arc<DashMap<CallId, CallEntry>> = Arc::new(DashMap::new());
 
         // UAS handler — routed to directly from the packet pump rather than
@@ -273,10 +292,24 @@ impl Anvil {
                 register_expires,
                 codecs,
                 refresh: parking_lot::Mutex::new(None),
-                tasks: vec![pump],
+                branding,
+                tasks: {
+                    tasks.push(pump);
+                    tasks
+                },
             },
             event_rx,
         ))
+    }
+
+    /// Fetch the tenant's brand again now (`docs/BRANDING.md` §7): a
+    /// changed one arrives as [`Event::BrandUpdated`]. Nothing happens
+    /// without a brand provider or a provisioning URL.
+    pub async fn refresh_brand(&self) -> Result<(), AnvilError> {
+        match &self.branding {
+            Some(branding) => branding.refresh().await,
+            None => Ok(()),
+        }
     }
 
     /// Where peers reach this softphone: its advertised SIP address, the
@@ -300,7 +333,10 @@ impl Anvil {
             .await;
         let granted =
             match register_once(&self.uac, &self.registrar_uri, self.register_expires).await {
-                Ok(granted) => granted,
+                Ok((granted, provisioning_url)) => {
+                    learn_brand_url(self.branding.as_ref(), provisioning_url.as_deref());
+                    granted
+                }
                 Err(e) => {
                     let _ = self
                         .events
@@ -325,6 +361,7 @@ impl Anvil {
             self.register_expires,
             granted,
             self.events.clone(),
+            self.branding.clone(),
         ));
         *self.refresh.lock() = Some(task);
         Ok(())
@@ -674,19 +711,41 @@ impl Anvil {
     }
 }
 
-/// One REGISTER; the expiry the registrar granted, in seconds. A 423
+/// A provisioning URL a REGISTER 200 OK named, learned by the branding,
+/// and a first fetch from it when it is new.
+fn learn_brand_url(branding: Option<&Arc<brand::Branding>>, url: Option<&str>) {
+    if let (Some(branding), Some(url)) = (branding, url) {
+        if branding.learn_url(url) {
+            let branding = Arc::clone(branding);
+            tokio::spawn(async move {
+                let _ = branding.refresh().await;
+            });
+        }
+    }
+}
+
+/// One REGISTER; the expiry the registrar granted, in seconds, and the
+/// provisioning URL its 200 OK named (`X-FCP-Provisioning-Url`). A 423
 /// Interval Too Brief is asked again with the registrar's `Min-Expires`
 /// (RFC 3261 §10.2.8).
 async fn register_once(
     uac: &IntegratedUAC,
     registrar: &SipUri,
     expires: u32,
-) -> Result<u32, AnvilError> {
+) -> Result<(u32, Option<String>), AnvilError> {
     let mut asked = expires;
     for _ in 0..2 {
         match uac.register(registrar.clone(), Some(asked)).await {
             Ok(resp) if (200..300).contains(&resp.code()) => {
-                return Ok(registration::granted_expires(&resp, asked));
+                let provisioning_url = resp
+                    .headers()
+                    .get("X-FCP-Provisioning-Url")
+                    .map(|v| v.trim().to_string())
+                    .filter(|v| v.starts_with("https://") || v.starts_with("http://"));
+                return Ok((
+                    registration::granted_expires(&resp, asked),
+                    provisioning_url,
+                ));
             }
             Ok(resp) if resp.code() == 423 => match registration::min_expires(&resp) {
                 Some(min) if min > asked => asked = min,
@@ -713,6 +772,7 @@ async fn keep_registered(
     expires: u32,
     mut granted: u32,
     events: mpsc::Sender<Event>,
+    branding: Option<Arc<brand::Branding>>,
 ) {
     let mut failures: u32 = 0;
     loop {
@@ -723,8 +783,14 @@ async fn keep_registered(
         };
         tokio::time::sleep(wait).await;
         match register_once(&uac, &registrar, expires).await {
-            Ok(g) => {
+            Ok((g, provisioning_url)) => {
                 granted = g;
+                learn_brand_url(branding.as_ref(), provisioning_url.as_deref());
+                // Opportunistically, at most hourly (docs/BRANDING.md §7).
+                if let Some(branding) = &branding {
+                    let branding = Arc::clone(branding);
+                    tokio::spawn(async move { branding.refresh_if_stale().await });
+                }
                 if failures > 0 {
                     let _ = events
                         .send(Event::RegistrationChanged {

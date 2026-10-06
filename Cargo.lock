@@ -156,6 +156,7 @@ dependencies = [
  "thiserror 1.0.69",
  "tokio",
  "tracing",
+ "url",
 ]
 
 [[package]]
@@ -223,6 +224,7 @@ dependencies = [
 name = "anvil-fcp"
 version = "0.1.0"
 dependencies = [
+ "anvil-brand",
  "anvil-core",
  "async-trait",
  "base64",
@@ -246,6 +248,7 @@ dependencies = [
  "async-trait",
  "cbindgen",
  "parking_lot",
+ "serde_json",
  "tokio",
  "tracing",
 ]

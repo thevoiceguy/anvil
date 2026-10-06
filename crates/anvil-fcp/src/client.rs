@@ -94,7 +94,7 @@ impl FcpClient {
     }
 
     /// An access token good for a while, refreshing first if it is not.
-    async fn bearer(&self) -> Result<String, FcpError> {
+    pub(crate) async fn bearer(&self) -> Result<String, FcpError> {
         if !self
             .session
             .lock()

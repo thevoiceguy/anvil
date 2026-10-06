@@ -76,6 +76,9 @@ pub enum Event {
     BrandUpdated {
         profile: Box<BrandProfile>,
     },
+    /// The tenant has no brand (any more), or the server refused the
+    /// credential: the UI goes back to its own theme.
+    BrandCleared,
     Error {
         call: Option<CallId>,
         error: AnvilError,

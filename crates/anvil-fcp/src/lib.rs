@@ -14,11 +14,13 @@
 
 #![forbid(unsafe_code)]
 
+mod brand;
 mod client;
 mod discovery;
 mod session;
 mod signin;
 
+pub use brand::{brand_config, FcpBrandProvider};
 pub use client::{FcpClient, SoftphoneAccount, SoftphoneConfig, SoftphoneMedia};
 pub use discovery::{discover, Server};
 pub use session::{AppClient, DeviceCredentials, FileTokenStore, Session, TokenStore};
