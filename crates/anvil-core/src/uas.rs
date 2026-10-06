@@ -43,6 +43,9 @@ pub(crate) struct AnvilUasHandler {
     /// we're actually listening on. Omitting the port lets it default to
     /// 5060, which breaks every non-standard bind.
     pub local_sip_addr: SocketAddr,
+    /// Whom this softphone watches, by `<event>|<user@host>`: a NOTIFY
+    /// about anyone else ends that subscription (481).
+    pub watched: Arc<DashMap<String, ()>>,
 }
 
 #[async_trait]

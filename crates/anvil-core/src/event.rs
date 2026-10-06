@@ -79,6 +79,23 @@ pub enum Event {
     /// The tenant has no brand (any more), or the server refused the
     /// credential: the UI goes back to its own theme.
     BrandCleared,
+    /// The mailbox's counts (RFC 3842), from an unsolicited NOTIFY or a
+    /// [`subscribe_mwi`](crate::Anvil::subscribe_mwi) subscription.
+    MessageWaiting {
+        summary: crate::mwi::MessageSummary,
+    },
+    /// Someone watched with [`WatchKind::Presence`](crate::watch::WatchKind)
+    /// changed: `aor` as their server names them.
+    PresenceChanged {
+        aor: String,
+        presence: crate::watch::Presence,
+    },
+    /// A busy lamp watched with [`WatchKind::Dialog`](crate::watch::WatchKind)
+    /// changed.
+    LineStateChanged {
+        aor: String,
+        state: crate::watch::LineState,
+    },
     Error {
         call: Option<CallId>,
         error: AnvilError,

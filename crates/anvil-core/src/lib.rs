@@ -17,10 +17,12 @@ pub mod config;
 pub mod error;
 pub mod event;
 pub(crate) mod media;
+pub mod mwi;
 mod registration;
 pub(crate) mod stun;
 pub(crate) mod transport;
 pub(crate) mod uas;
+pub mod watch;
 
 pub use brand::{
     BrandAsset, BrandCache, BrandColors, BrandCredential, BrandFetchOutcome, BrandLinks,
@@ -71,6 +73,14 @@ pub struct Anvil {
     refresh: parking_lot::Mutex<Option<JoinHandle<()>>>,
     /// The tenant's brand, when a provider is configured.
     branding: Option<Arc<brand::Branding>>,
+    /// The account's own address, which a message-summary subscription is to.
+    aor: SipUri,
+    /// The task keeping the message-summary subscription alive.
+    mwi: parking_lot::Mutex<Option<JoinHandle<()>>>,
+    /// Whom this softphone watches, shared with the request handler.
+    watched: Arc<DashMap<String, ()>>,
+    /// The tasks keeping each watch's subscription alive.
+    watches: DashMap<String, JoinHandle<()>>,
     /// Handles to the packet-pump task and any other long-running tasks.
     /// Dropped on shutdown.
     tasks: Vec<JoinHandle<()>>,
@@ -221,6 +231,7 @@ impl Anvil {
             .max(1);
 
         let audio: Arc<dyn AudioHost> = Arc::from(cfg.audio);
+        let watched: Arc<DashMap<String, ()>> = Arc::new(DashMap::new());
         let branding = brand::Branding::new(
             cfg.brand,
             cfg.account.aor.clone(),
@@ -252,6 +263,7 @@ impl Anvil {
             local_user: local_user.clone(),
             codecs: Arc::clone(&codecs),
             local_sip_addr: advertised,
+            watched: Arc::clone(&watched),
         });
 
         let pump = {
@@ -293,6 +305,10 @@ impl Anvil {
                 codecs,
                 refresh: parking_lot::Mutex::new(None),
                 branding,
+                aor: local_uri.clone(),
+                mwi: parking_lot::Mutex::new(None),
+                watched,
+                watches: DashMap::new(),
                 tasks: {
                     tasks.push(pump);
                     tasks
@@ -394,6 +410,82 @@ impl Anvil {
         if let Some(task) = self.refresh.lock().take() {
             task.abort();
         }
+    }
+
+    /// Watch someone (RFC 3856 presence or RFC 4235 dialog, a busy lamp):
+    /// their state arrives as [`Event::PresenceChanged`] or
+    /// [`Event::LineStateChanged`] at once and on every change, until
+    /// [`unwatch`](Self::unwatch). Renewed as
+    /// [`subscribe_mwi`](Self::subscribe_mwi) is.
+    pub async fn watch(&self, aor: &str, kind: watch::WatchKind) -> Result<(), AnvilError> {
+        let target = SipUri::parse(aor)
+            .map_err(|e| AnvilError::Config(format!("invalid address {aor:?}: {e:?}")))?;
+        let key = format!("{}|{}", kind.event(), watch::aor_key(aor));
+        // Watched before the SUBSCRIBE: the first NOTIFY may beat its 200.
+        self.watched.insert(key.clone(), ());
+        let granted = match subscribe_to(&self.uac, &target, kind.event()).await {
+            Ok(g) => g,
+            Err(e) => {
+                self.watched.remove(&key);
+                return Err(e);
+            }
+        };
+        let uac = Arc::clone(&self.uac);
+        let task = tokio::spawn(async move {
+            let mut granted = granted;
+            loop {
+                tokio::time::sleep(mwi_renew_after(granted)).await;
+                match subscribe_to(&uac, &target, kind.event()).await {
+                    Ok(g) => granted = g,
+                    Err(e) => {
+                        tracing::warn!(%e, "watch renewal failed; retrying");
+                        granted = 60;
+                    }
+                }
+            }
+        });
+        if let Some(old) = self.watches.insert(key, task) {
+            old.abort();
+        }
+        Ok(())
+    }
+
+    /// Stop watching: the next NOTIFY about them ends the subscription.
+    pub fn unwatch(&self, aor: &str, kind: watch::WatchKind) {
+        let key = format!("{}|{}", kind.event(), watch::aor_key(aor));
+        self.watched.remove(&key);
+        if let Some((_, task)) = self.watches.remove(&key) {
+            task.abort();
+        }
+    }
+
+    /// Subscribe to the account's own message summary (RFC 3842): the
+    /// counts arrive as [`Event::MessageWaiting`] at once and on every
+    /// change, until [`shutdown`](Self::shutdown). Renewed shortly before it
+    /// lapses with a new SUBSCRIBE (siphon-rs has no subscriber-side refresh
+    /// inside the dialog yet), so a change may be told twice for a moment.
+    pub async fn subscribe_mwi(&self) -> Result<(), AnvilError> {
+        if let Some(task) = self.mwi.lock().take() {
+            task.abort();
+        }
+        let granted = subscribe_summary(&self.uac, &self.aor).await?;
+        let uac = Arc::clone(&self.uac);
+        let aor = self.aor.clone();
+        let task = tokio::spawn(async move {
+            let mut granted = granted;
+            loop {
+                tokio::time::sleep(mwi_renew_after(granted)).await;
+                match subscribe_summary(&uac, &aor).await {
+                    Ok(g) => granted = g,
+                    Err(e) => {
+                        tracing::warn!(%e, "message-summary renewal failed; retrying");
+                        granted = 60;
+                    }
+                }
+            }
+        });
+        *self.mwi.lock() = Some(task);
+        Ok(())
     }
 
     /// Place an outgoing call.
@@ -704,10 +796,59 @@ impl Anvil {
     /// Gracefully stop the runtime. Aborts background tasks.
     pub async fn shutdown(self) -> Result<(), AnvilError> {
         self.stop_refresh();
+        for watch in self.watches.iter() {
+            watch.value().abort();
+        }
+        if let Some(task) = self.mwi.lock().take() {
+            task.abort();
+        }
         for handle in self.tasks {
             handle.abort();
         }
         Ok(())
+    }
+}
+
+/// How long a message-summary subscription is asked for.
+const MWI_EXPIRES: u32 = 3600;
+
+/// When to renew a subscription granted for `granted` seconds: 30 seconds
+/// before it lapses, or halfway through a short one.
+fn mwi_renew_after(granted: u32) -> std::time::Duration {
+    let secs = if granted > 60 {
+        granted - 30
+    } else {
+        (granted / 2).max(5)
+    };
+    std::time::Duration::from_secs(u64::from(secs))
+}
+
+/// One message-summary SUBSCRIBE to `aor`; the expiry granted.
+async fn subscribe_summary(uac: &IntegratedUAC, aor: &SipUri) -> Result<u32, AnvilError> {
+    subscribe_to(uac, aor, mwi::EVENT).await
+}
+
+/// One SUBSCRIBE to `event` at `target`; the expiry granted.
+async fn subscribe_to(
+    uac: &IntegratedUAC,
+    target: &SipUri,
+    event: &str,
+) -> Result<u32, AnvilError> {
+    match uac
+        .subscribe(target.clone(), event, Some(MWI_EXPIRES))
+        .await
+    {
+        Ok((resp, _)) if (200..300).contains(&resp.code()) => Ok(resp
+            .headers()
+            .get("Expires")
+            .and_then(|v| v.trim().parse::<u32>().ok())
+            .unwrap_or(MWI_EXPIRES)),
+        Ok((resp, _)) => Err(AnvilError::AuthRejected(format!(
+            "{event} SUBSCRIBE: {} {}",
+            resp.code(),
+            resp.reason()
+        ))),
+        Err(e) => Err(AnvilError::Transport(e.to_string())),
     }
 }
 
@@ -914,6 +1055,68 @@ async fn dispatch_request(
         }
         "OPTIONS" => {
             let resp = UserAgentServer::create_response(&request, 200, "OK");
+            handle.send_final(resp).await;
+        }
+        "NOTIFY" => {
+            let event = request
+                .headers()
+                .get("Event")
+                .map(|e| {
+                    e.split(';')
+                        .next()
+                        .unwrap_or("")
+                        .trim()
+                        .to_ascii_lowercase()
+                })
+                .unwrap_or_default();
+            let (code, reason) = match event.as_str() {
+                // Message waiting, subscribed or not (RFC 3842 allows both).
+                "message-summary" => {
+                    let body = String::from_utf8_lossy(request.body());
+                    if let Some(summary) = mwi::parse(&body) {
+                        let _ = handler.events.send(Event::MessageWaiting { summary }).await;
+                    }
+                    (200, "OK")
+                }
+                // A server's "fetch your settings again": a softphone gets
+                // them from its server's API, so nothing to do.
+                "check-sync" => (200, "OK"),
+                // Someone watched: told by entity, so a renewal's new
+                // subscription and the old one say the same thing.
+                "presence" | "dialog" => {
+                    let body = String::from_utf8_lossy(request.body());
+                    let sub_state = request
+                        .headers()
+                        .get("Subscription-State")
+                        .map(|s| s.to_ascii_lowercase())
+                        .unwrap_or_default();
+                    let told = if event == "presence" {
+                        watch::parse_pidf(&body).map(|(aor, presence)| {
+                            (aor.clone(), Event::PresenceChanged { aor, presence })
+                        })
+                    } else {
+                        watch::parse_dialog_info(&body).map(|(aor, state)| {
+                            (aor.clone(), Event::LineStateChanged { aor, state })
+                        })
+                    };
+                    match told {
+                        Some((aor, out))
+                            if handler
+                                .watched
+                                .contains_key(&format!("{event}|{}", watch::aor_key(&aor))) =>
+                        {
+                            let _ = handler.events.send(out).await;
+                            (200, "OK")
+                        }
+                        // A body-less NOTIFY (pending, or terminated) about
+                        // a subscription: accepted.
+                        None if !sub_state.is_empty() => (200, "OK"),
+                        _ => (481, "Subscription Does Not Exist"),
+                    }
+                }
+                _ => (481, "Subscription Does Not Exist"),
+            };
+            let resp = UserAgentServer::create_response(&request, code, reason);
             handle.send_final(resp).await;
         }
         _ => {
