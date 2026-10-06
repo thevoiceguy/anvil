@@ -762,11 +762,10 @@ impl Anvil {
             direction,
         );
 
-        let handle = self
-            .uac
-            .reinvite(&mut dialog, Some(&sdp_body))
-            .await
-            .map_err(|e| AnvilError::Transport(format!("re-INVITE: {e}")))?;
+        let sent = self.uac.reinvite(&mut dialog, Some(&sdp_body)).await;
+        // The re-INVITE used a CSeq: keep the dialog that knows it.
+        self.store_dialog(call, dialog).await;
+        let handle = sent.map_err(|e| AnvilError::Transport(format!("re-INVITE: {e}")))?;
 
         let resp = handle
             .await_final()
@@ -786,11 +785,75 @@ impl Anvil {
         Ok(())
     }
 
-    /// Blind-transfer a call. Phase 2.
-    pub async fn transfer(&self, _call: CallId, _target: &str) -> Result<(), AnvilError> {
-        Err(AnvilError::Internal(
-            "transfer not implemented in Phase 1 M1".into(),
-        ))
+    /// The call's dialog as it is now (a copy). In-dialog requests change
+    /// it (the CSeq): hand it back with [`store_dialog`](Self::store_dialog).
+    async fn dialog_of(&self, call: CallId) -> Result<sip_dialog::Dialog, AnvilError> {
+        let (dialog, handle) = {
+            let entry = self.calls.get(&call).ok_or(AnvilError::NoSuchCall(call))?;
+            (entry.dialog.clone(), entry.outbound_handle.clone())
+        };
+        match (dialog, handle) {
+            (Some(d), _) => Ok(d),
+            (None, Some(h)) => Ok(h.dialog.read().await.clone()),
+            (None, None) => Err(AnvilError::Internal(format!("{call:?} has no dialog"))),
+        }
+    }
+
+    /// Keep a dialog an in-dialog request advanced, so the next request's
+    /// CSeq is higher still (RFC 3261 §12.2.1.1).
+    async fn store_dialog(&self, call: CallId, dialog: sip_dialog::Dialog) {
+        let handle = {
+            let Some(mut entry) = self.calls.get_mut(&call) else {
+                return;
+            };
+            if entry.dialog.is_some() {
+                entry.dialog = Some(dialog);
+                return;
+            }
+            entry.outbound_handle.clone()
+        };
+        if let Some(h) = handle {
+            *h.dialog.write().await = dialog;
+        }
+    }
+
+    /// Blind-transfer a call to `target` (RFC 3515): a REFER in its dialog.
+    /// The server's progress arrives as [`Event::TransferProgress`]; on
+    /// success the server ends the call (a BYE, [`Event::CallEnded`]).
+    pub async fn transfer(&self, call: CallId, target: &str) -> Result<(), AnvilError> {
+        let refer_to = SipUri::parse(target).map_err(|e| {
+            AnvilError::Config(format!("invalid transfer target {target:?}: {e:?}"))
+        })?;
+        self.refer(call, &refer_to, None).await
+    }
+
+    /// Attended transfer (RFC 3515, RFC 3891): `call`'s party is sent to
+    /// `to_call`'s, replacing that call — the two are connected and both of
+    /// this softphone's calls end.
+    pub async fn transfer_attended(&self, call: CallId, to_call: CallId) -> Result<(), AnvilError> {
+        let target = self.dialog_of(to_call).await?;
+        let refer_to = target.remote_uri().clone();
+        self.refer(call, &refer_to, Some(&target)).await
+    }
+
+    async fn refer(
+        &self,
+        call: CallId,
+        refer_to: &SipUri,
+        replaces: Option<&sip_dialog::Dialog>,
+    ) -> Result<(), AnvilError> {
+        let mut dialog = self.dialog_of(call).await?;
+        let result = self.uac.refer(&mut dialog, refer_to, replaces).await;
+        self.store_dialog(call, dialog).await;
+        match result {
+            Ok((resp, _)) if (200..300).contains(&resp.code()) => Ok(()),
+            Ok((resp, _)) => Err(AnvilError::Transport(format!(
+                "REFER refused: {} {}",
+                resp.code(),
+                resp.reason()
+            ))),
+            Err(e) => Err(AnvilError::Transport(format!("REFER: {e}"))),
+        }
     }
 
     /// Gracefully stop the runtime. Aborts background tasks.
@@ -807,6 +870,14 @@ impl Anvil {
         }
         Ok(())
     }
+}
+
+/// A sipfrag body's status line (`SIP/2.0 200 OK`): code and reason.
+fn parse_sipfrag(body: &str) -> Option<(u16, String)> {
+    let line = body.lines().next()?.trim();
+    let rest = line.strip_prefix("SIP/2.0 ")?;
+    let (code, reason) = rest.split_once(' ').unwrap_or((rest, ""));
+    Some((code.parse().ok()?, reason.trim().to_string()))
 }
 
 /// How long a message-summary subscription is asked for.
@@ -1081,6 +1152,28 @@ async fn dispatch_request(
                 // A server's "fetch your settings again": a softphone gets
                 // them from its server's API, so nothing to do.
                 "check-sync" => (200, "OK"),
+                // A transfer's progress (RFC 3515 §2.4.5): a sipfrag status
+                // line, about the call whose dialog it arrives in.
+                "refer" => {
+                    let call_id = request
+                        .headers()
+                        .get("Call-ID")
+                        .map(|s| s.to_string())
+                        .unwrap_or_default();
+                    match uas::find_call_by_dialog_id(&handler.calls, &call_id) {
+                        Some(call) => {
+                            let body = String::from_utf8_lossy(request.body());
+                            if let Some((code, reason)) = parse_sipfrag(&body) {
+                                let _ = handler
+                                    .events
+                                    .send(Event::TransferProgress { call, code, reason })
+                                    .await;
+                            }
+                            (200, "OK")
+                        }
+                        None => (481, "Subscription Does Not Exist"),
+                    }
+                }
                 // Someone watched: told by entity, so a renewal's new
                 // subscription and the old one say the same thing.
                 "presence" | "dialog" => {
@@ -1314,5 +1407,24 @@ fn extract_codec_from_answer(body: &[u8]) -> Option<Codec> {
                 _ => None,
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod sipfrag_tests {
+    use super::parse_sipfrag;
+
+    #[test]
+    fn a_transfers_status_line_is_read() {
+        assert_eq!(
+            parse_sipfrag("SIP/2.0 200 OK\r\n"),
+            Some((200, "OK".into()))
+        );
+        assert_eq!(
+            parse_sipfrag("SIP/2.0 100 Trying\r\nContent-Length: 0\r\n"),
+            Some((100, "Trying".into()))
+        );
+        assert_eq!(parse_sipfrag("SIP/2.0 486"), Some((486, String::new())));
+        assert_eq!(parse_sipfrag("hello"), None);
     }
 }

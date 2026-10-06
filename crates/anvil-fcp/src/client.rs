@@ -43,6 +43,54 @@ pub struct SoftphoneConfig {
     pub device_id: String,
 }
 
+impl SoftphoneConfig {
+    /// A feature code by FCP's name for it (`park`, `retrieve`,
+    /// `group_pickup`, `directed_pickup`, …).
+    pub fn feature_code(&self, name: &str) -> Option<&str> {
+        self.feature_codes.get(name).map(String::as_str)
+    }
+
+    /// A feature code as an address in the account's domain: what to
+    /// transfer a call to (park) or to call (retrieve, pickup).
+    pub fn feature_uri(&self, name: &str) -> Option<String> {
+        self.feature_code(name)
+            .map(|code| format!("sip:{code}@{}", self.account.domain))
+    }
+}
+
+/// The user's calling settings (`/me/calling`, FCP's
+/// `docs/ENTERPRISE_CALLING.md`): what a softphone shows and changes.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct CallingSettings {
+    pub dnd: bool,
+    pub call_waiting: bool,
+    pub forward_all: Option<String>,
+    pub forward_busy: Option<String>,
+    pub forward_no_answer: Option<String>,
+    pub forward_unreachable: Option<String>,
+    pub no_answer_secs: Option<u32>,
+}
+
+/// A change to the calling settings: each field left out is kept. A
+/// forward is cleared with an empty string.
+#[derive(Debug, Clone, Default, Serialize)]
+pub struct CallingUpdate {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub dnd: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub call_waiting: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub forward_all: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub forward_busy: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub forward_no_answer: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub forward_unreachable: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub no_answer_secs: Option<u32>,
+}
+
 /// FCP, through the app's session.
 pub struct FcpClient {
     http: reqwest::Client,
@@ -141,6 +189,39 @@ impl FcpClient {
             .json()
             .await
             .map_err(|e| FcpError::Invalid(format!("/me/softphone: {e}")))
+    }
+
+    /// The user's calling settings.
+    pub async fn calling(&self) -> Result<CallingSettings, FcpError> {
+        let response = self.api(reqwest::Method::GET, "/me/calling").await?;
+        response
+            .json()
+            .await
+            .map_err(|e| FcpError::Invalid(format!("/me/calling: {e}")))
+    }
+
+    /// Change the calling settings; what they are afterwards.
+    pub async fn set_calling(&self, update: &CallingUpdate) -> Result<CallingSettings, FcpError> {
+        let api = self.session.lock().await.server.api_url.clone();
+        let send = |token: String| {
+            self.http
+                .put(format!("{api}/me/calling"))
+                .bearer_auth(token)
+                .json(update)
+                .send()
+        };
+        let mut response = send(self.bearer().await?).await?;
+        if response.status() == reqwest::StatusCode::UNAUTHORIZED {
+            self.refresh().await?;
+            response = send(self.bearer().await?).await?;
+        }
+        if !response.status().is_success() {
+            return Err(refused(response).await);
+        }
+        response
+            .json()
+            .await
+            .map_err(|e| FcpError::Invalid(format!("/me/calling: {e}")))
     }
 
     /// A new SIP password for the device, kept with the session.

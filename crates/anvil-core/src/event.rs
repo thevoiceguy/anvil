@@ -84,6 +84,14 @@ pub enum Event {
     MessageWaiting {
         summary: crate::mwi::MessageSummary,
     },
+    /// A transfer of `call` progressed (RFC 3515): the server's status for
+    /// the transferred party's new call — 1xx while it is placed, a final
+    /// when done. On success the server then ends `call`.
+    TransferProgress {
+        call: CallId,
+        code: u16,
+        reason: String,
+    },
     /// Someone watched with [`WatchKind::Presence`](crate::watch::WatchKind)
     /// changed: `aor` as their server names them.
     PresenceChanged {

@@ -358,6 +358,61 @@ pub unsafe extern "C" fn anvil_hold(handle: *mut AnvilHandle, call_id: u64, on: 
     })
 }
 
+/// Blind-transfer a call to `target` (a NUL-terminated SIP URI). Progress
+/// arrives as `TransferProgress` events; on success the server ends the
+/// call.
+///
+/// # Safety
+/// `handle` must be valid; `target` a valid NUL-terminated string.
+#[no_mangle]
+pub unsafe extern "C" fn anvil_transfer(
+    handle: *mut AnvilHandle,
+    call_id: u64,
+    target: *const c_char,
+) -> AnvilStatus {
+    catch_ffi(|| unsafe {
+        let Some(handle) = handle.as_mut() else {
+            return AnvilStatus::NullArgument;
+        };
+        if target.is_null() {
+            return AnvilStatus::NullArgument;
+        }
+        let Ok(target) = CStr::from_ptr(target).to_str() else {
+            return AnvilStatus::Config;
+        };
+        match handle.block_on(handle.anvil().transfer(anvil_core::CallId(call_id), target)) {
+            Ok(()) => AnvilStatus::Ok,
+            Err(e) => map_anvil_err(&e),
+        }
+    })
+}
+
+/// Attended transfer: `call_id`'s party replaces `to_call_id` — the two are
+/// connected and both calls of this softphone end.
+///
+/// # Safety
+/// `handle` must be valid; both calls established.
+#[no_mangle]
+pub unsafe extern "C" fn anvil_transfer_attended(
+    handle: *mut AnvilHandle,
+    call_id: u64,
+    to_call_id: u64,
+) -> AnvilStatus {
+    catch_ffi(|| unsafe {
+        let Some(handle) = handle.as_mut() else {
+            return AnvilStatus::NullArgument;
+        };
+        match handle.block_on(
+            handle
+                .anvil()
+                .transfer_attended(anvil_core::CallId(call_id), anvil_core::CallId(to_call_id)),
+        ) {
+            Ok(()) => AnvilStatus::Ok,
+            Err(e) => map_anvil_err(&e),
+        }
+    })
+}
+
 /// Send a DTMF digit (`'0'`..`'9'`, `'*'`, `'#'`, `'A'`..`'D'`) on a
 /// call as a single RFC 2833 event burst (~140 ms).
 ///

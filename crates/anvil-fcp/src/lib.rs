@@ -21,7 +21,9 @@ mod session;
 mod signin;
 
 pub use brand::{brand_config, FcpBrandProvider};
-pub use client::{FcpClient, SoftphoneAccount, SoftphoneConfig, SoftphoneMedia};
+pub use client::{
+    CallingSettings, CallingUpdate, FcpClient, SoftphoneAccount, SoftphoneConfig, SoftphoneMedia,
+};
 pub use discovery::{discover, Server};
 pub use session::{AppClient, DeviceCredentials, FileTokenStore, Session, TokenStore};
 pub use signin::{password_sign_in, BrowserSignIn};
