@@ -46,7 +46,7 @@ pub(crate) async fn discover_public_addr(
     thread_rng().fill_bytes(&mut tx_id);
     let mut request = [0u8; 20];
     request[0..2].copy_from_slice(&0x0001u16.to_be_bytes()); // Binding Request
-    // bytes 2..4 are length=0 already
+                                                             // bytes 2..4 are length=0 already
     request[4..8].copy_from_slice(&STUN_MAGIC_COOKIE.to_be_bytes());
     request[8..20].copy_from_slice(&tx_id);
 

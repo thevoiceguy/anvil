@@ -5,6 +5,27 @@ prove the signal → media path works end to end before investing in UI or mobil
 
 ---
 
+## As FCP's client
+
+Anvil becomes FCP's own softphone, desktop first. The design and its phases
+live in FCP: `docs/SOFTPHONE.md` in `thevoiceguy/fcp`. Anvil's phases:
+
+- [x] **A0** Today's stacks: siphon-rs and forge-media as git dependencies on
+      release tags, the API breaks fixed, siphon-rs answering INVITE challenges,
+      registration that lasts (refreshed before the granted expiry, retried with
+      backoff, `423` answered with `Min-Expires`), a real outbound proxy, CANCEL,
+      603 for a ringing call, a BYE for our own outgoing call, TCP (listener, pool,
+      answers on the connection), the advertised Contact, the configured codecs and
+      user agent; tests Anvil to Anvil and against FCP, and CI
+- [ ] **A1** Sign in to FCP (`anvil-fcp`: discovery, the browser sign-in,
+      `/me/softphone`, the account store), `anvil-cli login`
+- [ ] **A2** Branding from FCP (`anvil-brand` filled in)
+- [ ] **A3** Calling features over SIP: MWI, BLF, presence, transfer, park, call waiting
+- [ ] **A4** The app's data: call history, directory, voicemail, settings, live events
+- [ ] **A5** SDES-SRTP, and the cross-repo suite completed
+
+---
+
 ## Phase 1 — desktop core MVP
 
 **Target:** place and receive an audio call from `anvil-cli` on Linux/macOS/Windows.

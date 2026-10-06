@@ -38,12 +38,9 @@ sip-auth        = { workspace = true }
 sip-dns         = { workspace = true }
 
 # Media engine
-forge-core   = { workspace = true }
 forge-rtp    = { workspace = true }
-forge-engine = { workspace = true }
 forge-codecs = { workspace = true }
 forge-dtmf   = { workspace = true }
-forge-sdp    = { workspace = true }
 
 anyhow = { workspace = true }
 rand   = "0.8"
@@ -58,3 +55,7 @@ rustls-pemfile = { version = "2",    optional = true }
 
 [dev-dependencies]
 tokio = { workspace = true, features = ["test-util"] }
+tracing-subscriber = { workspace = true }
+reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "json"] }
+serde_json = { workspace = true }
+rand = "0.8"

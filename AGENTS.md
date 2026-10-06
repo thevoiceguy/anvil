@@ -11,8 +11,9 @@ this repo. Human-facing design lives in `docs/`; human contributor guidance is i
    `anvil-codec`.** If a change makes it depend on any of them, it's wrong — add
    a trait in `anvil-core::audio`, `anvil-core::brand`, etc. and supply the
    implementation from the platform crate.
-3. **Sibling workspaces.** `../siphon-rs` and `../forge-media` are separate workspaces.
-   Don't modify them from here. If a change is needed upstream, open a PR there.
+3. **Upstream workspaces.** siphon-rs and forge-media are git dependencies pinned to
+   release tags. Don't patch them from here: change them in their own repos, release a
+   tag, and move the tag in the root `Cargo.toml`.
 4. **Platform code is gated.** `#[cfg(target_os = ...)]` lives in `anvil-audio` or
    the FFI consumers, never in `anvil-core`.
 5. **Async runtime.** Tokio only. No `async-std`, no custom executors.
@@ -32,7 +33,7 @@ this repo. Human-facing design lives in `docs/`; human contributor guidance is i
 
 - **Workspace deps go in the root `Cargo.toml`.** Crate Cargo.tomls use
   `workspace = true`. Keeps versions aligned.
-- **Don't bump MSRV without discussion.** Currently 1.75 to match forge-media.
+- **Don't bump MSRV without discussion.** Currently 1.97, the toolchain CI lints on.
 - **Don't add UI crates to this workspace.** The UI (Flutter/Tauri/native) lives
   outside the Rust tree and consumes `anvil-ffi`.
 

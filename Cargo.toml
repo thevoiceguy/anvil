@@ -12,7 +12,7 @@ members = [
 [workspace.package]
 version = "0.1.0"
 edition = "2021"
-rust-version = "1.75"
+rust-version = "1.97"
 license = "MIT OR Apache-2.0"
 authors = ["Anvil contributors"]
 repository = "https://github.com/thevoiceguy/anvil"
@@ -47,27 +47,23 @@ cpal = "0.15"
 # Codec
 opus = "0.3"
 
-# siphon-rs (SIP stack) — path deps while we iterate locally
-sip-core = { path = "../siphon-rs/crates/sip-core" }
-sip-parse = { path = "../siphon-rs/crates/sip-parse" }
-sip-transport = { path = "../siphon-rs/crates/sip-transport", features = ["tls"] }
-sip-transaction = { path = "../siphon-rs/crates/sip-transaction" }
-sip-dialog = { path = "../siphon-rs/crates/sip-dialog" }
-sip-uac = { path = "../siphon-rs/crates/sip-uac" }
-sip-uas = { path = "../siphon-rs/crates/sip-uas" }
-sip-sdp = { path = "../siphon-rs/crates/sip-sdp" }
-sip-auth = { path = "../siphon-rs/crates/sip-auth" }
-sip-dns = { path = "../siphon-rs/crates/sip-dns" }
+# siphon-rs (SIP stack) — pinned to a release tag
+sip-core = { git = "https://github.com/thevoiceguy/siphon-rs", tag = "v2026.10.05.1" }
+sip-parse = { git = "https://github.com/thevoiceguy/siphon-rs", tag = "v2026.10.05.1" }
+sip-transport = { git = "https://github.com/thevoiceguy/siphon-rs", tag = "v2026.10.05.1", features = ["tls"] }
+sip-transaction = { git = "https://github.com/thevoiceguy/siphon-rs", tag = "v2026.10.05.1" }
+sip-dialog = { git = "https://github.com/thevoiceguy/siphon-rs", tag = "v2026.10.05.1" }
+sip-uac = { git = "https://github.com/thevoiceguy/siphon-rs", tag = "v2026.10.05.1" }
+sip-uas = { git = "https://github.com/thevoiceguy/siphon-rs", tag = "v2026.10.05.1" }
+sip-sdp = { git = "https://github.com/thevoiceguy/siphon-rs", tag = "v2026.10.05.1" }
+sip-auth = { git = "https://github.com/thevoiceguy/siphon-rs", tag = "v2026.10.05.1" }
+sip-dns = { git = "https://github.com/thevoiceguy/siphon-rs", tag = "v2026.10.05.1" }
 
-# forge-media — path deps while we iterate locally
-forge-core = { path = "../forge-media/crates/forge-core" }
-forge-rtp = { path = "../forge-media/crates/forge-rtp" }
-forge-engine = { path = "../forge-media/crates/forge-engine" }
-forge-codecs = { path = "../forge-media/crates/forge-codecs" }
-forge-dtmf = { path = "../forge-media/crates/forge-dtmf" }
-forge-sdp = { path = "../forge-media/crates/forge-sdp" }
-forge-injection = { path = "../forge-media/crates/forge-injection" }
-forge-resampler = { path = "../forge-media/crates/forge-resampler" }
+# forge-media — pinned to a release tag
+forge-rtp = { git = "https://github.com/thevoiceguy/forge-media", tag = "v2026.09.29" }
+forge-codecs = { git = "https://github.com/thevoiceguy/forge-media", tag = "v2026.09.29", features = ["g722"] }
+forge-dtmf = { git = "https://github.com/thevoiceguy/forge-media", tag = "v2026.09.29" }
+forge-resampler = { git = "https://github.com/thevoiceguy/forge-media", tag = "v2026.09.29" }
 
 # Internal
 anvil-core  = { path = "crates/anvil-core"  }
@@ -79,16 +75,3 @@ anvil-codec = { path = "crates/anvil-codec" }
 lto = "thin"
 codegen-units = 1
 strip = "symbols"
-
-# forge-media vendors an older copy of sip-sdp at its external/siphon-rs/.
-# The only diff versus top-level siphon-rs is rustfmt whitespace. Redirect
-# forge-media's vendored path to the canonical copy so cargo can resolve
-# a single sip-sdp across the graph.
-[patch."https://github.com/thevoiceguy/siphon-rs"]
-sip-sdp = { path = "../siphon-rs/crates/sip-sdp" }
-
-# Path-source patch: cargo matches by crate name + source. Since forge-sdp
-# uses a path dep, the effective source is the local directory — which we
-# override with a second patch block keyed on the path URL.
-[patch."file:///home/siphon/forge-media/external/siphon-rs/crates/sip-sdp"]
-sip-sdp = { path = "../siphon-rs/crates/sip-sdp" }

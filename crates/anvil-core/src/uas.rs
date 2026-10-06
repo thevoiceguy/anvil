@@ -36,7 +36,9 @@ pub(crate) struct AnvilUasHandler {
     pub calls: Arc<DashMap<CallId, CallEntry>>,
     pub media_ip: IpAddr,
     pub local_user: String,
-    /// Our own SIP bind address, used verbatim as the Contact URI host/port
+    /// The codecs offered and accepted, in order of preference.
+    pub codecs: Arc<[crate::config::Codec]>,
+    /// Our advertised SIP address, used verbatim as the Contact URI host/port
     /// so remote peers send in-dialog requests (BYE, re-INVITE) to the port
     /// we're actually listening on. Omitting the port lets it default to
     /// 5060, which breaks every non-standard bind.
@@ -56,8 +58,15 @@ impl UasRequestHandler for AnvilUasHandler {
         // offer's direction onto our pipeline, answer with the mirrored
         // direction, done.
         if let Some(dlg) = dialog {
-            handle_reinvite(request, handle, dlg, &self.calls, &self.local_user, self.media_ip)
-                .await;
+            handle_reinvite(
+                request,
+                handle,
+                dlg,
+                &self.calls,
+                &self.local_user,
+                self.media_ip,
+            )
+            .await;
             return Ok(());
         }
 
@@ -86,7 +95,7 @@ impl UasRequestHandler for AnvilUasHandler {
         // the peer offered nothing we support, reject with 488 rather than
         // silently picking PCMU and hoping.
         let offered_body = request.body();
-        let chosen = media::negotiate_answer_codec(offered_body, media::supported_codecs());
+        let chosen = media::negotiate_answer_codec(offered_body, &self.codecs);
         let chosen = match chosen {
             Some(c) => c,
             None => {
@@ -127,12 +136,12 @@ impl UasRequestHandler for AnvilUasHandler {
         let from_uri = request
             .headers()
             .get("From")
-            .and_then(|f| extract_uri_from_nameaddr(f))
+            .and_then(extract_uri_from_nameaddr)
             .ok_or_else(|| anyhow::anyhow!("missing From URI"))?;
         let to_uri = request
             .headers()
             .get("To")
-            .and_then(|t| extract_uri_from_nameaddr(t))
+            .and_then(extract_uri_from_nameaddr)
             .ok_or_else(|| anyhow::anyhow!("missing To URI"))?;
 
         let local = sip_core::SipUri::parse(&to_uri)
@@ -218,6 +227,7 @@ impl UasRequestHandler for AnvilUasHandler {
         &self,
         request: &Request,
         handle: ServerTransactionHandle,
+        _ctx: &TransportContext,
         dialog: &Dialog,
     ) -> anyhow::Result<()> {
         let call_id = find_call_by_dialog_id(&self.calls, dialog.id().call_id());
@@ -248,6 +258,7 @@ impl UasRequestHandler for AnvilUasHandler {
         &self,
         request: &Request,
         handle: ServerTransactionHandle,
+        _ctx: &TransportContext,
     ) -> anyhow::Result<()> {
         // Ack the CANCEL immediately.
         let resp = UserAgentServer::create_response(request, 200, "OK");
@@ -338,6 +349,7 @@ pub(crate) async fn send_answer_and_start_media(
     calls: &DashMap<CallId, CallEntry>,
     audio: &Arc<dyn AudioHost>,
     events: &mpsc::Sender<Event>,
+    codecs: &[Codec],
 ) -> Result<Codec, crate::error::AnvilError> {
     let (server_handle, answer_response, dialog, rtp_socket, offer_body) = {
         let mut entry = calls
@@ -364,8 +376,7 @@ pub(crate) async fn send_answer_and_start_media(
     let remote = media::extract_remote_rtp_addr(&offer_body);
     // Codec was already chosen when on_invite built the answer SDP; cheaper
     // to re-derive from the offer here than to plumb it through.
-    let codec = media::negotiate_answer_codec(&offer_body, media::supported_codecs())
-        .unwrap_or(Codec::Pcmu);
+    let codec = media::negotiate_answer_codec(&offer_body, codecs).unwrap_or(Codec::Pcmu);
 
     // Start the pipeline before sending 200 OK so that when the caller's
     // first RTP packet lands we already have a socket reading it. Losing the
@@ -463,11 +474,8 @@ async fn handle_reinvite(
             (rtp_port, codec, hold)
         }
         None => {
-            let resp = UserAgentServer::create_response(
-                request,
-                481,
-                "Call/Transaction Does Not Exist",
-            );
+            let resp =
+                UserAgentServer::create_response(request, 481, "Call/Transaction Does Not Exist");
             handle.send_final(resp).await;
             return;
         }

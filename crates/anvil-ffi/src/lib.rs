@@ -35,8 +35,8 @@ mod events;
 mod handle;
 
 pub use events::{
-    AnvilCodec, AnvilEndReason, AnvilEvent, AnvilEventCallback, AnvilEventKind,
-    AnvilMediaStats, AnvilRegState,
+    AnvilCodec, AnvilEndReason, AnvilEvent, AnvilEventCallback, AnvilEventKind, AnvilMediaStats,
+    AnvilRegState,
 };
 
 use std::ffi::{c_char, CStr};
@@ -229,7 +229,9 @@ pub unsafe extern "C" fn anvil_register(handle: *mut AnvilHandle) -> AnvilStatus
 #[no_mangle]
 pub unsafe extern "C" fn anvil_set_event_callback(
     handle: *mut AnvilHandle,
-    cb: Option<unsafe extern "C" fn(event: *const events::AnvilEvent, user_data: *mut std::ffi::c_void)>,
+    cb: Option<
+        unsafe extern "C" fn(event: *const events::AnvilEvent, user_data: *mut std::ffi::c_void),
+    >,
     user_data: *mut std::ffi::c_void,
 ) -> AnvilStatus {
     catch_ffi(|| unsafe {
@@ -288,10 +290,7 @@ pub unsafe extern "C" fn anvil_place_call(
 /// `handle` must be valid; `call_id` must come from an `IncomingCall`
 /// event delivered via the registered callback.
 #[no_mangle]
-pub unsafe extern "C" fn anvil_answer(
-    handle: *mut AnvilHandle,
-    call_id: u64,
-) -> AnvilStatus {
+pub unsafe extern "C" fn anvil_answer(handle: *mut AnvilHandle, call_id: u64) -> AnvilStatus {
     catch_ffi(|| unsafe {
         let Some(handle) = handle.as_mut() else {
             return AnvilStatus::NullArgument;
@@ -329,10 +328,7 @@ pub unsafe extern "C" fn anvil_reject(
 /// # Safety
 /// `handle` must be valid; `call_id` must refer to an established call.
 #[no_mangle]
-pub unsafe extern "C" fn anvil_hangup(
-    handle: *mut AnvilHandle,
-    call_id: u64,
-) -> AnvilStatus {
+pub unsafe extern "C" fn anvil_hangup(handle: *mut AnvilHandle, call_id: u64) -> AnvilStatus {
     catch_ffi(|| unsafe {
         let Some(handle) = handle.as_mut() else {
             return AnvilStatus::NullArgument;
@@ -350,11 +346,7 @@ pub unsafe extern "C" fn anvil_hangup(
 /// # Safety
 /// `handle` must be valid; `call_id` must refer to an established call.
 #[no_mangle]
-pub unsafe extern "C" fn anvil_hold(
-    handle: *mut AnvilHandle,
-    call_id: u64,
-    on: u8,
-) -> AnvilStatus {
+pub unsafe extern "C" fn anvil_hold(handle: *mut AnvilHandle, call_id: u64, on: u8) -> AnvilStatus {
     catch_ffi(|| unsafe {
         let Some(handle) = handle.as_mut() else {
             return AnvilStatus::NullArgument;

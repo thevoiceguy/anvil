@@ -1,10 +1,14 @@
 # Anvil — project context for Claude Code
 
 Anvil is a cross-platform softphone (iOS, Android, Windows, macOS, Linux) built on two
-sibling Rust workspaces:
+Rust workspaces of its own, used as git dependencies pinned to release tags
+(the root `Cargo.toml`):
 
-- `../siphon-rs` — RFC 3261 SIP signaling stack (pure Rust, Tokio)
-- `../forge-media` — RTP / codec / media engine (Tokio; some Linux-only features)
+- siphon-rs (`thevoiceguy/siphon-rs`) — RFC 3261 SIP signaling stack (pure Rust, Tokio)
+- forge-media (`thevoiceguy/forge-media`) — RTP / codec / media engine (Tokio; some Linux-only features)
+
+Anvil is FCP's softphone (`thevoiceguy/fcp`, `docs/SOFTPHONE.md` there holds
+the design and the phases).
 
 The Anvil workspace provides the integration layer: call orchestration, platform audio
 I/O, an FFI boundary for mobile UIs, and a reference CLI client.
@@ -96,8 +100,14 @@ Softphone-relevant forge-media entry points:
 ```bash
 # Desktop dev (Linux / macOS / Windows)
 cargo build --workspace
-cargo test  --workspace
+cargo test  --workspace            # unit tests, and two Anvils calling each other
 cargo run   -p anvil-cli -- --help
+
+# Against a running FCP (an admin and a call manager): crates/anvil-core/tests/fcp.rs.
+# CI runs it on FCP's compose stack from the nightly images.
+ANVIL_FCP_ADMIN=http://127.0.0.1:8080 ANVIL_FCP_TOKEN=<admin token> \
+ANVIL_FCP_SIP=127.0.0.1:5060 cargo test -p anvil-core --test fcp
+# ANVIL_LOG=debug shows Anvil's own log in any integration test.
 
 # Mobile cross-compile (Phase 3)
 cargo build -p anvil-ffi --target aarch64-apple-ios --release
@@ -105,10 +115,14 @@ cargo build -p anvil-ffi --target aarch64-linux-android --release
 ```
 
 Install once: `cargo install cargo-ndk` (Android) and the usual `rustup target add`s.
+On Linux, cpal needs the ALSA headers (`libasound2-dev`).
+
+To move to a new siphon-rs or forge-media release, change the tags in the root
+`Cargo.toml` (every crate of one repo on the same tag).
 
 ## Conventions
 
-- Rust 2021, MSRV 1.75 (matches forge-media).
+- Rust 2021, MSRV 1.97 (the toolchain CI lints on, as siphon-rs does).
 - `rustfmt` on save. `clippy -- -D warnings` in CI.
 - Public types: derive `Debug`; derive `Clone` only when cheap. Never derive `Copy`
   on anything containing a handle or `Arc`.

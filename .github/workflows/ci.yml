@@ -1,0 +1,113 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  schedule:
+    # After FCP's nightly images are published.
+    - cron: "0 9 * * *"
+  workflow_dispatch:
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  # Formatting and lints on a pinned toolchain, so a new clippy release
+  # does not fail an unchanged tree (siphon-rs pins the same one).
+  lint:
+    name: fmt and clippy
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: dtolnay/rust-toolchain@1.97.1
+        with:
+          components: rustfmt, clippy
+      - name: Audio headers for cpal
+        run: sudo apt-get update && sudo apt-get install -y libasound2-dev
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo fmt --all -- --check
+      - run: cargo clippy --workspace --all-targets -- -D warnings
+
+  # Unit tests and two Anvils calling each other with no server.
+  test:
+    name: tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Audio headers for cpal
+        run: sudo apt-get update && sudo apt-get install -y libasound2-dev
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo test --workspace
+
+  # Anvil against FCP: FCP's compose stack from its nightly images, and
+  # the tests against it (users made through the admin API, calls through
+  # the call manager). FCP's repository and images are private: the
+  # FCP_READ_TOKEN secret (a token that may read thevoiceguy/fcp and its
+  # packages) lets this job reach them; without it the job says so and
+  # passes.
+  fcp:
+    name: against FCP
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    permissions:
+      contents: read
+      packages: read
+    env:
+      FCP_READ_TOKEN: ${{ secrets.FCP_READ_TOKEN }}
+    steps:
+      - name: Without FCP_READ_TOKEN, FCP cannot be reached
+        if: env.FCP_READ_TOKEN == ''
+        run: echo "::notice::FCP_READ_TOKEN is not set; the tests against FCP were skipped"
+      - uses: actions/checkout@v5
+        if: env.FCP_READ_TOKEN != ''
+      - name: FCP's compose files
+        if: env.FCP_READ_TOKEN != ''
+        uses: actions/checkout@v5
+        with:
+          repository: thevoiceguy/fcp
+          token: ${{ secrets.FCP_READ_TOKEN }}
+          path: fcp
+          sparse-checkout: deploy/docker-compose
+      - name: Free disk space
+        if: env.FCP_READ_TOKEN != ''
+        run: sudo rm -rf /usr/share/dotnet /opt/ghc /usr/local/lib/android /opt/hostedtoolcache/CodeQL
+      - uses: docker/login-action@v3
+        if: env.FCP_READ_TOKEN != ''
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.FCP_READ_TOKEN }}
+      - name: Start FCP from its nightly images
+        if: env.FCP_READ_TOKEN != ''
+        working-directory: fcp/deploy/docker-compose
+        run: |
+          ip=$(hostname -I | awk '{print $1}')
+          sed -i "s/^HOST_IP=.*/HOST_IP=$ip/; s/^FCP_IMAGE_TAG=.*/FCP_IMAGE_TAG=nightly/" .env
+          docker compose pull --quiet
+          docker compose up -d --no-build
+          scripts/wait-healthy.sh 300
+      - uses: dtolnay/rust-toolchain@stable
+        if: env.FCP_READ_TOKEN != ''
+      - name: Audio headers for cpal
+        if: env.FCP_READ_TOKEN != ''
+        run: sudo apt-get update && sudo apt-get install -y libasound2-dev
+      - uses: Swatinem/rust-cache@v2
+        if: env.FCP_READ_TOKEN != ''
+      - name: Anvil against FCP
+        if: env.FCP_READ_TOKEN != ''
+        env:
+          ANVIL_FCP_ADMIN: http://127.0.0.1:8080
+          ANVIL_FCP_SIP: 127.0.0.1:5060
+        run: |
+          export ANVIL_FCP_TOKEN=$(grep '^FCP_ADMIN_AUTH_TOKEN=' fcp/deploy/docker-compose/.env | cut -d= -f2-)
+          cargo test -p anvil-core --test fcp -- --nocapture
+      - name: FCP's logs
+        if: failure() && env.FCP_READ_TOKEN != ''
+        working-directory: fcp/deploy/docker-compose
+        run: docker compose logs --no-color --tail 300
+      - name: Stop FCP
+        if: always() && env.FCP_READ_TOKEN != ''
+        working-directory: fcp/deploy/docker-compose
+        run: docker compose down -v

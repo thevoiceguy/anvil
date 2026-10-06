@@ -36,7 +36,7 @@ pub struct DeviceInfo {
 /// A factory for capture/playback streams, supplied to `Anvil::start`.
 pub trait AudioHost: Send + Sync {
     /// Open a microphone stream.
-    fn make_capture (&self, cfg: AudioFormat) -> Result<Box<dyn AudioSource>, AnvilError>;
+    fn make_capture(&self, cfg: AudioFormat) -> Result<Box<dyn AudioSource>, AnvilError>;
     /// Open a speaker stream.
     fn make_playback(&self, cfg: AudioFormat) -> Result<Box<dyn AudioSink>, AnvilError>;
     /// Enumerate devices. Returns an empty vec on hosts that don't expose enumeration.

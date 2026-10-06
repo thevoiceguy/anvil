@@ -70,16 +70,12 @@ pub struct AnvilAudioHostC {
     /// Open a capture stream. Return non-NULL on success, NULL on
     /// failure. The returned pointer is opaque to Anvil and lives until
     /// `close_stream` is called on it.
-    pub open_capture: unsafe extern "C" fn(
-        user_data: *mut c_void,
-        fmt: *const AnvilAudioFormat,
-    ) -> *mut c_void,
+    pub open_capture:
+        unsafe extern "C" fn(user_data: *mut c_void, fmt: *const AnvilAudioFormat) -> *mut c_void,
 
     /// Open a playback stream. Same semantics as `open_capture`.
-    pub open_playback: unsafe extern "C" fn(
-        user_data: *mut c_void,
-        fmt: *const AnvilAudioFormat,
-    ) -> *mut c_void,
+    pub open_playback:
+        unsafe extern "C" fn(user_data: *mut c_void, fmt: *const AnvilAudioFormat) -> *mut c_void,
 
     /// Pull one PCM frame from a capture stream into `out`. The buffer
     /// is sized for `out_capacity` `int16_t` elements (Anvil sizes it
@@ -166,11 +162,11 @@ impl CHostAudioHost {
 impl AudioHost for CHostAudioHost {
     fn make_capture(&self, cfg: AudioFormat) -> Result<Box<dyn AudioSource>, AnvilError> {
         let fmt: AnvilAudioFormat = cfg.into();
-        let stream = unsafe {
-            (self.host.open_capture)(self.host.user_data, &fmt as *const _)
-        };
+        let stream = unsafe { (self.host.open_capture)(self.host.user_data, &fmt as *const _) };
         if stream.is_null() {
-            return Err(AnvilError::AudioDevice("host open_capture returned NULL".into()));
+            return Err(AnvilError::AudioDevice(
+                "host open_capture returned NULL".into(),
+            ));
         }
         Ok(Box::new(CCapture {
             host: std::sync::Arc::clone(&self.host),
@@ -182,11 +178,11 @@ impl AudioHost for CHostAudioHost {
 
     fn make_playback(&self, cfg: AudioFormat) -> Result<Box<dyn AudioSink>, AnvilError> {
         let fmt: AnvilAudioFormat = cfg.into();
-        let stream = unsafe {
-            (self.host.open_playback)(self.host.user_data, &fmt as *const _)
-        };
+        let stream = unsafe { (self.host.open_playback)(self.host.user_data, &fmt as *const _) };
         if stream.is_null() {
-            return Err(AnvilError::AudioDevice("host open_playback returned NULL".into()));
+            return Err(AnvilError::AudioDevice(
+                "host open_playback returned NULL".into(),
+            ));
         }
         Ok(Box::new(CPlayback {
             host: std::sync::Arc::clone(&self.host),
