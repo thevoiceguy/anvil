@@ -17,8 +17,13 @@ live in FCP: `docs/SOFTPHONE.md` in `thevoiceguy/fcp`. Anvil's phases:
       603 for a ringing call, a BYE for our own outgoing call, TCP (listener, pool,
       answers on the connection), the advertised Contact, the configured codecs and
       user agent; tests Anvil to Anvil and against FCP, and CI
-- [ ] **A1** Sign in to FCP (`anvil-fcp`: discovery, the browser sign-in,
-      `/me/softphone`, the account store), `anvil-cli login`
+- [x] **A1** Sign in to FCP: `anvil-fcp` (discovery through
+      `/.well-known/fcp-provisioning`, the browser sign-in with a loopback
+      listener and PKCE, the password sign-in, the app session kept by a
+      `TokenStore` with a file store for desktops, refresh, `/me/softphone`
+      into an `AccountConfig`, a new SIP password, sign-out); `anvil-cli login`
+      / `logout` and runs from the session. The CLI's interactive commands
+      move to A3, with the features they drive
 - [ ] **A2** Branding from FCP (`anvil-brand` filled in)
 - [ ] **A3** Calling features over SIP: MWI, BLF, presence, transfer, park, call waiting
 - [ ] **A4** The app's data: call history, directory, voicemail, settings, live events

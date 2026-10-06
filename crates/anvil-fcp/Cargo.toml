@@ -1,0 +1,28 @@
+[package]
+name = "anvil-fcp"
+description = "Anvil as FCP's client: finding FCP, signing in, the app session and the softphone's settings."
+version.workspace      = true
+edition.workspace      = true
+rust-version.workspace = true
+license.workspace      = true
+authors.workspace      = true
+repository.workspace   = true
+homepage.workspace     = true
+
+[dependencies]
+anvil-core = { workspace = true }
+tokio      = { workspace = true }
+thiserror  = { workspace = true }
+tracing    = { workspace = true }
+serde      = { workspace = true }
+serde_json = { workspace = true }
+reqwest    = { version = "0.12", default-features = false, features = ["rustls-tls", "json"] }
+url        = "2"
+sha2       = "0.10"
+base64     = "0.22"
+rand       = "0.8"
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["test-util"] }
+async-trait = { workspace = true }
+tracing-subscriber = { workspace = true }

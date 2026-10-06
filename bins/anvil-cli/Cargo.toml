@@ -11,6 +11,7 @@ homepage.workspace     = true
 
 [dependencies]
 anvil-core  = { workspace = true }
+anvil-fcp   = { workspace = true }
 anvil-audio = { workspace = true, features = ["cpal-default", "tone"] }
 
 tokio              = { workspace = true }

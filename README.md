@@ -41,7 +41,14 @@ See [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) for the full design.
 
 ```bash
 cargo build --workspace
-cargo run   -p anvil-cli
+
+# Signed in to FCP: the account comes from FCP.
+cargo run -p anvil-cli -- login https://pbx.example.com    # opens the browser
+cargo run -p anvil-cli -- --call sip:bob@example.com
+
+# Or an account by hand.
+cargo run -p anvil-cli -- --aor sip:alice@example.com --registrar sip:example.com \
+    --username alice --password …
 ```
 
 ## Crates
@@ -52,6 +59,7 @@ cargo run   -p anvil-cli
 | `anvil-audio` | Cross-platform mic/speaker via `cpal`, plus AEC/NS/AGC        |
 | `anvil-brand` | FCP tenant branding — HTTP fetch + filesystem cache           |
 | `anvil-codec` | Opus wrapper (forge-media already provides G.711/G.722)       |
+| `anvil-fcp`   | FCP's client: discovery, sign-in, the app session, settings |
 | `anvil-ffi`   | C ABI surface for mobile/native UI hosts                      |
 | `anvil-cli`   | Terminal softphone — reference UAC and dev-loop test harness  |
 

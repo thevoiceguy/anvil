@@ -1,5 +1,9 @@
 //! anvil-cli — terminal softphone.
 //!
+//! Signed in to FCP (`anvil-cli login https://pbx.example.com`), it runs
+//! with what FCP tells it; or give an account by hand with `--aor`,
+//! `--registrar`, `--username` and `--password`.
+//!
 //! Phase 1 M2: REGISTER, then place an outgoing call if `--call` is given.
 //! Prints every event. Hangs up on Ctrl+C. No media flow yet (the INVITE
 //! advertises an RTP port, but no audio frames cross the wire).
@@ -13,26 +17,34 @@ use anvil_core::{
     AccountConfig, Anvil, AnvilConfig, BrandConfig, CallId, Event, MediaConfig, Transport,
 };
 use anyhow::Result;
-use clap::Parser;
+use clap::{Parser, Subcommand};
 
 #[derive(Parser, Debug)]
 #[command(name = "anvil-cli", about = "Anvil terminal softphone (Phase 1 M2)")]
 struct Cli {
-    /// Address-of-record, e.g. `sip:alice@example.com`.
+    #[command(subcommand)]
+    command: Option<Command>,
+
+    /// Where the FCP session is kept (default: the user's config directory).
+    #[arg(long, env = "ANVIL_SESSION", global = true)]
+    session: Option<std::path::PathBuf>,
+
+    /// Address-of-record, e.g. `sip:alice@example.com`. Without it, the
+    /// account comes from FCP (`anvil-cli login` first).
     #[arg(long)]
-    aor: String,
+    aor: Option<String>,
 
     /// Registrar host or URI, e.g. `sip:example.com` or `example.com:5060`.
     #[arg(long)]
-    registrar: String,
+    registrar: Option<String>,
 
     /// SIP username.
     #[arg(long)]
-    username: String,
+    username: Option<String>,
 
     /// SIP password.
     #[arg(long, env = "ANVIL_PASSWORD")]
-    password: String,
+    password: Option<String>,
 
     /// Optional target to call after registering, e.g. `sip:bob@example.com`.
     /// If omitted, anvil-cli just holds the registration.
@@ -99,6 +111,114 @@ struct Cli {
     agc: bool,
 }
 
+#[derive(Subcommand, Debug)]
+enum Command {
+    /// Sign in to FCP: through the browser, or with `--user` and a password.
+    Login {
+        /// The FCP server (`https://pbx.example.com`) or your email address.
+        place: String,
+        /// Sign in without a browser, as this user.
+        #[arg(long)]
+        user: Option<String>,
+        /// The password for `--user`.
+        #[arg(long, env = "ANVIL_FCP_PASSWORD")]
+        password: Option<String>,
+        /// The one-time code, when FCP asks for one.
+        #[arg(long)]
+        totp: Option<String>,
+    },
+    /// Sign out of FCP: the app's session ends.
+    Logout,
+}
+
+/// Where the FCP session lives.
+fn session_path(cli: &Cli) -> std::path::PathBuf {
+    cli.session.clone().unwrap_or_else(|| {
+        let base = std::env::var_os("XDG_CONFIG_HOME")
+            .map(std::path::PathBuf::from)
+            .or_else(|| std::env::var_os("HOME").map(|h| std::path::Path::new(&h).join(".config")))
+            .unwrap_or_else(|| std::path::PathBuf::from("."));
+        base.join("anvil").join("session.json")
+    })
+}
+
+/// `anvil-cli login`: sign in, keep the session.
+async fn login(
+    cli: &Cli,
+    place: &str,
+    user: Option<&str>,
+    password: Option<&str>,
+    totp: Option<&str>,
+) -> Result<()> {
+    use anvil_fcp::TokenStore;
+    let store = anvil_fcp::FileTokenStore::new(session_path(cli));
+    // The same install signing in again keeps its device.
+    let install = store
+        .load()
+        .ok()
+        .flatten()
+        .map(|s| s.client.install_id)
+        .unwrap_or_else(anvil_fcp::AppClient::new_install_id);
+    let client = anvil_fcp::AppClient::this_machine(install);
+    let server = anvil_fcp::discover(place).await?;
+    let session = match user {
+        Some(user) => {
+            let password = password.ok_or_else(|| {
+                anyhow::anyhow!("--user needs --password (or ANVIL_FCP_PASSWORD)")
+            })?;
+            anvil_fcp::password_sign_in(server, client, user, password, totp).await?
+        }
+        None => {
+            let signin = anvil_fcp::BrowserSignIn::start(server, client).await?;
+            println!("Sign in in your browser:\n\n  {}\n", signin.authorize_url());
+            open_browser(signin.authorize_url());
+            signin.finish(Duration::from_secs(600)).await?
+        }
+    };
+    store.save(&session)?;
+    println!(
+        "Signed in as {} on {} (device {}). Session kept in {}.",
+        session.username,
+        session.server.public_url,
+        session
+            .device
+            .as_ref()
+            .map(|d| d.sip_username.as_str())
+            .unwrap_or("-"),
+        store.path().display()
+    );
+    Ok(())
+}
+
+/// Ask the desktop to open `url`; the address was printed either way.
+fn open_browser(url: &str) {
+    let opener = if cfg!(target_os = "macos") {
+        ("open", vec![url])
+    } else if cfg!(target_os = "windows") {
+        ("cmd", vec!["/C", "start", "", url])
+    } else {
+        ("xdg-open", vec![url])
+    };
+    let _ = std::process::Command::new(opener.0)
+        .args(opener.1)
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .spawn();
+}
+
+/// The account from the FCP session, refreshed and kept.
+async fn fcp_account(cli: &Cli) -> Result<AccountConfig> {
+    use anvil_fcp::TokenStore;
+    let store = Arc::new(anvil_fcp::FileTokenStore::new(session_path(cli)));
+    let session = store.load()?.ok_or_else(|| {
+        anyhow::anyhow!("not signed in: run `anvil-cli login <server>` or give --aor")
+    })?;
+    let client = anvil_fcp::FcpClient::new(session, Some(store as Arc<dyn TokenStore>));
+    let config = client.softphone().await?;
+    tracing::info!(aor = %config.account.aor, proxy = ?config.account.outbound_proxy, "account from FCP");
+    Ok(client.account_config(&config).await?)
+}
+
 #[tokio::main]
 async fn main() -> Result<()> {
     tracing_subscriber::fmt()
@@ -109,6 +229,35 @@ async fn main() -> Result<()> {
         .init();
 
     let cli = Cli::parse();
+    match &cli.command {
+        Some(Command::Login {
+            place,
+            user,
+            password,
+            totp,
+        }) => {
+            return login(
+                &cli,
+                place,
+                user.as_deref(),
+                password.as_deref(),
+                totp.as_deref(),
+            )
+            .await;
+        }
+        Some(Command::Logout) => {
+            use anvil_fcp::TokenStore;
+            let store = Arc::new(anvil_fcp::FileTokenStore::new(session_path(&cli)));
+            if let Some(session) = store.load()? {
+                anvil_fcp::FcpClient::new(session, Some(store as Arc<dyn TokenStore>))
+                    .sign_out()
+                    .await?;
+            }
+            println!("Signed out.");
+            return Ok(());
+        }
+        None => {}
+    }
 
     let tls_extra_ca_pem = if let Some(path) = cli.tls_ca.as_ref() {
         Some(std::fs::read(path).map_err(|e| anyhow::anyhow!("read --tls-ca: {e}"))?)
@@ -116,23 +265,35 @@ async fn main() -> Result<()> {
         None
     };
 
-    let account = AccountConfig {
-        aor: cli.aor.clone(),
-        registrar: cli.registrar.clone(),
-        username: cli.username.clone(),
-        password: cli.password.clone(),
-        transport: if cli.tls {
-            Transport::Tls
-        } else {
-            Transport::Udp
+    let account = match (&cli.aor, &cli.registrar, &cli.username, &cli.password) {
+        (Some(aor), Some(registrar), Some(username), Some(password)) => AccountConfig {
+            aor: aor.clone(),
+            registrar: registrar.clone(),
+            username: username.clone(),
+            password: password.clone(),
+            transport: if cli.tls {
+                Transport::Tls
+            } else {
+                Transport::Udp
+            },
+            outbound_proxy: cli.outbound_proxy.clone(),
+            stun: cli.stun.clone(),
+            register_expires: Duration::from_secs(3600),
+            user_agent: format!("Anvil/{}", env!("CARGO_PKG_VERSION")),
+            bind_addr: cli.bind.clone(),
+            tls_extra_ca_pem,
+            provisioning_url: None,
         },
-        outbound_proxy: cli.outbound_proxy.clone(),
-        stun: cli.stun.clone(),
-        register_expires: Duration::from_secs(3600),
-        user_agent: format!("Anvil/{}", env!("CARGO_PKG_VERSION")),
-        bind_addr: cli.bind.clone(),
-        tls_extra_ca_pem,
-        provisioning_url: None,
+        (None, None, None, None) => {
+            let mut account = fcp_account(&cli).await?;
+            account.bind_addr = cli.bind.clone();
+            account.stun = cli.stun.clone();
+            account.tls_extra_ca_pem = tls_extra_ca_pem;
+            account
+        }
+        _ => anyhow::bail!(
+            "give all of --aor, --registrar, --username and --password, or none (signed in to FCP)"
+        ),
     };
 
     let (audio, tone_stats): (
