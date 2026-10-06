@@ -49,16 +49,16 @@ cpal = "0.15"
 opus = "0.3"
 
 # siphon-rs (SIP stack) — pinned to a release tag
-sip-core = { git = "https://github.com/thevoiceguy/siphon-rs", tag = "v2026.10.05.1" }
-sip-parse = { git = "https://github.com/thevoiceguy/siphon-rs", tag = "v2026.10.05.1" }
-sip-transport = { git = "https://github.com/thevoiceguy/siphon-rs", tag = "v2026.10.05.1", features = ["tls"] }
-sip-transaction = { git = "https://github.com/thevoiceguy/siphon-rs", tag = "v2026.10.05.1" }
-sip-dialog = { git = "https://github.com/thevoiceguy/siphon-rs", tag = "v2026.10.05.1" }
-sip-uac = { git = "https://github.com/thevoiceguy/siphon-rs", tag = "v2026.10.05.1" }
-sip-uas = { git = "https://github.com/thevoiceguy/siphon-rs", tag = "v2026.10.05.1" }
-sip-sdp = { git = "https://github.com/thevoiceguy/siphon-rs", tag = "v2026.10.05.1" }
-sip-auth = { git = "https://github.com/thevoiceguy/siphon-rs", tag = "v2026.10.05.1" }
-sip-dns = { git = "https://github.com/thevoiceguy/siphon-rs", tag = "v2026.10.05.1" }
+sip-core = { git = "https://github.com/thevoiceguy/siphon-rs", tag = "v2026.10.06" }
+sip-parse = { git = "https://github.com/thevoiceguy/siphon-rs", tag = "v2026.10.06" }
+sip-transport = { git = "https://github.com/thevoiceguy/siphon-rs", tag = "v2026.10.06", features = ["tls"] }
+sip-transaction = { git = "https://github.com/thevoiceguy/siphon-rs", tag = "v2026.10.06" }
+sip-dialog = { git = "https://github.com/thevoiceguy/siphon-rs", tag = "v2026.10.06" }
+sip-uac = { git = "https://github.com/thevoiceguy/siphon-rs", tag = "v2026.10.06" }
+sip-uas = { git = "https://github.com/thevoiceguy/siphon-rs", tag = "v2026.10.06" }
+sip-sdp = { git = "https://github.com/thevoiceguy/siphon-rs", tag = "v2026.10.06" }
+sip-auth = { git = "https://github.com/thevoiceguy/siphon-rs", tag = "v2026.10.06" }
+sip-dns = { git = "https://github.com/thevoiceguy/siphon-rs", tag = "v2026.10.06" }
 
 # forge-media — pinned to a release tag
 forge-rtp = { git = "https://github.com/thevoiceguy/forge-media", tag = "v2026.09.29" }
