@@ -337,6 +337,11 @@ async fn run(cli: Cli, cfg: AnvilConfig, tone_stats: Option<Arc<ToneStats>>) -> 
 
     tracing::info!("registering...");
     anvil.register().await?;
+    // Message waiting: a server that does not take the subscription still
+    // lights the lamp with unsolicited NOTIFYs.
+    if let Err(e) = anvil.subscribe_mwi().await {
+        tracing::info!(%e, "no message-summary subscription");
+    }
 
     // Optionally place a call. Either way, we then run a single event-drain
     // loop until the call ends / hold timer fires / Ctrl+C.
@@ -447,6 +452,12 @@ async fn run(cli: Cli, cfg: AnvilConfig, tone_stats: Option<Arc<ToneStats>>) -> 
                         );
                     }
                     Event::BrandCleared => println!("[brand] none: the default theme"),
+                    Event::MessageWaiting { summary } => println!(
+                        "[mwi] {} new, {} old{}",
+                        summary.new,
+                        summary.old,
+                        if summary.waiting { " (waiting)" } else { "" }
+                    ),
                     other => println!("[event] {other:?}"),
                 }
             }

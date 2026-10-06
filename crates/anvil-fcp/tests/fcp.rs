@@ -499,3 +499,89 @@ async fn anvil_takes_on_the_tenants_brand() {
     let _ = anvil.shutdown().await;
     let _ = std::fs::remove_dir_all(&cache);
 }
+
+impl Fcp {
+    /// A mailbox for `username`: a number, its line, the mailbox.
+    async fn mailbox(&self, username: &str) {
+        use rand::Rng;
+        let call = |method: reqwest::Method, path: String, body: Value| {
+            let req = self
+                .http
+                .request(method, format!("{}/api/v1{path}", self.admin))
+                .bearer_auth(&self.token)
+                .header("X-FCP-Tenant-Id", &self.tenant)
+                .json(&body);
+            async move {
+                let res = req.send().await.unwrap();
+                let status = res.status();
+                let json: Value = res.json().await.unwrap_or_default();
+                assert!(status.is_success(), "{path}: {status} {json}");
+                json
+            }
+        };
+        let user = self
+            .http
+            .get(format!("{}/api/v1/users/{username}", self.admin))
+            .bearer_auth(&self.token)
+            .header("X-FCP-Tenant-Id", &self.tenant)
+            .send()
+            .await
+            .unwrap()
+            .json::<Value>()
+            .await
+            .unwrap();
+        let n: u32 = rand::thread_rng().gen_range(1_000_000..9_999_999);
+        let number = call(
+            reqwest::Method::POST,
+            "/phone-numbers".into(),
+            json!({"e164": format!("+1512{n}"), "tenant_id": self.tenant}),
+        )
+        .await;
+        let line = call(
+            reqwest::Method::POST,
+            "/line-bindings".into(),
+            json!({"phone_number_id": number["id"], "owner_user_id": user["id"],
+                   "binding_type": "user", "tenant_id": self.tenant}),
+        )
+        .await;
+        call(
+            reqwest::Method::POST,
+            "/voicemail/mailboxes".into(),
+            json!({"tenant_id": self.tenant, "user_id": user["id"],
+                   "line_binding_id": line["id"], "pin": "4321", "enabled": true}),
+        )
+        .await;
+    }
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn anvil_is_told_its_messages() {
+    let fcp = fcp_or_skip!();
+    let server = discover(&fcp.admin).await.unwrap();
+    let (name, pw) = fcp.user("mwi").await;
+    fcp.mailbox(&name).await;
+    let session = password_sign_in(
+        server,
+        AppClient::this_machine(AppClient::new_install_id()),
+        &name,
+        &pw,
+        None,
+    )
+    .await
+    .unwrap();
+    let client = FcpClient::new(session, None);
+    let (anvil, mut events) = softphone(&client, "127.0.0.42").await;
+    anvil
+        .subscribe_mwi()
+        .await
+        .expect("FCP takes the message-summary subscription");
+    let summary = expect(&mut events, SOON, |e| match e {
+        Event::MessageWaiting { summary } => Some(*summary),
+        _ => None,
+    })
+    .await
+    .expect("the mailbox's counts at once");
+    assert!(!summary.waiting, "{summary:?}");
+    assert_eq!((summary.new, summary.old), (0, 0));
+    let _ = anvil.shutdown().await;
+}

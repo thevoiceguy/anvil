@@ -41,6 +41,9 @@ pub enum AnvilEventKind {
     BrandUpdated = 8,
     /// `BrandCleared`: the tenant has no brand; show the app's own theme.
     BrandCleared = 9,
+    /// `MessageWaiting`. Read `mwi_waiting`, `mwi_new`, `mwi_old`,
+    /// `mwi_urgent_new` and `mwi_urgent_old`.
+    MessageWaiting = 10,
 }
 
 /// Mirrors `anvil_core::RegState`. Stable numbering.
@@ -126,6 +129,13 @@ pub struct AnvilEvent {
     /// `BrandUpdated` only. NUL-terminated UTF-8 JSON, valid for the
     /// duration of the callback.
     pub brand_json: *const c_char,
+    /// `MessageWaiting` only: 1 when messages are waiting.
+    pub mwi_waiting: u8,
+    /// `MessageWaiting` only: the voice message counts.
+    pub mwi_new: u32,
+    pub mwi_old: u32,
+    pub mwi_urgent_new: u32,
+    pub mwi_urgent_old: u32,
 }
 
 /// Function-pointer type for the user callback. Fires from a worker
@@ -172,6 +182,11 @@ pub(crate) fn dispatch(slot: CallbackSlot, event: &Event) {
         display_name: std::ptr::null(),
         reason: std::ptr::null(),
         brand_json: std::ptr::null(),
+        mwi_waiting: 0,
+        mwi_new: 0,
+        mwi_old: 0,
+        mwi_urgent_new: 0,
+        mwi_urgent_old: 0,
     };
 
     // Hold any allocated CStrings until after the callback returns.
@@ -254,6 +269,14 @@ pub(crate) fn dispatch(slot: CallbackSlot, event: &Event) {
         }
         Event::BrandCleared => {
             ev.kind = AnvilEventKind::BrandCleared;
+        }
+        Event::MessageWaiting { summary } => {
+            ev.kind = AnvilEventKind::MessageWaiting;
+            ev.mwi_waiting = u8::from(summary.waiting);
+            ev.mwi_new = summary.new;
+            ev.mwi_old = summary.old;
+            ev.mwi_urgent_new = summary.urgent_new;
+            ev.mwi_urgent_old = summary.urgent_old;
         }
         // `Event` is `#[non_exhaustive]`; cover any future variants
         // gracefully by emitting an Error rather than panicking.

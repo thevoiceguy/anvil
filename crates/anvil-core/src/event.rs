@@ -79,6 +79,11 @@ pub enum Event {
     /// The tenant has no brand (any more), or the server refused the
     /// credential: the UI goes back to its own theme.
     BrandCleared,
+    /// The mailbox's counts (RFC 3842), from an unsolicited NOTIFY or a
+    /// [`subscribe_mwi`](crate::Anvil::subscribe_mwi) subscription.
+    MessageWaiting {
+        summary: crate::mwi::MessageSummary,
+    },
     Error {
         call: Option<CallId>,
         error: AnvilError,
