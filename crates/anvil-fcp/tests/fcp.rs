@@ -15,7 +15,8 @@ use std::time::Duration;
 
 use anvil_core::audio::{AudioFormat, AudioFrame, AudioHost, AudioSink, AudioSource, DeviceInfo};
 use anvil_core::{
-    Anvil, AnvilConfig, AnvilError, BrandConfig, Event, EventStream, MediaConfig, RegState,
+    Anvil, AnvilConfig, AnvilError, BrandConfig, CallId, EndReason, Event, EventStream,
+    MediaConfig, RegState,
 };
 use anvil_fcp::{discover, password_sign_in, AppClient, BrowserSignIn, FcpClient, FcpError};
 use async_trait::async_trait;
@@ -664,5 +665,200 @@ async fn anvil_watches_a_colleagues_lamp() {
     carol_phone.unwatch(&bob_aor, WatchKind::Dialog);
     for phone in [alice_phone, bob_phone, carol_phone] {
         let _ = phone.shutdown().await;
+    }
+}
+
+/// Three signed-in softphones, registered, at three addresses.
+async fn three(fcp: &Fcp, tag: &str, base: u8) -> Vec<(FcpClient, String, Anvil, EventStream)> {
+    let mut out = Vec::new();
+    for (i, who) in ["alice", "bob", "carol"].iter().enumerate() {
+        let (client, name) = signed_in(fcp, &format!("{tag}-{who}")).await;
+        let (anvil, events) = softphone(&client, &format!("127.0.0.{}", base + i as u8)).await;
+        out.push((client, name, anvil, events));
+    }
+    out
+}
+
+async fn established(events: &mut EventStream, call: Option<CallId>) -> CallId {
+    expect(events, SOON, |e| match e {
+        Event::CallEstablished { call: c, .. } if call.is_none_or(|x| x == *c) => Some(*c),
+        _ => None,
+    })
+    .await
+    .expect("the call is up")
+}
+
+async fn rings(events: &mut EventStream) -> CallId {
+    expect(events, SOON, |e| match e {
+        Event::IncomingCall { call, .. } => Some(*call),
+        _ => None,
+    })
+    .await
+    .expect("the phone rings")
+}
+
+async fn ended(events: &mut EventStream, call: CallId) -> EndReason {
+    expect(events, SOON, |e| match e {
+        Event::CallEnded { call: c, reason } if *c == call => Some(reason.clone()),
+        _ => None,
+    })
+    .await
+    .expect("the call ends")
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn anvil_transfers_a_call_blind() {
+    let fcp = fcp_or_skip!();
+    let mut p = three(&fcp, "blind", 50).await;
+    let domain = p[0].0.softphone().await.unwrap().account.domain;
+    let aor = |name: &str| format!("sip:{name}@{domain}");
+    let (bob_aor, carol_aor) = (aor(&p[1].1), aor(&p[2].1));
+
+    // Alice calls Bob; Bob answers.
+    let out = p[0].2.place_call(&bob_aor).await.unwrap();
+    let at_bob = rings(&mut p[1].3).await;
+    p[1].2.answer(at_bob).await.unwrap();
+    established(&mut p[0].3, Some(out)).await;
+
+    // Alice sends Bob to Carol: Carol rings and answers, Alice is told and
+    // let go, Bob stays on the line.
+    p[0].2
+        .transfer(out, &carol_aor)
+        .await
+        .expect("FCP takes the REFER");
+    let at_carol = rings(&mut p[2].3).await;
+    p[2].2.answer(at_carol).await.unwrap();
+    let done = expect(&mut p[0].3, SOON, |e| match e {
+        Event::TransferProgress { call, code, .. } if *call == out && *code >= 200 => Some(*code),
+        _ => None,
+    })
+    .await;
+    assert_eq!(done, Some(200), "the transfer succeeded");
+    assert!(matches!(
+        ended(&mut p[0].3, out).await,
+        EndReason::RemoteHangup
+    ));
+    assert!(
+        expect(&mut p[1].3, Duration::from_secs(1), |e| matches!(
+            e,
+            Event::CallEnded { call, .. } if *call == at_bob
+        )
+        .then_some(()))
+        .await
+        .is_none(),
+        "Bob is still on the line, now with Carol"
+    );
+    for (_, _, anvil, _) in p {
+        let _ = anvil.shutdown().await;
+    }
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn anvil_transfers_a_call_attended() {
+    let fcp = fcp_or_skip!();
+    let mut p = three(&fcp, "attended", 60).await;
+    let domain = p[0].0.softphone().await.unwrap().account.domain;
+    let aor = |name: &str| format!("sip:{name}@{domain}");
+    let (bob_aor, carol_aor) = (aor(&p[1].1), aor(&p[2].1));
+
+    // Alice talks to Bob, holds him, consults Carol.
+    let to_bob = p[0].2.place_call(&bob_aor).await.unwrap();
+    let at_bob = rings(&mut p[1].3).await;
+    p[1].2.answer(at_bob).await.unwrap();
+    established(&mut p[0].3, Some(to_bob)).await;
+    p[0].2.hold(to_bob, true).await.expect("Bob held");
+    let to_carol = p[0].2.place_call(&carol_aor).await.unwrap();
+    let at_carol = rings(&mut p[2].3).await;
+    p[2].2.answer(at_carol).await.unwrap();
+    established(&mut p[0].3, Some(to_carol)).await;
+
+    // Alice joins them and leaves: both her calls end, theirs goes on.
+    p[0].2
+        .transfer_attended(to_bob, to_carol)
+        .await
+        .expect("FCP takes the REFER with Replaces");
+    // Both of Alice's calls end, in either order.
+    let mut open = vec![to_bob, to_carol];
+    while !open.is_empty() {
+        let gone = expect(&mut p[0].3, SOON, |e| match e {
+            Event::CallEnded { call, .. } if open.contains(call) => Some(*call),
+            _ => None,
+        })
+        .await
+        .unwrap_or_else(|| panic!("Alice's calls {open:?} did not end"));
+        open.retain(|c| *c != gone);
+    }
+    // FCP joins Bob's leg to Carol's: both stay in the calls they had.
+    for (i, who, call) in [(1, "Bob", at_bob), (2, "Carol", at_carol)] {
+        let gone = expect(&mut p[i].3, Duration::from_secs(1), |e| match e {
+            Event::CallEnded { call: c, .. } if *c == call => Some(()),
+            _ => None,
+        })
+        .await;
+        assert!(gone.is_none(), "{who}'s call ended with the transfer");
+    }
+    for (_, _, anvil, _) in p {
+        let _ = anvil.shutdown().await;
+    }
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn anvil_sets_do_not_disturb_and_hears_a_second_call() {
+    let fcp = fcp_or_skip!();
+    let mut p = three(&fcp, "dnd", 70).await;
+    let domain = p[0].0.softphone().await.unwrap().account.domain;
+    let bob_aor = format!("sip:{}@{domain}", p[1].1);
+
+    // Call waiting: Bob on a call with Alice, Carol's call rings him too.
+    let out = p[0].2.place_call(&bob_aor).await.unwrap();
+    let at_bob = rings(&mut p[1].3).await;
+    p[1].2.answer(at_bob).await.unwrap();
+    established(&mut p[0].3, Some(out)).await;
+    let from_carol = p[2].2.place_call(&bob_aor).await.unwrap();
+    let waiting = rings(&mut p[1].3).await;
+    assert_ne!(waiting, at_bob, "a second call, while the first is up");
+    p[1].2.reject(waiting, 486).await.unwrap();
+    assert!(matches!(
+        ended(&mut p[2].3, from_carol).await,
+        EndReason::Rejected(_)
+    ));
+    p[0].2.hangup(out).await.unwrap();
+
+    // Do not disturb, set from the app: Alice's call is refused unrung.
+    let set = p[1]
+        .0
+        .set_calling(&anvil_fcp::CallingUpdate {
+            dnd: Some(true),
+            ..Default::default()
+        })
+        .await
+        .expect("/me/calling");
+    assert!(set.dnd);
+    let refused = p[0].2.place_call(&bob_aor).await.unwrap();
+    assert!(matches!(
+        ended(&mut p[0].3, refused).await,
+        EndReason::Rejected(_)
+    ));
+    assert!(
+        expect(&mut p[1].3, Duration::from_millis(500), |e| matches!(
+            e,
+            Event::IncomingCall { .. }
+        )
+        .then_some(()))
+        .await
+        .is_none(),
+        "Bob's app did not ring"
+    );
+    let cleared = p[1]
+        .0
+        .set_calling(&anvil_fcp::CallingUpdate {
+            dnd: Some(false),
+            ..Default::default()
+        })
+        .await
+        .unwrap();
+    assert!(!cleared.dnd);
+    for (_, _, anvil, _) in p {
+        let _ = anvil.shutdown().await;
     }
 }

@@ -88,6 +88,15 @@ struct Cli {
     #[arg(long)]
     hold_at: Option<u64>,
 
+    /// Blind-transfer the call to this address `transfer_after` seconds
+    /// after CallEstablished; the server's progress prints as `[transfer]`.
+    #[arg(long, value_name = "AOR")]
+    transfer_to: Option<String>,
+
+    /// Seconds into the call before `--transfer-to`.
+    #[arg(long, default_value = "3")]
+    transfer_after: u64,
+
     /// Use TLS (sips:) for SIP signaling. Default is UDP.
     #[arg(long)]
     tls: bool,
@@ -436,6 +445,13 @@ async fn run(cli: Cli, cfg: AnvilConfig, tone_stats: Option<Arc<ToneStats>>) -> 
                                 Err(e) => tracing::warn!(%e, "hold off failed"),
                             }
                         }
+                        if let Some(target) = &cli.transfer_to {
+                            tokio::time::sleep(Duration::from_secs(cli.transfer_after)).await;
+                            match anvil.transfer(call, target).await {
+                                Ok(()) => println!("[transfer] to {target}: accepted"),
+                                Err(e) => tracing::warn!(%e, "transfer failed"),
+                            }
+                        }
                     }
                     Event::DtmfReceived { call, digit } => {
                         println!("[event] DtmfReceived {{ call: {call:?}, digit: {digit:?} }}");
@@ -478,6 +494,9 @@ async fn run(cli: Cli, cfg: AnvilConfig, tone_stats: Option<Arc<ToneStats>>) -> 
                     ),
                     Event::LineStateChanged { aor, state } => {
                         println!("[lamp] {aor}: {state:?}")
+                    }
+                    Event::TransferProgress { call, code, reason } => {
+                        println!("[transfer] call={call:?} {code} {reason}")
                     }
                     Event::MessageWaiting { summary } => println!(
                         "[mwi] {} new, {} old{}",

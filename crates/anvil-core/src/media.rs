@@ -118,11 +118,28 @@ impl MediaMetrics {
         }
         // Signed difference handles 16-bit wraparound.
         let delta = (seq as i32).wrapping_sub(s.highest as i32);
-        if delta > 0 && delta < 32_768 {
-            s.highest = seq;
-        } else if delta < -32_768 {
-            // Forward wrap.
-            s.cycles = s.cycles.saturating_add(1);
+        let forward = if delta < -32_768 {
+            delta + 65_536
+        } else if delta > 32_768 {
+            delta - 65_536
+        } else {
+            delta
+        };
+        if !(-MAX_MISORDER..=MAX_DROPOUT).contains(&forward) {
+            // A jump no loss or reordering explains: the far end is a new
+            // stream (a transfer, a re-anchored leg). Count afresh
+            // (RFC 3550 §A.1).
+            *s = SeqState {
+                first: Some(seq),
+                highest: seq,
+                cycles: 0,
+                received: 1,
+            };
+        } else if forward > 0 {
+            if seq < s.highest {
+                // Forward wrap.
+                s.cycles = s.cycles.saturating_add(1);
+            }
             s.highest = seq;
         }
         // Out-of-order packets don't advance `highest`; they're still
@@ -155,6 +172,11 @@ struct JitterState {
     last_transit: Option<i64>,
     current: f64,
 }
+
+/// The largest forward jump in sequence numbers still one stream, and the
+/// largest backward one still reordering (RFC 3550 §A.1).
+const MAX_DROPOUT: i32 = 3000;
+const MAX_MISORDER: i32 = 100;
 
 #[derive(Default)]
 struct SeqState {
@@ -842,9 +864,8 @@ pub(crate) fn start_pipeline(
                     let s = metrics.seq.lock();
                     let expected = match s.first {
                         Some(first) => {
-                            (s.cycles as u64) * 65_536
-                                + (s.highest as u64).wrapping_sub(first as u64)
-                                + 1
+                            let extended = (s.cycles as i64) * 65_536 + s.highest as i64;
+                            (extended - first as i64 + 1).max(0) as u64
                         }
                         None => 0,
                     };
@@ -1039,6 +1060,37 @@ mod tests {
     use tokio::net::UdpSocket;
 
     use super::*;
+
+    fn received(metrics: &MediaMetrics, seqs: &[u16]) {
+        for &seq in seqs {
+            metrics.on_rtp_rx(seq, 0, 160, Instant::now());
+        }
+    }
+
+    #[test]
+    fn a_new_stream_restarts_the_count() {
+        let m = MediaMetrics::new(8000);
+        received(&m, &[40_000, 40_001, 40_002]);
+        // A transfer: the far end's numbering starts somewhere else.
+        received(&m, &[100, 101]);
+        let s = m.seq.lock();
+        assert_eq!(
+            (s.first, s.highest, s.cycles, s.received),
+            (Some(100), 101, 0, 2)
+        );
+    }
+
+    #[test]
+    fn wraparound_and_reordering_are_one_stream() {
+        let m = MediaMetrics::new(8000);
+        received(&m, &[65_534, 65_535, 0, 65_533, 1]);
+        let s = m.seq.lock();
+        assert_eq!(
+            (s.first, s.highest, s.cycles, s.received),
+            (Some(65_534), 1, 1, 5)
+        );
+    }
+
     use crate::audio::{AudioFormat, AudioFrame, AudioSink, AudioSource};
     use crate::error::AnvilError;
 

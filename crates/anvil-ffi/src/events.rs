@@ -49,6 +49,10 @@ pub enum AnvilEventKind {
     PresenceChanged = 11,
     /// `LineStateChanged`. Read `from` (whose) and `line_state`.
     LineStateChanged = 12,
+    /// `TransferProgress`: a transfer of `call_id` progressed. Read
+    /// `status_code` (1xx while the new call is placed, then the final)
+    /// and `reason`.
+    TransferProgress = 13,
 }
 
 /// Mirrors `anvil_core::RegState`. Stable numbering.
@@ -145,6 +149,9 @@ pub struct AnvilEvent {
     pub presence_open: u8,
     /// `LineStateChanged` only: 0 idle, 1 ringing, 2 busy.
     pub line_state: u8,
+    /// `TransferProgress` only: the SIP status of the transferred party's
+    /// new call.
+    pub status_code: u16,
 }
 
 /// Function-pointer type for the user callback. Fires from a worker
@@ -198,6 +205,7 @@ pub(crate) fn dispatch(slot: CallbackSlot, event: &Event) {
         mwi_urgent_old: 0,
         presence_open: 0,
         line_state: 0,
+        status_code: 0,
     };
 
     // Hold any allocated CStrings until after the callback returns.
@@ -297,6 +305,12 @@ pub(crate) fn dispatch(slot: CallbackSlot, event: &Event) {
                 anvil_core::watch::LineState::Ringing => 1,
                 anvil_core::watch::LineState::Busy => 2,
             };
+        }
+        Event::TransferProgress { call, code, reason } => {
+            ev.kind = AnvilEventKind::TransferProgress;
+            ev.call_id = call.0;
+            ev.status_code = *code;
+            ev.reason = push_cstr(&mut keep_alive, reason);
         }
         Event::MessageWaiting { summary } => {
             ev.kind = AnvilEventKind::MessageWaiting;

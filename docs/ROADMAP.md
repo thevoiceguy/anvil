@@ -29,7 +29,7 @@ live in FCP: `docs/SOFTPHONE.md` in `thevoiceguy/fcp`. Anvil's phases:
       `X-FCP-Provisioning-Url`, hourly, `refresh_brand`, `BrandCleared`),
       `anvil_fcp::brand_config`, the CLI and the FFI events
       (`docs/BRANDING.md` §9a)
-- [ ] **A3** Calling features over SIP: MWI, BLF, presence, transfer, park, call waiting
+- [x] **A3** Calling features over SIP: MWI, BLF, presence, transfer, park, call waiting
   - [x] **A3a** Message waiting: NOTIFY `message-summary` (unsolicited or
         subscribed) → `Event::MessageWaiting`, `Anvil::subscribe_mwi()`
         renewed before it lapses, the CLI's `[mwi]`, the FFI's
@@ -42,6 +42,19 @@ live in FCP: `docs/SOFTPHONE.md` in `thevoiceguy/fcp`. Anvil's phases:
         the CLI's `--watch`, the FFI's two kinds. Needs FCP #271 (presence
         per tenant, device credentials, one subscription per device) and
         FCP's ACK fix (a challenged call rang the callee repeatedly)
+  - [x] **A3c** Transfer and the rest: `Anvil::transfer` (blind, a REFER in
+        the call's dialog) and `transfer_attended` (REFER with `Replaces`
+        naming the consultation call), the server's sipfrag NOTIFYs as
+        `Event::TransferProgress`; a call's dialog kept after each in-dialog
+        request so CSeq keeps rising; park as a transfer to
+        `SoftphoneConfig::feature_uri("park")`; do not disturb, call waiting
+        and forwards through `/me/calling` (`FcpClient::calling`,
+        `set_calling`); RTP statistics restarting on a new stream (RFC 3550
+        §A.1) rather than overflowing after a transfer; the CLI's
+        `--transfer-to`, the FFI's `anvil_transfer`,
+        `anvil_transfer_attended` and `TransferProgress`. Needs FCP #275 (the
+        caller transferring the callee, the node's own legs under
+        `auth_invites`, a user dialed by name, a dead watcher freezing lamps)
 - [ ] **A4** The app's data: call history, directory, voicemail, settings, live events
 - [ ] **A5** SDES-SRTP, and the cross-repo suite completed
 
@@ -165,9 +178,6 @@ UI work is deliberately last. Everything until here is UI-less and exercised via
 
 ## Stretch / post-1.0
 
-- Attended transfer (REFER with Replaces)
-- Presence (SUBSCRIBE/NOTIFY, BLF)
-- Voicemail MWI (message-summary event package)
 - SDES-SRTP and DTLS-SRTP for media encryption
 - ICE / TURN for strict-NAT environments
 - Push notification relay service (server-side) so the mobile client doesn't need to
