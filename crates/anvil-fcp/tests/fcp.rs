@@ -862,3 +862,94 @@ async fn anvil_sets_do_not_disturb_and_hears_a_second_call() {
         let _ = anvil.shutdown().await;
     }
 }
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn anvil_reads_the_users_history_directory_voicemail_and_events() {
+    let fcp = fcp_or_skip!();
+    let (alice_client, alice) = signed_in(&fcp, "data-alice").await;
+    let (bob_client, bob) = signed_in(&fcp, "data-bob").await;
+    let (alice_phone, mut alice_events) = softphone(&alice_client, "127.0.0.80").await;
+    let (bob_phone, mut bob_events) = softphone(&bob_client, "127.0.0.81").await;
+    let domain = bob_client.softphone().await.unwrap().account.domain;
+
+    // Bob's live events, open before the call.
+    let mut live = bob_client.events().await.expect("/me/events");
+
+    // Alice calls Bob; Bob answers; Alice hangs up.
+    let out = alice_phone
+        .place_call(&format!("sip:{bob}@{domain}"))
+        .await
+        .unwrap();
+    let at_bob = expect(&mut bob_events, SOON, |e| match e {
+        Event::IncomingCall { call, .. } => Some(*call),
+        _ => None,
+    })
+    .await
+    .expect("Bob rings");
+    bob_phone.answer(at_bob).await.unwrap();
+    expect(&mut alice_events, SOON, |e| match e {
+        Event::CallEstablished { call, .. } if *call == out => Some(()),
+        _ => None,
+    })
+    .await
+    .expect("answered");
+    alice_phone.hangup(out).await.unwrap();
+
+    // Bob's stream follows the call from its start to its end.
+    let mut seen = Vec::new();
+    let deadline = tokio::time::Instant::now() + SOON;
+    while tokio::time::Instant::now() < deadline && !seen.iter().any(|n: &String| n == "call.ended")
+    {
+        match tokio::time::timeout(Duration::from_millis(500), live.next()).await {
+            Ok(Some(event)) => seen.push(event.name),
+            Ok(None) => break,
+            Err(_) => {}
+        }
+    }
+    for name in ["call.initiated", "call.answered", "call.ended"] {
+        assert!(seen.iter().any(|n| n == name), "{name} in {seen:?}");
+    }
+    live.close().await;
+
+    // The call in Bob's history, with Alice.
+    let mut found = None;
+    for _ in 0..40 {
+        let page = bob_client
+            .calls(&anvil_fcp::CallQuery::default())
+            .await
+            .expect("/me/calls");
+        found = page.data.into_iter().find(|c| {
+            c.other_party.contains(&alice) || c.other_party_name.as_deref() == Some(&alice)
+        });
+        if found.is_some() {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(250)).await;
+    }
+    let record = found.expect("the call is in Bob's history");
+    assert_eq!(record.direction, "incoming", "{record:?}");
+    assert!(!record.missed, "{record:?}");
+
+    // Alice in the directory, found by her name.
+    let directory = bob_client
+        .directory(Some(&alice), None, None)
+        .await
+        .expect("/me/directory");
+    assert!(
+        directory
+            .data
+            .iter()
+            .any(|e| e.username.as_deref() == Some(alice.as_str())),
+        "{directory:?}"
+    );
+
+    // Bob's voicemail: none yet.
+    match bob_client.voicemail(None, None).await {
+        Ok(page) => assert!(page.data.is_empty(), "{page:?}"),
+        Err(FcpError::Refused { status: 404, .. }) => {}
+        Err(e) => panic!("/me/voicemail/messages: {e}"),
+    }
+
+    let _ = alice_phone.shutdown().await;
+    let _ = bob_phone.shutdown().await;
+}

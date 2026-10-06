@@ -142,6 +142,27 @@ enum Command {
     },
     /// Sign out of FCP: the app's session ends.
     Logout,
+    /// Your call history.
+    Calls {
+        /// Only the calls you missed.
+        #[arg(long)]
+        missed: bool,
+        #[arg(long, default_value = "20")]
+        limit: u32,
+    },
+    /// The directory, searched by name, extension or email.
+    Directory { search: Option<String> },
+    /// Your voicemail: the counts and the messages.
+    Voicemail,
+    /// Your calling settings; change do not disturb or call waiting.
+    Settings {
+        #[arg(long)]
+        dnd: Option<bool>,
+        #[arg(long)]
+        call_waiting: Option<bool>,
+    },
+    /// Print your live events until Ctrl+C.
+    Events,
 }
 
 /// Where the FCP session lives.
@@ -219,6 +240,114 @@ fn open_browser(url: &str) {
         .spawn();
 }
 
+/// A client for the kept FCP session.
+fn fcp_client(cli: &Cli) -> Result<Arc<anvil_fcp::FcpClient>> {
+    use anvil_fcp::TokenStore;
+    let store = Arc::new(anvil_fcp::FileTokenStore::new(session_path(cli)));
+    let session = store
+        .load()?
+        .ok_or_else(|| anyhow::anyhow!("not signed in: run `anvil-cli login <server>`"))?;
+    Ok(Arc::new(anvil_fcp::FcpClient::new(
+        session,
+        Some(store as Arc<dyn TokenStore>),
+    )))
+}
+
+/// The commands that read or change the user's own data.
+async fn user_data(cli: &Cli, command: &Command) -> Result<()> {
+    let client = fcp_client(cli)?;
+    match command {
+        Command::Calls { missed, limit } => {
+            let page = client
+                .calls(&anvil_fcp::CallQuery {
+                    limit: Some(*limit),
+                    missed: *missed,
+                    ..Default::default()
+                })
+                .await?;
+            for c in page.data {
+                println!(
+                    "{}  {:8} {:30} {:10} {}s{}",
+                    c.start_time,
+                    c.direction,
+                    c.other_party_name.as_deref().unwrap_or(&c.other_party),
+                    c.disposition,
+                    c.duration_seconds.unwrap_or(0),
+                    if c.missed { "  (missed)" } else { "" }
+                );
+            }
+        }
+        Command::Directory { search } => {
+            let page = client.directory(search.as_deref(), None, None).await?;
+            for e in page.data {
+                println!(
+                    "{:6} {:30} {:8} {}",
+                    e.extension.as_deref().unwrap_or("-"),
+                    e.display_name
+                        .as_deref()
+                        .or(e.username.as_deref())
+                        .unwrap_or("-"),
+                    e.presence.as_deref().unwrap_or(""),
+                    e.presence_note.as_deref().unwrap_or("")
+                );
+            }
+        }
+        Command::Voicemail => {
+            let stats = match client.voicemail_stats().await {
+                Err(anvil_fcp::FcpError::Refused { status: 404, .. }) => {
+                    println!("You have no voicemail box.");
+                    return Ok(());
+                }
+                other => other?,
+            };
+            println!(
+                "{} new, {} heard, {} saved",
+                stats.new_messages, stats.heard_messages, stats.saved_messages
+            );
+            for m in client.voicemail(None, None).await?.data {
+                println!(
+                    "{}  {:6} {:30} {}s  {}",
+                    m.created_at,
+                    m.status,
+                    m.caller_name.as_deref().unwrap_or(&m.caller),
+                    m.duration,
+                    m.transcription.as_deref().unwrap_or("")
+                );
+            }
+        }
+        Command::Settings { dnd, call_waiting } => {
+            let settings = if dnd.is_some() || call_waiting.is_some() {
+                client
+                    .set_calling(&anvil_fcp::CallingUpdate {
+                        dnd: *dnd,
+                        call_waiting: *call_waiting,
+                        ..Default::default()
+                    })
+                    .await?
+            } else {
+                client.calling().await?
+            };
+            println!("{settings:#?}");
+        }
+        Command::Events => {
+            let mut events = client.events().await?;
+            println!("Listening; Ctrl+C to stop.");
+            loop {
+                tokio::select! {
+                    event = events.next() => match event {
+                        Some(e) => println!("[{}] {}", e.name, e.body),
+                        None => break,
+                    },
+                    _ = tokio::signal::ctrl_c() => break,
+                }
+            }
+            events.close().await;
+        }
+        Command::Login { .. } | Command::Logout => unreachable!("handled in main"),
+    }
+    Ok(())
+}
+
 /// The account from the FCP session, refreshed and kept, and the tenant's
 /// brand fetched with it.
 async fn fcp_account(cli: &Cli) -> Result<(AccountConfig, BrandConfig)> {
@@ -275,6 +404,7 @@ async fn main() -> Result<()> {
             println!("Signed out.");
             return Ok(());
         }
+        Some(command) => return user_data(&cli, command).await,
         None => {}
     }
 

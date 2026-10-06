@@ -23,6 +23,8 @@ url        = "2"
 sha2       = "0.10"
 base64     = "0.22"
 rand       = "0.8"
+tokio-tungstenite = { version = "0.24", default-features = false, features = ["connect", "rustls-tls-webpki-roots"] }
+futures-util = { version = "0.3", default-features = false, features = ["sink"] }
 
 [dev-dependencies]
 tokio = { workspace = true, features = ["test-util"] }

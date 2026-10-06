@@ -8,7 +8,9 @@
 //!   install's device with its SIP account, kept by a [`TokenStore`];
 //! - [`FcpClient`] keeps the session fresh and reads the softphone's
 //!   settings (`/me/softphone`), which [`FcpClient::account_config`] turns
-//!   into an [`anvil_core::AccountConfig`].
+//!   into an [`anvil_core::AccountConfig`];
+//! - and the user's own data through it: call history, the directory,
+//!   voicemail and live events ([`FcpClient::events`]).
 //!
 //! `anvil-core` knows SIP and media, not FCP; this crate is FCP's.
 
@@ -17,6 +19,7 @@
 mod brand;
 mod client;
 mod discovery;
+mod me;
 mod session;
 mod signin;
 
@@ -25,6 +28,10 @@ pub use client::{
     CallingSettings, CallingUpdate, FcpClient, SoftphoneAccount, SoftphoneConfig, SoftphoneMedia,
 };
 pub use discovery::{discover, Server};
+pub use me::{
+    CallQuery, CallRecord, DirectoryEntry, MailboxStats, Page, UserEvent, UserEvents,
+    VoicemailMessage,
+};
 pub use session::{AppClient, DeviceCredentials, FileTokenStore, Session, TokenStore};
 pub use signin::{password_sign_in, BrowserSignIn};
 
