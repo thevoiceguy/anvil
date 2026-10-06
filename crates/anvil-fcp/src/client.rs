@@ -73,7 +73,7 @@ pub struct CallingSettings {
 
 /// A change to the calling settings: each field left out is kept. A
 /// forward is cleared with an empty string.
-#[derive(Debug, Clone, Default, Serialize)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct CallingUpdate {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub dnd: Option<bool>,
@@ -159,22 +159,33 @@ impl FcpClient {
         method: reqwest::Method,
         path: &str,
     ) -> Result<reqwest::Response, FcpError> {
+        self.api_with(method, path, None).await
+    }
+
+    /// A request to FCP's API as the session, with a JSON body when given;
+    /// a 401 is retried once after a refresh, any other refusal returned.
+    pub(crate) async fn api_with(
+        &self,
+        method: reqwest::Method,
+        path: &str,
+        body: Option<&serde_json::Value>,
+    ) -> Result<reqwest::Response, FcpError> {
         let api = self.session.lock().await.server.api_url.clone();
-        let mut response = self
-            .http
-            .request(method.clone(), format!("{api}{path}"))
-            .bearer_auth(self.bearer().await?)
-            .send()
-            .await?;
+        let send = |token: String| {
+            let mut request = self
+                .http
+                .request(method.clone(), format!("{api}{path}"))
+                .bearer_auth(token);
+            if let Some(body) = body {
+                request = request.json(body);
+            }
+            request.send()
+        };
+        let mut response = send(self.bearer().await?).await?;
         // Revoked or expired underneath us: once more after a refresh.
         if response.status() == reqwest::StatusCode::UNAUTHORIZED {
             self.refresh().await?;
-            response = self
-                .http
-                .request(method, format!("{api}{path}"))
-                .bearer_auth(self.bearer().await?)
-                .send()
-                .await?;
+            response = send(self.bearer().await?).await?;
         }
         if !response.status().is_success() {
             return Err(refused(response).await);
@@ -202,22 +213,11 @@ impl FcpClient {
 
     /// Change the calling settings; what they are afterwards.
     pub async fn set_calling(&self, update: &CallingUpdate) -> Result<CallingSettings, FcpError> {
-        let api = self.session.lock().await.server.api_url.clone();
-        let send = |token: String| {
-            self.http
-                .put(format!("{api}/me/calling"))
-                .bearer_auth(token)
-                .json(update)
-                .send()
-        };
-        let mut response = send(self.bearer().await?).await?;
-        if response.status() == reqwest::StatusCode::UNAUTHORIZED {
-            self.refresh().await?;
-            response = send(self.bearer().await?).await?;
-        }
-        if !response.status().is_success() {
-            return Err(refused(response).await);
-        }
+        let body = serde_json::to_value(update)
+            .map_err(|e| FcpError::Invalid(format!("calling update: {e}")))?;
+        let response = self
+            .api_with(reqwest::Method::PUT, "/me/calling", Some(&body))
+            .await?;
         response
             .json()
             .await

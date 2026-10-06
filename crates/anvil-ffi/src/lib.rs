@@ -32,6 +32,7 @@
 
 mod audio;
 mod events;
+pub mod fcp;
 mod handle;
 
 pub use events::{
@@ -71,6 +72,11 @@ pub enum AnvilStatus {
     /// method returned an error that doesn't map to a more specific
     /// code.
     Failed = 7,
+    /// FCP has no such thing for this user (no voicemail box, no such
+    /// message).
+    NotFound = 8,
+    /// Signing in needs a one-time code: call again with `totp`.
+    TotpRequired = 9,
 }
 
 /// SIP transport selector for the C API.

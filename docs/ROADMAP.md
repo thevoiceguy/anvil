@@ -55,7 +55,19 @@ live in FCP: `docs/SOFTPHONE.md` in `thevoiceguy/fcp`. Anvil's phases:
         `anvil_transfer_attended` and `TransferProgress`. Needs FCP #275 (the
         caller transferring the callee, the node's own legs under
         `auth_invites`, a user dialed by name, a dead watcher freezing lamps)
-- [ ] **A4** The app's data: call history, directory, voicemail, settings, live events
+- [x] **A4** The app's data: call history, directory, voicemail, settings, live events
+  - `anvil_fcp`: `FcpClient::calls` (`CallQuery`, missed only), `directory`
+    (search, presence), `voicemail`, `voicemail_stats`, `voicemail_audio`,
+    `set_voicemail_status`, `delete_voicemail`, `calling`/`set_calling`, and
+    `events()` — the `/me/events` WebSocket signed in with the session's
+    token, each event a `UserEvent` named `{event_type}.{type}`; lists as
+    `Page<T>` with FCP's cursor
+  - the CLI's `calls`, `directory`, `voicemail`, `settings` and `events`
+  - the FFI's `anvil_fcp_*`: open a kept session or sign in with a password,
+    the data as JSON (freed with `anvil_string_free`), live events through a
+    callback, `NotFound` and `TotpRequired` statuses
+  - FCP's `/me/events` needs its admin following an events server that the
+    call manager posts to (`[events] server_url` on both)
 - [ ] **A5** SDES-SRTP, and the cross-repo suite completed
 
 ---
