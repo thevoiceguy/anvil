@@ -35,6 +35,12 @@ pub enum AnvilEventKind {
     /// `Error`. Read `reason` (always populated). `call_id` is 0 if the
     /// error is not call-scoped.
     Error = 7,
+    /// `BrandUpdated`. Read `brand_json`: the profile as JSON
+    /// (`docs/BRANDING.md` §5) with each asset's `local_path` where the
+    /// cache holds its verified file, and no `bytes`.
+    BrandUpdated = 8,
+    /// `BrandCleared`: the tenant has no brand; show the app's own theme.
+    BrandCleared = 9,
 }
 
 /// Mirrors `anvil_core::RegState`. Stable numbering.
@@ -117,6 +123,9 @@ pub struct AnvilEvent {
     pub display_name: *const c_char,
     /// `RegistrationChanged`, `CallEnded`, `Error`. May be NULL.
     pub reason: *const c_char,
+    /// `BrandUpdated` only. NUL-terminated UTF-8 JSON, valid for the
+    /// duration of the callback.
+    pub brand_json: *const c_char,
 }
 
 /// Function-pointer type for the user callback. Fires from a worker
@@ -162,6 +171,7 @@ pub(crate) fn dispatch(slot: CallbackSlot, event: &Event) {
         from: std::ptr::null(),
         display_name: std::ptr::null(),
         reason: std::ptr::null(),
+        brand_json: std::ptr::null(),
     };
 
     // Hold any allocated CStrings until after the callback returns.
@@ -238,15 +248,12 @@ pub(crate) fn dispatch(slot: CallbackSlot, event: &Event) {
             ev.call_id = call.map(|c| c.0).unwrap_or(0);
             ev.reason = push_cstr(&mut keep_alive, &error.to_string());
         }
-        Event::BrandUpdated { .. } => {
-            // Brand profiles need their own marshalling shape (logo bytes,
-            // colour tokens, link list). Out of scope for M2; surface as a
-            // generic Error-with-message until P3-M5/M6.
-            ev.kind = AnvilEventKind::Error;
-            ev.reason = push_cstr(
-                &mut keep_alive,
-                "BrandUpdated event not yet exposed via FFI",
-            );
+        Event::BrandUpdated { profile } => {
+            ev.kind = AnvilEventKind::BrandUpdated;
+            ev.brand_json = push_cstr(&mut keep_alive, &brand_json(profile));
+        }
+        Event::BrandCleared => {
+            ev.kind = AnvilEventKind::BrandCleared;
         }
         // `Event` is `#[non_exhaustive]`; cover any future variants
         // gracefully by emitting an Error rather than panicking.
@@ -296,4 +303,20 @@ fn stats_to_c(s: &MediaStats) -> AnvilMediaStats {
         recv_kbps: s.recv_kbps,
         send_kbps: s.send_kbps,
     }
+}
+
+/// A profile as the C host reads it: the bytes left out (the host opens
+/// `local_path`, or fetches `url`).
+fn brand_json(profile: &anvil_core::BrandProfile) -> String {
+    let mut profile = profile.clone();
+    for asset in [&mut profile.logo, &mut profile.logo_dark, &mut profile.icon]
+        .into_iter()
+        .flatten()
+    {
+        asset.bytes.clear();
+    }
+    for ringtone in &mut profile.ringtones {
+        ringtone.asset.bytes.clear();
+    }
+    serde_json::to_string(&profile).unwrap_or_default()
 }

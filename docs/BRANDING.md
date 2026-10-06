@@ -93,9 +93,11 @@ Anvil sends whatever the `BrandCredential` in `BrandConfig` says. Three modes:
 | `Basic`   | `Authorization: Basic base64(username:password)`            | Reuse SIP credentials (simple, dev-only)          |
 | `None`    | (omitted)                                                   | Public branding (e.g. marketing preview tenants)  |
 
-The `Bearer` path is preferred in production. The token-issue flow is out of
-scope for this doc — FCP may expose it at `{provisioning_url}/auth/token` or
-piggy-back on SIP (e.g. Authentication-Info header).
+FCP takes only `Bearer` (its `docs/BRANDING.md`): the app's own session from
+signing in (FCP's `docs/APP_SIGN_IN.md`). `anvil-fcp`'s `FcpBrandProvider`
+signs each fetch with the session's access token, refreshed when it is near
+its end, and once more after a refresh if FCP answers 401. `Basic` and `None`
+stay for servers other than FCP.
 
 ---
 
@@ -199,7 +201,8 @@ post-1.0 consideration.
 ## 8. Security considerations
 
 - Provisioning URL must be HTTPS. Anvil rejects `http://` unless the
-  `dangerously-allow-http` feature is compiled in (dev only).
+  host is this machine (`127.0.0.1`, `::1`, `localhost`): a developer's FCP.
+  Asset URLs follow the same rule.
 - Asset URLs may be any origin; they're fetched with no credentials. Don't
   serve private assets from a URL that depends on auth.
 - SVG assets are rendered by the UI framework. Both Flutter's `flutter_svg`
@@ -245,11 +248,53 @@ Client                                    FCP
 
 ---
 
+## 9a. What Anvil does (A2)
+
+- **The model reads the wire leniently.** Each color slot is optional; one
+  that is not `#RRGGBB`/`#RRGGBBAA` is dropped, and the UI keeps its own
+  token. Fields the server leaves out are empty.
+- **`HttpBrandProvider`** (`anvil-brand`):
+  - `GET {provisioning_url}/brand/v1?aor=…` with `If-None-Match`.
+  - 200 gives the profile, its `ETag` kept. 304 keeps what is held.
+  - 404 is `BrandFetchOutcome::NoBrand`. 401 and 403 are
+    `AnvilError::AuthRejected`.
+  - Each asset is fetched (one redirect at most, 5 MB at most) and checked
+    against its SHA-256. An asset that fails is dropped and the rest of the
+    profile stands.
+- **`FsBrandCache`** (`anvil-brand`):
+  - A profile per tenant without its bytes, and assets by hash under
+    `assets/`.
+  - Each asset's `local_path` is set on load.
+  - Which tenant an account's brand came from is remembered, so a launch
+    can show it before anything is fetched.
+  - Assets are evicted least recently used past 50 MB, never one a cached
+    profile names.
+- **The driver** (`anvil-core`, when `BrandConfig.provider` is set):
+  - The cached profile is sent as `Event::BrandUpdated` at start, then a
+    fetch runs, concurrently with REGISTER.
+  - The provisioning URL is `AccountConfig.provisioning_url`, else learned
+    from a REGISTER 200 OK's `X-FCP-Provisioning-Url`.
+  - Fetches again on a registration refresh at most hourly, and on
+    `Anvil::refresh_brand()`.
+  - A 404, or a refused credential, clears what is held and sends
+    `Event::BrandCleared`. A refused credential also sends `Event::Error`.
+- **`anvil-fcp`**: `brand_config(client, cache_dir)` gives an account signed
+  in to FCP its provider and cache. `anvil-cli` uses it and prints
+  `[brand] …`.
+- **FFI**: `ANVIL_EVENT_KIND_BRAND_UPDATED` with `brand_json` (the profile
+  as JSON with `local_path`s and no bytes), and
+  `ANVIL_EVENT_KIND_BRAND_CLEARED`.
+- **Not yet done:** the `/.well-known/fcp-provisioning` fallback (step 3 of
+  §2). A signed-in account always knows its server.
+
+Tested against a running FCP: `crates/anvil-fcp/tests/fcp.rs`
+`anvil_takes_on_the_tenants_brand` covers the first fetch with its files,
+the cached brand at the next launch with no refetch, a change brought by
+`refresh_brand`, and removal.
+
 ## 10. Open questions
 
-1. **Auth exchange.** How does the client get a Bearer token? Probably a POST
-   to `{provisioning_url}/auth/token` with SIP Digest-equivalent challenge.
-   Needs an FCP-side spec.
+1. **Auth exchange.** Settled: the app's session (§4).
 2. **Multi-account.** A desktop user signed into two accounts (personal +
    work) sees two brands. UI choice: persistent shell branding vs. per-call
    brand swap. Punt until we have concrete UX.

@@ -339,3 +339,163 @@ async fn anvil_signs_in_through_the_browser() {
     assert!(config.account.aor.contains(&name));
     client.sign_out().await.unwrap();
 }
+
+/// A PNG's signature and header, and bytes of its own.
+fn tiny_png(salt: u8) -> Vec<u8> {
+    let mut png = b"\x89PNG\r\n\x1a\n\0\0\0\rIHDR".to_vec();
+    png.extend_from_slice(&64u32.to_be_bytes());
+    png.extend_from_slice(&64u32.to_be_bytes());
+    png.extend_from_slice(&[8, 6, 0, 0, 0, salt]);
+    png
+}
+
+impl Fcp {
+    /// Upload an asset to the tenant's brand: its hash.
+    async fn brand_asset(&self, bytes: Vec<u8>) -> String {
+        let res = self
+            .http
+            .post(format!("{}/api/v1/branding/assets", self.admin))
+            .bearer_auth(&self.token)
+            .header("X-FCP-Tenant-Id", &self.tenant)
+            .body(bytes)
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(res.status().as_u16(), 201);
+        res.json::<Value>().await.unwrap()["sha256"]
+            .as_str()
+            .unwrap()
+            .to_string()
+    }
+
+    async fn branding(&self, method: reqwest::Method, body: Option<Value>) -> u16 {
+        let mut req = self
+            .http
+            .request(method, format!("{}/api/v1/branding", self.admin))
+            .bearer_auth(&self.token)
+            .header("X-FCP-Tenant-Id", &self.tenant);
+        if let Some(body) = body {
+            req = req.json(&body);
+        }
+        req.send().await.unwrap().status().as_u16()
+    }
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn anvil_takes_on_the_tenants_brand() {
+    let fcp = fcp_or_skip!();
+    let logo = tiny_png(7);
+    let ring: Vec<u8> = b"OggS\0\x02anvil-ring".to_vec();
+    let (logo_hash, ring_hash) = (
+        fcp.brand_asset(logo.clone()).await,
+        fcp.brand_asset(ring.clone()).await,
+    );
+    let brand = |name: &str| {
+        json!({
+            "app_name": name,
+            "colors": {"primary": "#1A73E8"},
+            "logo": logo_hash,
+            "ringtones": [{"name": "Acme", "default": true, "sha256": ring_hash}],
+            "links": {"support": "https://acme.example/support"},
+        })
+    };
+    assert_eq!(
+        fcp.branding(reqwest::Method::PUT, Some(brand("Acme Voice")))
+            .await,
+        200
+    );
+
+    let server = discover(&fcp.admin).await.unwrap();
+    let (name, pw) = fcp.user("brand").await;
+    let session = password_sign_in(
+        server,
+        AppClient::this_machine(AppClient::new_install_id()),
+        &name,
+        &pw,
+        None,
+    )
+    .await
+    .unwrap();
+    let client = Arc::new(FcpClient::new(session, None));
+    let cache = std::env::temp_dir().join(format!("anvil-brand-test-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&cache);
+    let config = client.softphone().await.unwrap();
+    let start = |client: Arc<FcpClient>| {
+        let cache = cache.clone();
+        let config = config.clone();
+        async move {
+            let mut account = client.account_config(&config).await.unwrap();
+            account.bind_addr = Some("127.0.0.41:0".into());
+            Anvil::start(AnvilConfig {
+                account,
+                media: MediaConfig::default(),
+                audio: Box::new(Quiet),
+                brand: anvil_fcp::brand_config(client, Some(cache)).unwrap(),
+            })
+            .await
+            .unwrap()
+        }
+    };
+    let brand_of = |e: &Event| match e {
+        Event::BrandUpdated { profile } => Some((**profile).clone()),
+        _ => None,
+    };
+
+    // The first launch fetches it, files and all.
+    let (anvil, mut events) = start(Arc::clone(&client)).await;
+    let profile = expect(&mut events, SOON, brand_of)
+        .await
+        .expect("the brand");
+    assert_eq!(profile.app_name, "Acme Voice");
+    assert_eq!(
+        profile.colors.primary.map(|c| c.to_hex()).as_deref(),
+        Some("#1A73E8")
+    );
+    assert_eq!(profile.logo.as_ref().unwrap().bytes, logo);
+    assert_eq!(profile.ringtones[0].asset.bytes, ring);
+    assert_eq!(
+        profile.links.support.as_deref(),
+        Some("https://acme.example/support")
+    );
+    let _ = anvil.shutdown().await;
+
+    // The next shows the cached brand at once and fetches nothing new.
+    let (anvil, mut events) = start(Arc::clone(&client)).await;
+    let cached = expect(&mut events, SOON, brand_of)
+        .await
+        .expect("the cached brand");
+    assert_eq!(cached.app_name, "Acme Voice");
+    assert!(
+        cached.logo.as_ref().unwrap().local_path.is_some(),
+        "from the cache"
+    );
+    assert!(
+        expect(&mut events, Duration::from_secs(2), brand_of)
+            .await
+            .is_none(),
+        "unchanged: 304, no second event"
+    );
+
+    // Changed at FCP: a refresh brings it.
+    assert_eq!(
+        fcp.branding(reqwest::Method::PUT, Some(brand("Acme Calls")))
+            .await,
+        200
+    );
+    anvil.refresh_brand().await.unwrap();
+    let changed = expect(&mut events, SOON, brand_of)
+        .await
+        .expect("the new brand");
+    assert_eq!(changed.app_name, "Acme Calls");
+
+    // Gone at FCP: the app's own theme again.
+    assert_eq!(fcp.branding(reqwest::Method::DELETE, None).await, 204);
+    anvil.refresh_brand().await.unwrap();
+    expect(&mut events, SOON, |e| {
+        matches!(e, Event::BrandCleared).then_some(())
+    })
+    .await
+    .expect("the brand cleared");
+    let _ = anvil.shutdown().await;
+    let _ = std::fs::remove_dir_all(&cache);
+}
