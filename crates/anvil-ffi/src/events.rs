@@ -44,6 +44,11 @@ pub enum AnvilEventKind {
     /// `MessageWaiting`. Read `mwi_waiting`, `mwi_new`, `mwi_old`,
     /// `mwi_urgent_new` and `mwi_urgent_old`.
     MessageWaiting = 10,
+    /// `PresenceChanged`. Read `from` (whose), `presence_open`, and `reason`
+    /// (the RPID activity, else the note; may be NULL).
+    PresenceChanged = 11,
+    /// `LineStateChanged`. Read `from` (whose) and `line_state`.
+    LineStateChanged = 12,
 }
 
 /// Mirrors `anvil_core::RegState`. Stable numbering.
@@ -136,6 +141,10 @@ pub struct AnvilEvent {
     pub mwi_old: u32,
     pub mwi_urgent_new: u32,
     pub mwi_urgent_old: u32,
+    /// `PresenceChanged` only: 1 when available.
+    pub presence_open: u8,
+    /// `LineStateChanged` only: 0 idle, 1 ringing, 2 busy.
+    pub line_state: u8,
 }
 
 /// Function-pointer type for the user callback. Fires from a worker
@@ -187,6 +196,8 @@ pub(crate) fn dispatch(slot: CallbackSlot, event: &Event) {
         mwi_old: 0,
         mwi_urgent_new: 0,
         mwi_urgent_old: 0,
+        presence_open: 0,
+        line_state: 0,
     };
 
     // Hold any allocated CStrings until after the callback returns.
@@ -269,6 +280,23 @@ pub(crate) fn dispatch(slot: CallbackSlot, event: &Event) {
         }
         Event::BrandCleared => {
             ev.kind = AnvilEventKind::BrandCleared;
+        }
+        Event::PresenceChanged { aor, presence } => {
+            ev.kind = AnvilEventKind::PresenceChanged;
+            ev.from = push_cstr(&mut keep_alive, aor);
+            ev.presence_open = u8::from(presence.open);
+            if let Some(why) = presence.activity.as_ref().or(presence.note.as_ref()) {
+                ev.reason = push_cstr(&mut keep_alive, why);
+            }
+        }
+        Event::LineStateChanged { aor, state } => {
+            ev.kind = AnvilEventKind::LineStateChanged;
+            ev.from = push_cstr(&mut keep_alive, aor);
+            ev.line_state = match state {
+                anvil_core::watch::LineState::Idle => 0,
+                anvil_core::watch::LineState::Ringing => 1,
+                anvil_core::watch::LineState::Busy => 2,
+            };
         }
         Event::MessageWaiting { summary } => {
             ev.kind = AnvilEventKind::MessageWaiting;

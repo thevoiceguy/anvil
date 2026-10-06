@@ -84,6 +84,18 @@ pub enum Event {
     MessageWaiting {
         summary: crate::mwi::MessageSummary,
     },
+    /// Someone watched with [`WatchKind::Presence`](crate::watch::WatchKind)
+    /// changed: `aor` as their server names them.
+    PresenceChanged {
+        aor: String,
+        presence: crate::watch::Presence,
+    },
+    /// A busy lamp watched with [`WatchKind::Dialog`](crate::watch::WatchKind)
+    /// changed.
+    LineStateChanged {
+        aor: String,
+        state: crate::watch::LineState,
+    },
     Error {
         call: Option<CallId>,
         error: AnvilError,

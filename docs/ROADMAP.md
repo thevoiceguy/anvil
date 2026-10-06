@@ -35,6 +35,13 @@ live in FCP: `docs/SOFTPHONE.md` in `thevoiceguy/fcp`. Anvil's phases:
         renewed before it lapses, the CLI's `[mwi]`, the FFI's
         `MessageWaiting`; FCP's 489 to the SUBSCRIBE fixed in FCP #269.
         Other NOTIFYs: `check-sync` 200, anything else 481
+  - [x] **A3b** Watching someone: `Anvil::watch(aor, WatchKind::{Presence,
+        Dialog})` / `unwatch`, renewed before it lapses; PIDF and dialog-info
+        read into `Event::PresenceChanged` / `Event::LineStateChanged`
+        (idle, ringing, busy), NOTIFYs matched by entity (unwatched: 481);
+        the CLI's `--watch`, the FFI's two kinds. Needs FCP #271 (presence
+        per tenant, device credentials, one subscription per device) and
+        FCP's ACK fix (a challenged call rang the callee repeatedly)
 - [ ] **A4** The app's data: call history, directory, voicemail, settings, live events
 - [ ] **A5** SDES-SRTP, and the cross-repo suite completed
 

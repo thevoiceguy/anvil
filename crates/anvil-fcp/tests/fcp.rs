@@ -585,3 +585,84 @@ async fn anvil_is_told_its_messages() {
     assert_eq!((summary.new, summary.old), (0, 0));
     let _ = anvil.shutdown().await;
 }
+
+/// A signed-in Anvil, by name.
+async fn signed_in(fcp: &Fcp, who: &str) -> (FcpClient, String) {
+    let server = discover(&fcp.admin).await.unwrap();
+    let (name, pw) = fcp.user(who).await;
+    let session = password_sign_in(
+        server,
+        AppClient::this_machine(AppClient::new_install_id()),
+        &name,
+        &pw,
+        None,
+    )
+    .await
+    .unwrap();
+    (FcpClient::new(session, None), name)
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn anvil_watches_a_colleagues_lamp() {
+    use anvil_core::watch::{LineState, WatchKind};
+    let _ = tracing_subscriber::fmt()
+        .with_env_filter(tracing_subscriber::EnvFilter::from_default_env())
+        .with_test_writer()
+        .try_init();
+    let fcp = fcp_or_skip!();
+    let (alice, _) = signed_in(&fcp, "lamp-alice").await;
+    let (bob, bob_name) = signed_in(&fcp, "lamp-bob").await;
+    let (carol, _) = signed_in(&fcp, "lamp-carol").await;
+    let domain = alice.softphone().await.unwrap().account.domain;
+    let (alice_phone, _alice_events) = softphone(&alice, "127.0.0.43").await;
+    let (bob_phone, mut bob_events) = softphone(&bob, "127.0.0.44").await;
+    let (carol_phone, mut carol_events) = softphone(&carol, "127.0.0.45").await;
+    let bob_aor = format!("sip:{bob_name}@{domain}");
+
+    // Carol watches Bob's lamp: idle at once.
+    carol_phone
+        .watch(&bob_aor, WatchKind::Dialog)
+        .await
+        .expect("FCP takes the dialog subscription");
+    let lamp = |e: &Event| match e {
+        Event::LineStateChanged { state, .. } => Some(*state),
+        _ => None,
+    };
+    assert_eq!(
+        expect(&mut carol_events, SOON, lamp).await,
+        Some(LineState::Idle)
+    );
+
+    // Alice calls Bob: his lamp lights, and goes out when the call ends.
+    let out = alice_phone.place_call(&bob_aor).await.unwrap();
+    let incoming = expect(&mut bob_events, SOON, |e| match e {
+        Event::IncomingCall { call, .. } => Some(*call),
+        _ => None,
+    })
+    .await
+    .expect("Bob rings");
+    let lit = expect(&mut carol_events, SOON, |e| match lamp(e) {
+        Some(LineState::Idle) | None => None,
+        Some(s) => Some(s),
+    })
+    .await;
+    assert!(lit.is_some(), "Carol sees Bob's lamp light");
+    bob_phone.answer(incoming).await.unwrap();
+    tokio::time::sleep(Duration::from_millis(500)).await;
+    alice_phone.hangup(out).await.unwrap();
+    assert_eq!(
+        expect(&mut carol_events, SOON, |e| match lamp(e) {
+            Some(LineState::Idle) => Some(LineState::Idle),
+            _ => None,
+        })
+        .await,
+        Some(LineState::Idle),
+        "and go out"
+    );
+
+    // Stopped watching: nothing more.
+    carol_phone.unwatch(&bob_aor, WatchKind::Dialog);
+    for phone in [alice_phone, bob_phone, carol_phone] {
+        let _ = phone.shutdown().await;
+    }
+}

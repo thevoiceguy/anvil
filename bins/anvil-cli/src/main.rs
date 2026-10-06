@@ -63,6 +63,10 @@ struct Cli {
     #[arg(long)]
     bind: Option<String>,
 
+    /// Watch someone's presence and busy lamp (repeatable).
+    #[arg(long = "watch", value_name = "AOR")]
+    watch: Vec<String>,
+
     /// Use the synthetic tone generator instead of cpal (for headless CI
     /// and hardware-less dev boxes). When a call is established the
     /// sink's peak RMS is printed at hangup.
@@ -342,6 +346,16 @@ async fn run(cli: Cli, cfg: AnvilConfig, tone_stats: Option<Arc<ToneStats>>) -> 
     if let Err(e) = anvil.subscribe_mwi().await {
         tracing::info!(%e, "no message-summary subscription");
     }
+    for aor in &cli.watch {
+        for kind in [
+            anvil_core::watch::WatchKind::Presence,
+            anvil_core::watch::WatchKind::Dialog,
+        ] {
+            if let Err(e) = anvil.watch(aor, kind).await {
+                tracing::warn!(%e, aor, ?kind, "cannot watch");
+            }
+        }
+    }
 
     // Optionally place a call. Either way, we then run a single event-drain
     // loop until the call ends / hold timer fires / Ctrl+C.
@@ -452,6 +466,19 @@ async fn run(cli: Cli, cfg: AnvilConfig, tone_stats: Option<Arc<ToneStats>>) -> 
                         );
                     }
                     Event::BrandCleared => println!("[brand] none: the default theme"),
+                    Event::PresenceChanged { aor, presence } => println!(
+                        "[presence] {aor}: {}{}",
+                        if presence.open { "available" } else { "unavailable" },
+                        presence
+                            .activity
+                            .as_ref()
+                            .or(presence.note.as_ref())
+                            .map(|w| format!(" ({w})"))
+                            .unwrap_or_default()
+                    ),
+                    Event::LineStateChanged { aor, state } => {
+                        println!("[lamp] {aor}: {state:?}")
+                    }
                     Event::MessageWaiting { summary } => println!(
                         "[mwi] {} new, {} old{}",
                         summary.new,
