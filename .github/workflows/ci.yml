@@ -103,6 +103,7 @@ jobs:
         run: |
           export ANVIL_FCP_TOKEN=$(grep '^FCP_ADMIN_AUTH_TOKEN=' fcp/deploy/docker-compose/.env | cut -d= -f2-)
           cargo test -p anvil-core --test fcp -- --nocapture
+          cargo test -p anvil-fcp --test fcp -- --nocapture
       - name: FCP's logs
         if: failure() && env.FCP_READ_TOKEN != ''
         working-directory: fcp/deploy/docker-compose

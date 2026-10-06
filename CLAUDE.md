@@ -22,6 +22,7 @@ anvil/
 │   ├── anvil-audio   # cpal mic/speaker I/O, AEC/NS/AGC, device routing
 │   ├── anvil-brand   # FCP brand provisioning (HTTP + filesystem cache)
 │   ├── anvil-codec   # Opus wrapper (forge provides G.711/G.722)
+│   ├── anvil-fcp     # FCP: discovery, sign-in, the app session, the softphone's settings
 │   └── anvil-ffi     # C ABI for mobile UI integration
 └── bins/
     └── anvil-cli     # terminal softphone — reference UAC and integration test
@@ -35,6 +36,7 @@ workspace so Rust builds stay hermetic. See `docs/ARCHITECTURE.md`.
 ### Dependency direction
 
 ```
+anvil-cli → anvil-fcp → anvil-core (FCP's client; anvil-core never depends on it)
 anvil-cli → anvil-core → {siphon-rs crates, forge-media crates}
                        ↘ anvil-audio → cpal
                        ↘ anvil-brand → reqwest
@@ -103,7 +105,8 @@ cargo build --workspace
 cargo test  --workspace            # unit tests, and two Anvils calling each other
 cargo run   -p anvil-cli -- --help
 
-# Against a running FCP (an admin and a call manager): crates/anvil-core/tests/fcp.rs.
+# Against a running FCP (an admin and a call manager): crates/anvil-core/tests/fcp.rs
+# (SIP against FCP) and crates/anvil-fcp/tests/fcp.rs (signing in, settings, calls).
 # CI runs it on FCP's compose stack from the nightly images.
 ANVIL_FCP_ADMIN=http://127.0.0.1:8080 ANVIL_FCP_TOKEN=<admin token> \
 ANVIL_FCP_SIP=127.0.0.1:5060 cargo test -p anvil-core --test fcp
