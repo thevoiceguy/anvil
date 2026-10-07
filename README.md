@@ -72,6 +72,25 @@ cargo run -p anvil-cli -- settings --dnd true
 cargo run -p anvil-cli -- events
 ```
 
+## Windows
+
+Each release has `anvil-cli` for Windows (x86_64) on its GitHub release page:
+unzip it and run
+
+```powershell
+.\anvil-cli.exe login https://pbx.example.com
+.\anvil-cli.exe --call sip:1002@example.com
+```
+
+It needs nothing installed (the C runtime is linked in). It is not
+code-signed yet, so SmartScreen may ask before running it. The first time it
+opens its network ports, Windows Firewall asks to allow it.
+
+To build it yourself: Visual Studio Build Tools with "Desktop development
+with C++", Rust from rustup (the MSVC toolchain), CMake (for libopus), then
+`cargo build --release -p anvil-cli`. CI builds and tests the workspace on
+Windows on every change.
+
 ## Testing against FCP
 
 `cargo test --workspace` needs nothing. The tests that need a running FCP

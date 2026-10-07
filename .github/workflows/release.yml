@@ -1,0 +1,83 @@
+name: Release
+
+# A tag vX.Y.Z (the workspace's version) builds anvil-cli for Windows and
+# publishes it as a GitHub release: a zip with anvil-cli.exe, the README and
+# the licences, and its SHA-256. A pull request that changes this file
+# builds and packages the same zip without publishing it, as a run's
+# artifact, so the pipeline is proved before a tag needs it.
+
+on:
+  push:
+    tags: ["v*"]
+  pull_request:
+    paths: [".github/workflows/release.yml"]
+  workflow_dispatch:
+
+env:
+  CARGO_TERM_COLOR: always
+
+permissions:
+  contents: write
+
+jobs:
+  windows:
+    name: anvil-cli for Windows
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: x86_64-pc-windows-msvc
+      - uses: Swatinem/rust-cache@v2
+
+      - name: The tag is the workspace's version
+        if: startsWith(github.ref, 'refs/tags/v')
+        shell: bash
+        run: |
+          version=$(cargo metadata --no-deps --format-version 1 \
+            | python -c "import json,sys; print(next(p['version'] for p in json.load(sys.stdin)['packages'] if p['name']=='anvil-cli'))")
+          if [ "v$version" != "${GITHUB_REF_NAME}" ]; then
+            echo "::error::tag ${GITHUB_REF_NAME} is not the workspace's version v$version"
+            exit 1
+          fi
+
+      # The C runtime linked in, so the exe runs without the Visual C++
+      # redistributable installed.
+      - name: Build
+        env:
+          RUSTFLAGS: -C target-feature=+crt-static
+        run: cargo build --release --locked -p anvil-cli --target x86_64-pc-windows-msvc
+
+      - name: Package
+        id: package
+        shell: pwsh
+        run: |
+          $name = if ($env:GITHUB_REF -like 'refs/tags/v*') { "anvil-cli-$env:GITHUB_REF_NAME-windows-x86_64" } else { "anvil-cli-dev-windows-x86_64" }
+          New-Item -ItemType Directory -Path $name | Out-Null
+          Copy-Item target/x86_64-pc-windows-msvc/release/anvil-cli.exe $name/
+          Copy-Item README.md $name/
+          Get-ChildItem -Filter 'LICENSE*' | Copy-Item -Destination $name/
+          Compress-Archive -Path $name -DestinationPath "$name.zip"
+          $hash = (Get-FileHash "$name.zip" -Algorithm SHA256).Hash.ToLower()
+          "$hash  $name.zip" | Out-File -Encoding ascii "$name.zip.sha256"
+          "name=$name" | Out-File -Append -Encoding utf8 $env:GITHUB_OUTPUT
+          # It runs: the exe answers --help.
+          & "$name/anvil-cli.exe" --help | Select-Object -First 3
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ steps.package.outputs.name }}
+          path: |
+            ${{ steps.package.outputs.name }}.zip
+            ${{ steps.package.outputs.name }}.zip.sha256
+
+      - name: Publish the release
+        if: startsWith(github.ref, 'refs/tags/v')
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          name=${{ steps.package.outputs.name }}
+          gh release create "$GITHUB_REF_NAME" "$name.zip" "$name.zip.sha256" \
+            --title "Anvil $GITHUB_REF_NAME" \
+            --notes "anvil-cli for Windows (x86_64). Unzip and run \`anvil-cli.exe login https://your-fcp-server\`. The exe is not code-signed yet: Windows SmartScreen may ask before running it. SHA-256 in \`$name.zip.sha256\`."
