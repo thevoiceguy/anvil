@@ -61,10 +61,10 @@ sip-auth = { git = "https://github.com/thevoiceguy/siphon-rs", tag = "v2026.10.0
 sip-dns = { git = "https://github.com/thevoiceguy/siphon-rs", tag = "v2026.10.06" }
 
 # forge-media — pinned to a release tag
-forge-rtp = { git = "https://github.com/thevoiceguy/forge-media", tag = "v2026.09.29" }
-forge-codecs = { git = "https://github.com/thevoiceguy/forge-media", tag = "v2026.09.29", features = ["g722"] }
-forge-dtmf = { git = "https://github.com/thevoiceguy/forge-media", tag = "v2026.09.29" }
-forge-resampler = { git = "https://github.com/thevoiceguy/forge-media", tag = "v2026.09.29" }
+forge-rtp = { git = "https://github.com/thevoiceguy/forge-media", tag = "v2026.10.07" }
+forge-codecs = { git = "https://github.com/thevoiceguy/forge-media", tag = "v2026.10.07", features = ["g722"] }
+forge-dtmf = { git = "https://github.com/thevoiceguy/forge-media", tag = "v2026.10.07" }
+forge-resampler = { git = "https://github.com/thevoiceguy/forge-media", tag = "v2026.10.07" }
 
 # Internal
 anvil-core  = { path = "crates/anvil-core"  }
