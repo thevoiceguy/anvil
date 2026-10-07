@@ -17,8 +17,8 @@ use async_trait::async_trait;
 use bytes::Bytes;
 use sip_transaction::{TransportContext, TransportDispatcher, TransportKind};
 use sip_transport::{
-    pool::ConnectionPool, run_tcp, run_udp, send_stream, send_udp, DefaultTransportPolicy,
-    InboundPacket, TransportPolicy,
+    bind_tcp, pool::ConnectionPool, run_udp, send_stream, send_udp, serve_tcp,
+    DefaultTransportPolicy, InboundPacket, TransportPolicy,
 };
 use tokio::{net::UdpSocket, sync::mpsc};
 
@@ -94,12 +94,14 @@ pub(crate) async fn start_transports(
     // Responses on connections we open come back to the same pump.
     tcp_pool.set_inbound_tx(tx.clone()).await;
 
-    // TCP on the same address and port as UDP.
+    // TCP on the same address and port as UDP, bound before this returns:
+    // a peer calling the moment Anvil has started must find it listening.
     let tcp_bind = udp_socket.local_addr()?.to_string();
+    let tcp_listener = bind_tcp(&tcp_bind)?;
     tokio::spawn({
         let tx = tx.clone();
         async move {
-            if let Err(e) = run_tcp(&tcp_bind, tx).await {
+            if let Err(e) = serve_tcp(tcp_listener, tx).await {
                 tracing::warn!(%e, bind = %tcp_bind, "TCP listener exited");
             }
         }
