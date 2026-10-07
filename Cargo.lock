@@ -128,6 +128,25 @@ dependencies = [
 ]
 
 [[package]]
+name = "anvil-app"
+version = "0.1.0"
+dependencies = [
+ "anvil-core",
+ "anvil-fcp",
+ "async-trait",
+ "dirs",
+ "parking_lot",
+ "rand 0.8.6",
+ "reqwest",
+ "serde",
+ "serde_json",
+ "thiserror 1.0.69",
+ "tokio",
+ "tracing",
+ "tracing-subscriber",
+]
+
+[[package]]
 name = "anvil-audio"
 version = "0.1.0"
 dependencies = [
@@ -163,6 +182,7 @@ dependencies = [
 name = "anvil-cli"
 version = "0.1.0"
 dependencies = [
+ "anvil-app",
  "anvil-audio",
  "anvil-core",
  "anvil-fcp",

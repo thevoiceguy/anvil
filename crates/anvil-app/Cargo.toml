@@ -1,0 +1,27 @@
+[package]
+name = "anvil-app"
+description = "The running phone: one state model and one stream of changes over anvil-core and anvil-fcp, the commands that drive it, and the local control socket the CLI and the app use."
+version.workspace      = true
+edition.workspace      = true
+rust-version.workspace = true
+license.workspace      = true
+authors.workspace      = true
+repository.workspace   = true
+homepage.workspace     = true
+
+[dependencies]
+anvil-core = { workspace = true }
+anvil-fcp  = { workspace = true }
+tokio      = { workspace = true }
+serde      = { workspace = true }
+serde_json = { workspace = true }
+thiserror  = { workspace = true }
+tracing    = { workspace = true }
+parking_lot = { workspace = true }
+dirs       = "5"
+
+[dev-dependencies]
+async-trait = { workspace = true }
+tracing-subscriber = { workspace = true }
+reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "json"] }
+rand    = "0.8"

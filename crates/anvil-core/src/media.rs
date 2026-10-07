@@ -40,6 +40,9 @@ pub(crate) struct MediaPipeline {
     /// Hold / direction state. Flipped by `Anvil::hold` (local hold) and
     /// by the dispatcher's re-INVITE path (remote hold).
     pub(crate) hold: Arc<HoldState>,
+    /// The microphone muted: silence is sent in its place, so the far end
+    /// keeps receiving RTP and does not take the call for dead.
+    pub(crate) muted: Arc<AtomicBool>,
 }
 
 impl MediaPipeline {
@@ -696,6 +699,8 @@ pub(crate) fn start_pipeline(
     let sock_send = Arc::clone(&rtp_socket);
     let metrics_send = Arc::clone(&metrics);
     let hold_send = Arc::clone(&hold);
+    let muted = Arc::new(AtomicBool::new(false));
+    let muted_send = Arc::clone(&muted);
     let srtp_send = srtp.clone();
     let send_task = tokio::spawn(async move {
         let mut driver = send_driver;
@@ -751,7 +756,11 @@ pub(crate) fn start_pipeline(
                         continue;
                     }
 
-                    let payload = driver.encode(&frame.samples);
+                    let payload = if muted_send.load(Ordering::Relaxed) {
+                        driver.encode(&vec![0; frame.samples.len()])
+                    } else {
+                        driver.encode(&frame.samples)
+                    };
                     // RFC 3551: marker bit on first packet of a talkspurt.
                     let marker = !sent_any;
                     let packet = RtpPacket::build(
@@ -954,6 +963,7 @@ pub(crate) fn start_pipeline(
         stats_task,
         dtmf_tx,
         hold,
+        muted,
     })
 }
 
@@ -1297,6 +1307,50 @@ mod tests {
         let offer = crate::srtp::Crypto::generate(1, crate::srtp::Suite::AesCm128HmacSha1_80);
         let (answer, _) = crate::srtp::answer_to(std::slice::from_ref(&offer)).unwrap();
         (offer, answer)
+    }
+
+    /// Muted, a pipeline sends silence: the far side gets frames, none loud.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+    async fn muted_sends_silence() {
+        let loopback = IpAddr::V4(Ipv4Addr::LOCALHOST);
+        let sock_a = Arc::new(UdpSocket::bind(SocketAddr::new(loopback, 0)).await.unwrap());
+        let sock_b = Arc::new(UdpSocket::bind(SocketAddr::new(loopback, 0)).await.unwrap());
+        let (addr_a, addr_b) = (sock_a.local_addr().unwrap(), sock_b.local_addr().unwrap());
+        let (frames_b, rms_b) = (Arc::new(AtomicU64::new(0)), Arc::new(AtomicU64::new(0)));
+        let pipe_a = start_pipeline(
+            Codec::Pcmu,
+            Arc::clone(&sock_a),
+            addr_b,
+            Box::new(ToneSource::new_at(440.0, 8000)),
+            Box::new(RmsSink {
+                frames: Arc::new(AtomicU64::new(0)),
+                peak_rms_q: Arc::new(AtomicU64::new(0)),
+            }),
+            None,
+            None,
+        )
+        .unwrap();
+        pipe_a.muted.store(true, Ordering::Relaxed);
+        let pipe_b = start_pipeline(
+            Codec::Pcmu,
+            Arc::clone(&sock_b),
+            addr_a,
+            Box::new(ToneSource::new_at(660.0, 8000)),
+            Box::new(RmsSink {
+                frames: Arc::clone(&frames_b),
+                peak_rms_q: Arc::clone(&rms_b),
+            }),
+            None,
+            None,
+        )
+        .unwrap();
+        tokio::time::sleep(Duration::from_millis(600)).await;
+        drop((pipe_a, pipe_b));
+        assert!(
+            frames_b.load(Ordering::Relaxed) >= 20,
+            "B still receives frames"
+        );
+        assert!(rms_b.load(Ordering::Relaxed) < 100, "B hears silence");
     }
 
     /// SDES-SRTP both ways: the audio survives encryption.

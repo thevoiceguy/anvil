@@ -835,6 +835,20 @@ impl Anvil {
         }
     }
 
+    /// Mute the microphone on a call (`on`), or unmute it. Silence is sent
+    /// while muted, so the call stays up at the far end.
+    pub fn mute(&self, call: CallId, on: bool) -> Result<(), AnvilError> {
+        let entry = self.calls.get(&call).ok_or(AnvilError::NoSuchCall(call))?;
+        let pipeline = entry
+            .pipeline
+            .as_ref()
+            .ok_or_else(|| AnvilError::Internal(format!("{call:?} has no media")))?;
+        pipeline
+            .muted
+            .store(on, std::sync::atomic::Ordering::Relaxed);
+        Ok(())
+    }
+
     /// Blind-transfer a call to `target` (RFC 3515): a REFER in its dialog.
     /// The server's progress arrives as [`Event::TransferProgress`]; on
     /// success the server ends the call (a BYE, [`Event::CallEnded`]).
