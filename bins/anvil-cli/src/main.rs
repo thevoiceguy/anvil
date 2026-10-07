@@ -4,9 +4,11 @@
 //! with what FCP tells it; or give an account by hand with `--aor`,
 //! `--registrar`, `--username` and `--password`.
 //!
-//! Phase 1 M2: REGISTER, then place an outgoing call if `--call` is given.
-//! Prints every event. Hangs up on Ctrl+C. No media flow yet (the INVITE
-//! advertises an RTP port, but no audio frames cross the wire).
+//! It registers, places a call when `--call` is given (with the microphone
+//! and speaker, or a test tone with `--tone`), answers and prints every
+//! event, and hangs up on Ctrl+C. The subcommands read and change the
+//! user's data on FCP: `calls`, `directory`, `voicemail`, `settings`,
+//! `events`.
 
 use std::time::Duration;
 
@@ -20,7 +22,11 @@ use anyhow::Result;
 use clap::{Parser, Subcommand};
 
 #[derive(Parser, Debug)]
-#[command(name = "anvil-cli", about = "Anvil terminal softphone (Phase 1 M2)")]
+#[command(
+    name = "anvil-cli",
+    version,
+    about = "Anvil, the softphone for FCP: a terminal client"
+)]
 struct Cli {
     #[command(subcommand)]
     command: Option<Command>,
