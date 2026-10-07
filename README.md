@@ -16,7 +16,21 @@ FFI bridge for mobile UIs, and a reference CLI client.
 
 ## Status
 
-Pre-alpha. See [`docs/ROADMAP.md`](docs/ROADMAP.md) for the phased plan.
+Pre-alpha, without a UI: everything is driven from `anvil-cli` or through
+`anvil-ffi`. See [`docs/ROADMAP.md`](docs/ROADMAP.md) for the phased plan.
+
+What works today, tested against FCP:
+
+- **Signing in** through the browser (OAuth 2.0 with PKCE) or a password;
+  the install is a device with its own SIP account, kept registered.
+- **Calls** over UDP, TCP or TLS: Opus, G.722 and G.711, RFC 2833 DTMF,
+  hold, blind and attended transfer, park, call waiting.
+- **Encrypted media** (SDES-SRTP), optional or required; on by default when
+  FCP serves the account over TLS.
+- **Message waiting, presence and busy lamps** (SUBSCRIBE/NOTIFY).
+- **The user's data from FCP**: call history, the directory with presence,
+  voicemail, calling settings (do not disturb, forwards), and live events.
+- **The tenant's brand**: logo, colors, ringtones, app name.
 
 ## Architecture (at a glance)
 
@@ -49,7 +63,31 @@ cargo run -p anvil-cli -- --call sip:bob@example.com
 # Or an account by hand.
 cargo run -p anvil-cli -- --aor sip:alice@example.com --registrar sip:example.com \
     --username alice --password …
+
+# The user's own data.
+cargo run -p anvil-cli -- calls --missed
+cargo run -p anvil-cli -- directory ann
+cargo run -p anvil-cli -- voicemail
+cargo run -p anvil-cli -- settings --dnd true
+cargo run -p anvil-cli -- events
 ```
+
+## Testing against FCP
+
+`cargo test --workspace` needs nothing. The tests that need a running FCP
+(`anvil-fcp/tests/fcp.rs`, `anvil-ffi/tests/fcp.rs`) skip unless told where
+it is:
+
+```bash
+ANVIL_FCP_ADMIN=http://127.0.0.1:8080 ANVIL_FCP_TOKEN=<admin token> \
+ANVIL_FCP_SIP=127.0.0.1:5060 \
+ANVIL_FCP_SIPS=127.0.0.1:5061 ANVIL_FCP_CA=/path/to/ca.pem \
+    cargo test -p anvil-fcp -p anvil-ffi --test fcp
+```
+
+The TLS pair is only for the encrypted-call test. FCP's `/me/events` carries
+call events only when its admin and call manager share an events server
+(`[events] server_url`).
 
 ## Crates
 
@@ -59,7 +97,7 @@ cargo run -p anvil-cli -- --aor sip:alice@example.com --registrar sip:example.co
 | `anvil-audio` | Cross-platform mic/speaker via `cpal`, plus AEC/NS/AGC        |
 | `anvil-brand` | FCP tenant branding — HTTP fetch + filesystem cache           |
 | `anvil-codec` | Opus wrapper (forge-media already provides G.711/G.722)       |
-| `anvil-fcp`   | FCP's client: discovery, sign-in, the app session, settings |
+| `anvil-fcp`   | FCP's client: discovery, sign-in, the app session, settings, the user's data and events |
 | `anvil-ffi`   | C ABI surface for mobile/native UI hosts                      |
 | `anvil-cli`   | Terminal softphone — reference UAC and dev-loop test harness  |
 
