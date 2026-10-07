@@ -44,3 +44,11 @@
 # ─── iOS simulator (Apple Silicon Mac) ─────────────────────────────────
 #
 #   cargo build -p anvil-ffi --target aarch64-apple-ios-sim --release
+
+# ─── Every host ────────────────────────────────────────────────────────
+
+[env]
+# The libopus that audiopus_sys builds (Windows; anywhere without a system
+# libopus) declares CMake compatibility below 3.5, which CMake 4 removed;
+# this is CMake's own way to configure it anyway.
+CMAKE_POLICY_VERSION_MINIMUM = "3.5"
