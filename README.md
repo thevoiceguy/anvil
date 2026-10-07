@@ -64,6 +64,12 @@ cargo run -p anvil-cli -- --call sip:bob@example.com
 cargo run -p anvil-cli -- --aor sip:alice@example.com --registrar sip:example.com \
     --username alice --password …
 
+# A phone that keeps running, and commands it takes from anywhere.
+cargo run -p anvil-cli -- run                     # registered, ringing, a prompt
+cargo run -p anvil-cli -- call 1002               # from another terminal or a script
+cargo run -p anvil-cli -- answer | hangup | hold | resume | mute | transfer 1003 | status
+cargo run -p anvil-cli -- watch                   # its changes as they happen
+
 # The user's own data.
 cargo run -p anvil-cli -- calls --missed
 cargo run -p anvil-cli -- directory ann

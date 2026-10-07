@@ -91,6 +91,22 @@ live in FCP: `docs/SOFTPHONE.md` in `thevoiceguy/fcp`. Anvil's phases:
 
 ---
 
+## The app (`docs/APP.md`)
+
+- [x] **U0** The running phone: `anvil-app` (one state model, one stream of
+      changes, the commands), mute in `anvil-core`, the control socket (a
+      Unix socket or a named pipe, this user only), `anvil-cli run` with a
+      prompt, and `anvil-cli call|answer|decline|hangup|hold|resume|mute|
+      unmute|dtmf|transfer|attended|dnd|status|watch` driving it
+- [ ] **U1** The app's skeleton on desktop (Flutter, `flutter_rust_bridge`)
+- [ ] **U2** The desktop app
+- [ ] **U3** Desktop distribution
+- [ ] **U4** The app on mobile
+- [ ] **U5** Ringing a sleeping phone (with FCP's push)
+- [ ] **U6** Accessibility, localisation, store listings
+
+---
+
 ## Phase 1 — desktop core MVP
 
 **Target:** place and receive an audio call from `anvil-cli` on Linux/macOS/Windows.

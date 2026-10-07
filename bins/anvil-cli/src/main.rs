@@ -32,6 +32,11 @@ struct Cli {
     command: Option<Command>,
 
     /// Where the FCP session is kept (default: the user's config directory).
+    /// The running phone's control socket (a path, or `\\.\pipe\name` on
+    /// Windows); unset, this user's default.
+    #[arg(long, env = "ANVIL_CONTROL", global = true)]
+    control: Option<String>,
+
     #[arg(long, env = "ANVIL_SESSION", global = true)]
     session: Option<std::path::PathBuf>,
 
@@ -191,6 +196,274 @@ enum Command {
     },
     /// Print your live events until Ctrl+C.
     Events,
+    /// Run the phone: registered, ringing, and taking commands at a prompt
+    /// and on its control socket, until `quit` or Ctrl+C.
+    Run,
+    /// Tell the running phone to call a number, an extension or an address.
+    Call { target: String },
+    /// Answer the ringing call.
+    Answer {
+        #[arg(long)]
+        id: Option<u64>,
+    },
+    /// Decline the ringing call.
+    Decline {
+        #[arg(long)]
+        id: Option<u64>,
+    },
+    /// Hang up.
+    Hangup {
+        #[arg(long)]
+        id: Option<u64>,
+    },
+    /// Put the call on hold.
+    Hold {
+        #[arg(long)]
+        id: Option<u64>,
+    },
+    /// Take the call off hold.
+    Resume {
+        #[arg(long)]
+        id: Option<u64>,
+    },
+    /// Mute the microphone.
+    Mute {
+        #[arg(long)]
+        id: Option<u64>,
+    },
+    /// Unmute the microphone.
+    Unmute {
+        #[arg(long)]
+        id: Option<u64>,
+    },
+    /// Send DTMF digits.
+    Dtmf {
+        digits: String,
+        #[arg(long)]
+        id: Option<u64>,
+    },
+    /// Transfer the call to a number or address.
+    Transfer {
+        target: String,
+        #[arg(long)]
+        id: Option<u64>,
+    },
+    /// Join one call's party to another's (attended transfer).
+    Attended { call: u64, to: u64 },
+    /// Do not disturb on or off, on the running phone.
+    Dnd {
+        #[arg(value_parser = ["on", "off"])]
+        state: String,
+    },
+    /// The running phone: registration, calls, message waiting.
+    Status,
+    /// Print the running phone's changes until Ctrl+C.
+    Watch,
+}
+
+impl Command {
+    /// The phone command this subcommand is, when it is one.
+    fn phone_command(&self) -> Option<anvil_app::Command> {
+        use anvil_app::Command as P;
+        Some(match self {
+            Command::Call { target } => P::Call {
+                target: target.clone(),
+            },
+            Command::Answer { id } => P::Answer { call: *id },
+            Command::Decline { id } => P::Decline { call: *id },
+            Command::Hangup { id } => P::Hangup { call: *id },
+            Command::Hold { id } => P::Hold { call: *id },
+            Command::Resume { id } => P::Resume { call: *id },
+            Command::Mute { id } => P::Mute { call: *id },
+            Command::Unmute { id } => P::Unmute { call: *id },
+            Command::Dtmf { digits, id } => P::Dtmf {
+                digits: digits.clone(),
+                call: *id,
+            },
+            Command::Transfer { target, id } => P::Transfer {
+                target: target.clone(),
+                call: *id,
+            },
+            Command::Attended { call, to } => P::TransferAttended {
+                call: *call,
+                to: *to,
+            },
+            Command::Dnd { state } => P::Dnd { on: state == "on" },
+            Command::Status => P::Status,
+            _ => return None,
+        })
+    }
+}
+
+/// The running phone's control socket.
+fn control_endpoint(cli: &Cli) -> anvil_app::control::Endpoint {
+    cli.control
+        .as_deref()
+        .map(anvil_app::control::Endpoint::named)
+        .unwrap_or_else(anvil_app::control::Endpoint::default_for_user)
+}
+
+/// One command to the running phone; its answer printed.
+async fn tell_phone(cli: &Cli, command: anvil_app::Command) -> Result<()> {
+    let mut client = anvil_app::control::Client::connect(&control_endpoint(cli)).await?;
+    let answer = client.request(&command).await?;
+    if !answer.ok {
+        anyhow::bail!("{}", answer.error.unwrap_or_else(|| "refused".into()));
+    }
+    if let Some(state) = answer.state {
+        print_state(&state);
+    } else if let Some(call) = answer.call {
+        println!("calling (call {call})");
+    } else {
+        println!("ok");
+    }
+    Ok(())
+}
+
+/// The running phone's changes, until it goes or Ctrl+C.
+async fn watch_phone(cli: &Cli) -> Result<()> {
+    let mut client = anvil_app::control::Client::connect(&control_endpoint(cli)).await?;
+    client.subscribe().await?;
+    loop {
+        tokio::select! {
+            change = client.next_change() => match change? {
+                Some(change) => print_change(&change),
+                None => break,
+            },
+            _ = tokio::signal::ctrl_c() => break,
+        }
+    }
+    Ok(())
+}
+
+fn print_state(state: &anvil_app::State) {
+    println!("{}  {:?}", state.aor, state.registration);
+    if let Some(dnd) = state.dnd {
+        println!("do not disturb: {}", if dnd { "on" } else { "off" });
+    }
+    if let Some(mw) = state.message_waiting {
+        println!("voicemail: {} new, {} old", mw.new, mw.old);
+    }
+    if state.calls.is_empty() {
+        println!("no calls");
+    }
+    for c in &state.calls {
+        println!("{}", call_line(c));
+    }
+}
+
+fn call_line(c: &anvil_app::CallView) -> String {
+    let mut flags = Vec::new();
+    if c.held {
+        flags.push("held");
+    }
+    if c.muted {
+        flags.push("muted");
+    }
+    format!(
+        "call {}  {:?} {:?}  {}{}{}",
+        c.id,
+        c.direction,
+        c.state,
+        c.display_name.as_deref().unwrap_or(&c.remote),
+        c.codec
+            .as_deref()
+            .map(|k| format!("  [{k}]"))
+            .unwrap_or_default(),
+        if flags.is_empty() {
+            String::new()
+        } else {
+            format!("  ({})", flags.join(", "))
+        }
+    )
+}
+
+fn print_change(change: &anvil_app::Change) {
+    use anvil_app::Change as C;
+    match change {
+        C::Registration { state, reason } => println!(
+            "[registration] {state:?}{}",
+            reason
+                .as_deref()
+                .map(|r| format!(" ({r})"))
+                .unwrap_or_default()
+        ),
+        C::Call { call } => println!("[call] {}", call_line(call)),
+        C::CallEnded { id, reason } => println!("[call] {id} ended: {reason}"),
+        C::MessageWaiting { message_waiting: m } => {
+            println!("[voicemail] {} new, {} old", m.new, m.old)
+        }
+        C::Dnd { on } => println!("[dnd] {}", if *on { "on" } else { "off" }),
+        C::TransferProgress { id, code, reason } => {
+            println!("[transfer] call {id}: {code} {reason}")
+        }
+    }
+}
+
+/// `anvil-cli run`: the phone, its control socket and a prompt.
+async fn run_phone(cli: &Cli) -> Result<()> {
+    use tokio::io::AsyncBufReadExt;
+    let (anvil, _tone, fcp) = phone_config(cli).await?;
+    let phone = anvil_app::Phone::start(anvil_app::PhoneConfig {
+        anvil,
+        fcp,
+        register: true,
+    })
+    .await?;
+    let endpoint = control_endpoint(cli);
+    let server = tokio::spawn(anvil_app::control::serve(phone.clone(), endpoint.clone()));
+    let mut changes = phone.changes();
+    let printer = tokio::spawn(async move {
+        while let Ok(change) = changes.recv().await {
+            print_change(&change);
+        }
+    });
+    println!(
+        "Anvil is running as {} — commands here or `anvil-cli <command>` (control: {endpoint}).",
+        phone.state().aor
+    );
+    println!("call <number>, answer, decline, hangup, hold, resume, mute, unmute, dtmf <digits>, transfer <number>, attended <call> <to>, dnd on|off, status, quit");
+    let mut lines = tokio::io::BufReader::new(tokio::io::stdin()).lines();
+    loop {
+        tokio::select! {
+            line = lines.next_line() => {
+                let Some(line) = line? else { break };
+                let line = line.trim();
+                if line.is_empty() {
+                    continue;
+                }
+                if matches!(line, "quit" | "exit") {
+                    break;
+                }
+                match anvil_app::Command::parse_line(line) {
+                    Ok(command) => match phone.execute(command).await {
+                        Ok(answer) => match (answer.state, answer.call) {
+                            (Some(state), _) => print_state(&state),
+                            (None, Some(call)) => println!("calling (call {call})"),
+                            _ => println!("ok"),
+                        },
+                        Err(e) => println!("! {e}"),
+                    },
+                    Err(e) => println!("! {e}"),
+                }
+            }
+            _ = tokio::signal::ctrl_c() => break,
+        }
+        if server.is_finished() {
+            break;
+        }
+    }
+    printer.abort();
+    if server.is_finished() {
+        if let Ok(Err(e)) = server.await {
+            eprintln!("control socket: {e}");
+        }
+    } else {
+        server.abort();
+    }
+    phone.shutdown().await;
+    println!("Stopped.");
+    Ok(())
 }
 
 /// Where the FCP session lives.
@@ -371,14 +644,21 @@ async fn user_data(cli: &Cli, command: &Command) -> Result<()> {
             }
             events.close().await;
         }
-        Command::Login { .. } | Command::Logout => unreachable!("handled in main"),
+        _ => unreachable!("handled in main"),
     }
     Ok(())
 }
 
 /// The account from the FCP session, refreshed and kept, and the tenant's
 /// brand fetched with it.
-async fn fcp_account(cli: &Cli) -> Result<(AccountConfig, BrandConfig, MediaConfig)> {
+async fn fcp_account(
+    cli: &Cli,
+) -> Result<(
+    AccountConfig,
+    BrandConfig,
+    MediaConfig,
+    Arc<anvil_fcp::FcpClient>,
+)> {
     use anvil_fcp::TokenStore;
     let store = Arc::new(anvil_fcp::FileTokenStore::new(session_path(cli)));
     let session = store.load()?.ok_or_else(|| {
@@ -392,7 +672,7 @@ async fn fcp_account(cli: &Cli) -> Result<(AccountConfig, BrandConfig, MediaConf
     tracing::info!(aor = %config.account.aor, proxy = ?config.account.outbound_proxy, "account from FCP");
     let account = client.account_config(&config).await?;
     let brand = anvil_fcp::brand_config(Arc::clone(&client), None)?;
-    Ok((account, brand, config.media_config()))
+    Ok((account, brand, config.media_config(), client))
 }
 
 #[tokio::main]
@@ -432,51 +712,71 @@ async fn main() -> Result<()> {
             println!("Signed out.");
             return Ok(());
         }
+        Some(Command::Run) => return run_phone(&cli).await,
+        Some(Command::Watch) => return watch_phone(&cli).await,
+        Some(command) if command.phone_command().is_some() => {
+            let phone_command = command.phone_command().expect("checked");
+            return tell_phone(&cli, phone_command).await;
+        }
         Some(command) => return user_data(&cli, command).await,
         None => {}
     }
 
+    let (cfg, tone_stats, _) = phone_config(&cli).await?;
+    run(cli, cfg, tone_stats).await
+}
+
+/// The phone's configuration from the command line: an account by hand,
+/// or FCP's (and the FCP client with it); the audio host; the media.
+async fn phone_config(
+    cli: &Cli,
+) -> Result<(
+    AnvilConfig,
+    Option<Arc<ToneStats>>,
+    Option<Arc<anvil_fcp::FcpClient>>,
+)> {
     let tls_extra_ca_pem = if let Some(path) = cli.tls_ca.as_ref() {
         Some(std::fs::read(path).map_err(|e| anyhow::anyhow!("read --tls-ca: {e}"))?)
     } else {
         None
     };
 
-    let (account, brand, mut media) = match (&cli.aor, &cli.registrar, &cli.username, &cli.password)
-    {
-        (Some(aor), Some(registrar), Some(username), Some(password)) => (
-            AccountConfig {
-                aor: aor.clone(),
-                registrar: registrar.clone(),
-                username: username.clone(),
-                password: password.clone(),
-                transport: if cli.tls {
-                    Transport::Tls
-                } else {
-                    Transport::Udp
+    let (account, brand, mut media, fcp) =
+        match (&cli.aor, &cli.registrar, &cli.username, &cli.password) {
+            (Some(aor), Some(registrar), Some(username), Some(password)) => (
+                AccountConfig {
+                    aor: aor.clone(),
+                    registrar: registrar.clone(),
+                    username: username.clone(),
+                    password: password.clone(),
+                    transport: if cli.tls {
+                        Transport::Tls
+                    } else {
+                        Transport::Udp
+                    },
+                    outbound_proxy: cli.outbound_proxy.clone(),
+                    stun: cli.stun.clone(),
+                    register_expires: Duration::from_secs(3600),
+                    user_agent: format!("Anvil/{}", env!("CARGO_PKG_VERSION")),
+                    bind_addr: cli.bind.clone(),
+                    tls_extra_ca_pem,
+                    provisioning_url: None,
                 },
-                outbound_proxy: cli.outbound_proxy.clone(),
-                stun: cli.stun.clone(),
-                register_expires: Duration::from_secs(3600),
-                user_agent: format!("Anvil/{}", env!("CARGO_PKG_VERSION")),
-                bind_addr: cli.bind.clone(),
-                tls_extra_ca_pem,
-                provisioning_url: None,
-            },
-            BrandConfig::default(),
-            MediaConfig::default(),
-        ),
-        (None, None, None, None) => {
-            let (mut account, brand, media) = fcp_account(&cli).await?;
-            account.bind_addr = cli.bind.clone();
-            account.stun = cli.stun.clone();
-            account.tls_extra_ca_pem = tls_extra_ca_pem;
-            (account, brand, media)
-        }
-        _ => anyhow::bail!(
+                BrandConfig::default(),
+                MediaConfig::default(),
+                None,
+            ),
+            (None, None, None, None) => {
+                let (mut account, brand, media, client) = fcp_account(cli).await?;
+                account.bind_addr = cli.bind.clone();
+                account.stun = cli.stun.clone();
+                account.tls_extra_ca_pem = tls_extra_ca_pem;
+                (account, brand, media, Some(client))
+            }
+            _ => anyhow::bail!(
             "give all of --aor, --registrar, --username and --password, or none (signed in to FCP)"
         ),
-    };
+        };
 
     let (audio, tone_stats): (
         Box<dyn anvil_core::audio::AudioHost>,
@@ -504,7 +804,7 @@ async fn main() -> Result<()> {
         brand,
     };
 
-    run(cli, cfg, tone_stats).await
+    Ok((cfg, tone_stats, fcp))
 }
 
 async fn run(cli: Cli, cfg: AnvilConfig, tone_stats: Option<Arc<ToneStats>>) -> Result<()> {
