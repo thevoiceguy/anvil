@@ -140,8 +140,10 @@ async fn serve_pipe(_: Phone, _: String, endpoint: Endpoint) -> Result<(), Contr
     )))
 }
 
+#[cfg(unix)]
 struct RemoveOnDrop(PathBuf);
 
+#[cfg(unix)]
 impl Drop for RemoveOnDrop {
     fn drop(&mut self) {
         let _ = std::fs::remove_file(&self.0);
@@ -197,6 +199,28 @@ async fn send<W: AsyncWrite + Unpin>(
     write.flush().await
 }
 
+/// Open the pipe, waiting while every instance is busy: the server makes
+/// its next instance only after the last client connected, so a client
+/// arriving in between is told "busy" (`ERROR_PIPE_BUSY`) and tries again.
+#[cfg(windows)]
+async fn open_pipe(
+    name: &str,
+) -> std::io::Result<tokio::net::windows::named_pipe::NamedPipeClient> {
+    const ERROR_PIPE_BUSY: i32 = 231;
+    let deadline = tokio::time::Instant::now() + std::time::Duration::from_secs(2);
+    loop {
+        match tokio::net::windows::named_pipe::ClientOptions::new().open(name) {
+            Err(e)
+                if e.raw_os_error() == Some(ERROR_PIPE_BUSY)
+                    && tokio::time::Instant::now() < deadline =>
+            {
+                tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+            }
+            other => return other,
+        }
+    }
+}
+
 /// A connection to a running phone.
 pub struct Client {
     lines: tokio::io::Lines<BufReader<Box<dyn AsyncRead + Unpin + Send>>>,
@@ -226,9 +250,7 @@ impl Client {
             }
             #[cfg(windows)]
             Endpoint::Pipe(name) => {
-                let pipe = tokio::net::windows::named_pipe::ClientOptions::new()
-                    .open(name)
-                    .map_err(not_running)?;
+                let pipe = open_pipe(name).await.map_err(not_running)?;
                 let (r, w) = tokio::io::split(pipe);
                 (Box::new(r), Box::new(w))
             }
