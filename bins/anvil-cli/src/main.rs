@@ -118,10 +118,32 @@ struct Cli {
     #[arg(long)]
     stun: Option<String>,
 
+    /// Encrypt media (SDES-SRTP). Signed in to FCP the default is what FCP
+    /// says (optional over TLS); otherwise off.
+    #[arg(long, value_enum)]
+    srtp: Option<SrtpArg>,
+
     /// Run captured mic frames through anvil-audio's SimpleAgc before
     /// encoding. Off by default; turn on for noisy / quiet mics.
     #[arg(long)]
     agc: bool,
+}
+
+#[derive(clap::ValueEnum, Clone, Copy, Debug)]
+enum SrtpArg {
+    Off,
+    Optional,
+    Required,
+}
+
+impl From<SrtpArg> for anvil_core::config::SrtpMode {
+    fn from(a: SrtpArg) -> Self {
+        match a {
+            SrtpArg::Off => Self::Off,
+            SrtpArg::Optional => Self::Optional,
+            SrtpArg::Required => Self::Required,
+        }
+    }
 }
 
 #[derive(Subcommand, Debug)]
@@ -350,7 +372,7 @@ async fn user_data(cli: &Cli, command: &Command) -> Result<()> {
 
 /// The account from the FCP session, refreshed and kept, and the tenant's
 /// brand fetched with it.
-async fn fcp_account(cli: &Cli) -> Result<(AccountConfig, BrandConfig)> {
+async fn fcp_account(cli: &Cli) -> Result<(AccountConfig, BrandConfig, MediaConfig)> {
     use anvil_fcp::TokenStore;
     let store = Arc::new(anvil_fcp::FileTokenStore::new(session_path(cli)));
     let session = store.load()?.ok_or_else(|| {
@@ -364,7 +386,7 @@ async fn fcp_account(cli: &Cli) -> Result<(AccountConfig, BrandConfig)> {
     tracing::info!(aor = %config.account.aor, proxy = ?config.account.outbound_proxy, "account from FCP");
     let account = client.account_config(&config).await?;
     let brand = anvil_fcp::brand_config(Arc::clone(&client), None)?;
-    Ok((account, brand))
+    Ok((account, brand, config.media_config()))
 }
 
 #[tokio::main]
@@ -414,7 +436,8 @@ async fn main() -> Result<()> {
         None
     };
 
-    let (account, brand) = match (&cli.aor, &cli.registrar, &cli.username, &cli.password) {
+    let (account, brand, mut media) = match (&cli.aor, &cli.registrar, &cli.username, &cli.password)
+    {
         (Some(aor), Some(registrar), Some(username), Some(password)) => (
             AccountConfig {
                 aor: aor.clone(),
@@ -435,13 +458,14 @@ async fn main() -> Result<()> {
                 provisioning_url: None,
             },
             BrandConfig::default(),
+            MediaConfig::default(),
         ),
         (None, None, None, None) => {
-            let (mut account, brand) = fcp_account(&cli).await?;
+            let (mut account, brand, media) = fcp_account(&cli).await?;
             account.bind_addr = cli.bind.clone();
             account.stun = cli.stun.clone();
             account.tls_extra_ca_pem = tls_extra_ca_pem;
-            (account, brand)
+            (account, brand, media)
         }
         _ => anyhow::bail!(
             "give all of --aor, --registrar, --username and --password, or none (signed in to FCP)"
@@ -464,9 +488,12 @@ async fn main() -> Result<()> {
         (Box::new(host), None)
     };
 
+    if let Some(srtp) = cli.srtp {
+        media.srtp = srtp.into();
+    }
     let cfg = AnvilConfig {
         account,
-        media: MediaConfig::default(),
+        media,
         audio,
         brand,
     };

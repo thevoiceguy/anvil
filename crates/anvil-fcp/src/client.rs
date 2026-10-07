@@ -50,6 +50,39 @@ impl SoftphoneConfig {
         self.feature_codes.get(name).map(String::as_str)
     }
 
+    /// The media FCP says the app offers: its codecs in FCP's order (the
+    /// ones Anvil drives) and SRTP — `optional` over TLS, `off` otherwise.
+    pub fn media_config(&self) -> anvil_core::MediaConfig {
+        use anvil_core::config::{Codec, SrtpMode};
+        let mut codecs = Vec::new();
+        for name in &self.media.codecs {
+            let codec = match name.to_ascii_lowercase().as_str() {
+                "opus" => Some(Codec::Opus),
+                "g722" => Some(Codec::G722),
+                "pcmu" => Some(Codec::Pcmu),
+                "pcma" => Some(Codec::Pcma),
+                _ => None,
+            };
+            if let Some(c) = codec.filter(|c| !codecs.contains(c)) {
+                codecs.push(c);
+            }
+        }
+        let defaults = anvil_core::MediaConfig::default();
+        anvil_core::MediaConfig {
+            codecs: if codecs.is_empty() {
+                defaults.codecs.clone()
+            } else {
+                codecs
+            },
+            srtp: match self.media.srtp.as_str() {
+                "required" => SrtpMode::Required,
+                "optional" => SrtpMode::Optional,
+                _ => SrtpMode::Off,
+            },
+            ..defaults
+        }
+    }
+
     /// A feature code as an address in the account's domain: what to
     /// transfer a call to (park) or to call (retrieve, pickup).
     pub fn feature_uri(&self, name: &str) -> Option<String> {
@@ -286,5 +319,37 @@ impl FcpClient {
             tls_extra_ca_pem: None,
             provisioning_url: Some(session.server.public_url),
         })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn config(codecs: &[&str], srtp: &str) -> SoftphoneConfig {
+        serde_json::from_value(serde_json::json!({
+            "account": {
+                "aor": "sip:a@x", "registrar": "sip:x", "transport": "tls", "outbound_proxy": null,
+                "domain": "x", "realm": "x", "sip_username": "a", "register_expires": 3600
+            },
+            "media": {"codecs": codecs, "srtp": srtp, "dtmf": "rfc2833"},
+            "username": "a", "extension": null, "feature_codes": {}, "api_url": null,
+            "device_id": "d"
+        }))
+        .unwrap()
+    }
+
+    #[test]
+    fn media_follows_what_fcp_says() {
+        use anvil_core::config::{Codec, SrtpMode};
+        let m = config(&["PCMU", "opus", "speex"], "optional").media_config();
+        assert_eq!(m.codecs, vec![Codec::Pcmu, Codec::Opus]);
+        assert_eq!(m.srtp, SrtpMode::Optional);
+        let m = config(&[], "off").media_config();
+        assert_eq!(m.srtp, SrtpMode::Off);
+        assert!(
+            !m.codecs.is_empty(),
+            "Anvil's own codecs when FCP names none"
+        );
     }
 }

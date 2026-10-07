@@ -19,6 +19,7 @@ pub mod event;
 pub(crate) mod media;
 pub mod mwi;
 mod registration;
+mod srtp;
 pub(crate) mod stun;
 pub(crate) mod transport;
 pub(crate) mod uas;
@@ -69,6 +70,8 @@ pub struct Anvil {
     register_expires: u32,
     /// The codecs offered and accepted, in order of preference.
     codecs: Arc<[Codec]>,
+    /// Whether media is encrypted (SDES-SRTP).
+    srtp: config::SrtpMode,
     /// The task keeping the registration alive, while registered.
     refresh: parking_lot::Mutex<Option<JoinHandle<()>>>,
     /// The tenant's brand, when a provider is configured.
@@ -262,6 +265,7 @@ impl Anvil {
             media_ip,
             local_user: local_user.clone(),
             codecs: Arc::clone(&codecs),
+            srtp: cfg.media.srtp,
             local_sip_addr: advertised,
             watched: Arc::clone(&watched),
         });
@@ -303,6 +307,7 @@ impl Anvil {
                 advertised,
                 register_expires,
                 codecs,
+                srtp: cfg.media.srtp,
                 refresh: parking_lot::Mutex::new(None),
                 branding,
                 aor: local_uri.clone(),
@@ -509,13 +514,17 @@ impl Anvil {
             .map_err(|e| AnvilError::Media(format!("rtp local_addr: {e}")))?
             .port();
 
-        // Offer everything we can drive today, in preference order.
+        // Offer everything we can drive today, in preference order, with a
+        // key of ours when media is to be encrypted.
+        let ours = (self.srtp != config::SrtpMode::Off)
+            .then(|| srtp::Crypto::generate(1, srtp::Suite::AesCm128HmacSha1_80));
         let sdp_body = media::build_sdp(
             &self.codecs,
             &self.local_user,
             &self.media_ip.to_string(),
             rtp_port,
             media::MediaDirection::Sendrecv,
+            ours.as_ref(),
         );
 
         tracing::debug!(%target, rtp_port, "sending INVITE");
@@ -537,6 +546,7 @@ impl Anvil {
                 negotiated_codec: None,
                 rtp_socket: Arc::clone(&rtp_socket),
                 pipeline: None,
+                srtp: ours.map(|ours| call::CallSrtp { ours, theirs: None }),
             },
         );
 
@@ -546,8 +556,13 @@ impl Anvil {
         let events = self.events.clone();
         let calls = Arc::clone(&self.calls);
         let audio = Arc::clone(&self.audio);
+        let uac = Arc::clone(&self.uac);
+        let required = self.srtp == config::SrtpMode::Required;
         tokio::spawn(async move {
-            drive_outgoing_call(call_id, handle, rtp_socket, audio, calls, events).await;
+            drive_outgoing_call(
+                call_id, handle, rtp_socket, audio, calls, events, uac, required,
+            )
+            .await;
         });
 
         Ok(call_id)
@@ -706,6 +721,7 @@ impl Anvil {
             hold_state: Arc<media::HoldState>,
             rtp_port: u16,
             codec: Codec,
+            crypto: Option<srtp::Crypto>,
         }
         #[allow(clippy::large_enum_variant)] // a moment on the stack
         enum DialogSource {
@@ -740,6 +756,7 @@ impl Anvil {
                 hold_state,
                 rtp_port,
                 codec,
+                crypto: entry.srtp.as_ref().map(|k| k.ours.clone()),
             }
         };
 
@@ -760,6 +777,7 @@ impl Anvil {
             &self.media_ip.to_string(),
             bundle.rtp_port,
             direction,
+            bundle.crypto.as_ref(),
         );
 
         let sent = self.uac.reinvite(&mut dialog, Some(&sdp_body)).await;
@@ -1234,6 +1252,7 @@ fn map_transport(kind: sip_transport::TransportKind) -> sip_transaction::Transpo
 /// Drives an outgoing call's lifecycle: drains provisional responses and
 /// awaits the final response. Emits `CallRinging`, `CallEstablished`, and
 /// `CallEnded` events; leaves the `CallEntry` in place for the app to `hangup`.
+#[allow(clippy::too_many_arguments)]
 async fn drive_outgoing_call(
     call_id: CallId,
     handle: Arc<sip_uac::integrated::CallHandle>,
@@ -1241,6 +1260,8 @@ async fn drive_outgoing_call(
     audio: Arc<dyn AudioHost>,
     calls: Arc<DashMap<CallId, CallEntry>>,
     events: mpsc::Sender<Event>,
+    uac: Arc<IntegratedUAC>,
+    srtp_required: bool,
 ) {
     // Drain provisional responses in parallel with await_final. We only care
     // about 180 Ringing at this milestone; other 1xx responses (100, 183)
@@ -1282,6 +1303,46 @@ async fn drive_outgoing_call(
             let codec = extract_codec_from_answer(body_slice).unwrap_or(Codec::Pcmu);
             let remote_rtp = media::extract_remote_rtp_addr(body_slice);
 
+            // The answer's key for the one we offered. Without one the
+            // media goes in the clear — or, when SRTP is required, the call
+            // ends here.
+            let srtp_context = {
+                let answered = srtp::offered(body_slice);
+                let mut entry = calls.get_mut(&call_id);
+                match entry.as_mut().and_then(|e| e.srtp.as_mut()) {
+                    Some(keys) => match srtp::matching(&keys.ours, &answered).cloned() {
+                        Some(theirs) => {
+                            keys.theirs = Some(theirs);
+                            keys.context()
+                        }
+                        None => None,
+                    },
+                    None => None,
+                }
+            };
+            let offered_srtp = calls.get(&call_id).is_some_and(|e| e.srtp.is_some());
+            if offered_srtp && srtp_context.is_none() {
+                if srtp_required {
+                    tracing::warn!(
+                        "the answer carries no SRTP key and SRTP is required; hanging up"
+                    );
+                    let dialog = handle.dialog.read().await.clone();
+                    let _ = uac.bye(&dialog).await;
+                    calls.remove(&call_id);
+                    let _ = events
+                        .send(Event::CallEnded {
+                            call: call_id,
+                            reason: EndReason::Error("the answer did not encrypt media".into()),
+                        })
+                        .await;
+                    return;
+                }
+                // The other end answered in the clear: so is the call.
+                if let Some(mut entry) = calls.get_mut(&call_id) {
+                    entry.srtp = None;
+                }
+            }
+
             // Start media: open audio host streams for this call, spawn the
             // send/receive tasks. Failures are logged but don't tear down the
             // call — a half-deaf call is still better UX than a cryptic panic
@@ -1289,7 +1350,16 @@ async fn drive_outgoing_call(
             // in Phase 2.
             let pipeline = match remote_rtp {
                 Some(remote) => {
-                    start_media(call_id, codec, &audio, rtp_socket, remote, events.clone()).await
+                    start_media(
+                        call_id,
+                        codec,
+                        &audio,
+                        rtp_socket,
+                        remote,
+                        events.clone(),
+                        srtp_context,
+                    )
+                    .await
                 }
                 None => {
                     tracing::warn!("no remote RTP address in SDP answer; no media");
@@ -1344,6 +1414,7 @@ async fn start_media(
     rtp_socket: Arc<tokio::net::UdpSocket>,
     remote: std::net::SocketAddr,
     events: mpsc::Sender<Event>,
+    srtp: Option<forge_rtp::srtp::SrtpContext>,
 ) -> Option<media::MediaPipeline> {
     let fmt = media::CodecSpec::for_codec(codec).audio_format();
     let capture = match audio.make_capture(fmt) {
@@ -1367,9 +1438,18 @@ async fn start_media(
         interval: std::time::Duration::from_secs(2),
         events,
     };
-    match media::start_pipeline(codec, rtp_socket, remote, capture, playback, Some(sink)) {
+    let encrypted = srtp.is_some();
+    match media::start_pipeline(
+        codec,
+        rtp_socket,
+        remote,
+        capture,
+        playback,
+        Some(sink),
+        srtp,
+    ) {
         Ok(p) => {
-            tracing::info!(%remote, ?codec, "media pipeline started");
+            tracing::info!(%remote, ?codec, encrypted, "media pipeline started");
             Some(p)
         }
         Err(e) => {

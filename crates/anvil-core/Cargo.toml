@@ -40,6 +40,7 @@ sip-dns         = { workspace = true }
 
 # Media engine
 forge-rtp    = { workspace = true }
+base64       = "0.22"
 forge-codecs = { workspace = true }
 forge-dtmf   = { workspace = true }
 

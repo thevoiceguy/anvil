@@ -69,6 +69,20 @@ live in FCP: `docs/SOFTPHONE.md` in `thevoiceguy/fcp`. Anvil's phases:
   - FCP's `/me/events` needs its admin following an events server that the
     call manager posts to (`[events] server_url` on both)
 - [ ] **A5** SDES-SRTP, and the cross-repo suite completed
+  - [x] **A5a** SDES-SRTP (RFC 4568, RFC 3711): `MediaConfig::srtp` read —
+        `Optional` and `Required` offer `RTP/SAVP` with a fresh
+        AES_CM_128_HMAC_SHA1_80 key, `Required` hangs up on an answer in the
+        clear; an encrypted offer answered with our key under its tag and
+        suite, a plain offer refused 488 when SRTP is required and a secure
+        one when it is off; every packet protected (DTMF too) and
+        authenticated on receipt, the rest dropped; re-INVITEs keep the key
+        (`anvil_core::srtp` over forge-rtp's `SrtpContext`).
+        `SoftphoneConfig::media_config` takes FCP's codecs and SRTP
+        (`optional` over TLS); the CLI's `--srtp`. Needs FCP #277 (an
+        encrypted caller answered encrypted, its key kept off the callee's
+        leg)
+  - [ ] **A5b** FCP offering SRTP toward a softphone registered over TLS;
+        the cross-repo suite completed
 
 ---
 

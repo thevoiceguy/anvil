@@ -63,6 +63,72 @@ impl AudioHost for Quiet {
     }
 }
 
+/// A host that speaks a tone and remembers the loudest frame it heard.
+struct Tone {
+    hz: f32,
+    heard: Arc<std::sync::atomic::AtomicU64>,
+}
+struct ToneSource {
+    format: AudioFormat,
+    tick: tokio::time::Interval,
+    hz: f32,
+    phase: f32,
+}
+struct LoudestSink(Arc<std::sync::atomic::AtomicU64>);
+
+#[async_trait]
+impl AudioSource for ToneSource {
+    async fn next_frame(&mut self) -> Option<AudioFrame> {
+        self.tick.tick().await;
+        let rate = self.format.sample_rate as f32;
+        let n = (self.format.sample_rate * self.format.frame_ms / 1000) as usize;
+        let samples = (0..n)
+            .map(|_| {
+                self.phase = (self.phase + self.hz / rate) % 1.0;
+                ((self.phase * std::f32::consts::TAU).sin() * 12_000.0) as i16
+            })
+            .collect();
+        Some(AudioFrame {
+            samples,
+            format: self.format,
+        })
+    }
+}
+
+#[async_trait]
+impl AudioSink for LoudestSink {
+    async fn write_frame(&mut self, frame: &AudioFrame) -> Result<(), AnvilError> {
+        let n = frame.samples.len().max(1) as f64;
+        let sum: f64 = frame
+            .samples
+            .iter()
+            .map(|&s| f64::from(s) * f64::from(s))
+            .sum();
+        self.0.fetch_max(
+            (sum / n).sqrt() as u64,
+            std::sync::atomic::Ordering::Relaxed,
+        );
+        Ok(())
+    }
+}
+
+impl AudioHost for Tone {
+    fn make_capture(&self, cfg: AudioFormat) -> Result<Box<dyn AudioSource>, AnvilError> {
+        Ok(Box::new(ToneSource {
+            format: cfg,
+            tick: tokio::time::interval(Duration::from_millis(u64::from(cfg.frame_ms))),
+            hz: self.hz,
+            phase: 0.0,
+        }))
+    }
+    fn make_playback(&self, _cfg: AudioFormat) -> Result<Box<dyn AudioSink>, AnvilError> {
+        Ok(Box::new(LoudestSink(Arc::clone(&self.heard))))
+    }
+    fn devices(&self) -> Vec<DeviceInfo> {
+        Vec::new()
+    }
+}
+
 /// The FCP a test runs against, and an administrator's way into it.
 struct Fcp {
     admin: String,
@@ -167,13 +233,22 @@ async fn expect<T>(
 
 /// An Anvil started from what FCP tells the signed-in app, bound to `ip`.
 async fn softphone(client: &FcpClient, ip: &str) -> (Anvil, EventStream) {
+    softphone_with(client, ip, MediaConfig::default(), Box::new(Quiet)).await
+}
+
+async fn softphone_with(
+    client: &FcpClient,
+    ip: &str,
+    media: MediaConfig,
+    audio: Box<dyn AudioHost>,
+) -> (Anvil, EventStream) {
     let config = client.softphone().await.expect("/me/softphone");
     let mut account = client.account_config(&config).await.expect("an account");
     account.bind_addr = Some(format!("{ip}:0"));
     let (anvil, mut events) = Anvil::start(AnvilConfig {
         account,
-        media: MediaConfig::default(),
-        audio: Box::new(Quiet),
+        media,
+        audio,
         brand: BrandConfig::default(),
     })
     .await
@@ -950,6 +1025,75 @@ async fn anvil_reads_the_users_history_directory_voicemail_and_events() {
         Err(e) => panic!("/me/voicemail/messages: {e}"),
     }
 
+    let _ = alice_phone.shutdown().await;
+    let _ = bob_phone.shutdown().await;
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn anvil_encrypts_its_media_and_fcp_answers_in_srtp() {
+    use std::sync::atomic::{AtomicU64, Ordering};
+    let fcp = fcp_or_skip!();
+    let (alice_client, _) = signed_in(&fcp, "srtp-alice").await;
+    let (bob_client, bob) = signed_in(&fcp, "srtp-bob").await;
+    let (alice_heard, bob_heard) = (Arc::new(AtomicU64::new(0)), Arc::new(AtomicU64::new(0)));
+    // Alice requires SRTP; Bob's phone speaks RTP in the clear.
+    let (alice_phone, mut alice_events) = softphone_with(
+        &alice_client,
+        "127.0.0.90",
+        MediaConfig {
+            srtp: anvil_core::config::SrtpMode::Required,
+            ..MediaConfig::default()
+        },
+        Box::new(Tone {
+            hz: 440.0,
+            heard: Arc::clone(&alice_heard),
+        }),
+    )
+    .await;
+    let (bob_phone, mut bob_events) = softphone_with(
+        &bob_client,
+        "127.0.0.91",
+        MediaConfig::default(),
+        Box::new(Tone {
+            hz: 660.0,
+            heard: Arc::clone(&bob_heard),
+        }),
+    )
+    .await;
+    let domain = bob_client.softphone().await.unwrap().account.domain;
+
+    let out = alice_phone
+        .place_call(&format!("sip:{bob}@{domain}"))
+        .await
+        .unwrap();
+    let at_bob = expect(&mut bob_events, SOON, |e| match e {
+        Event::IncomingCall { call, .. } => Some(*call),
+        _ => None,
+    })
+    .await
+    .expect("Bob rings");
+    bob_phone.answer(at_bob).await.unwrap();
+    // FCP answered Alice's encrypted offer with a key of its own, or her
+    // phone, requiring SRTP, would have ended the call.
+    expect(&mut alice_events, SOON, |e| match e {
+        Event::CallEstablished { call, .. } if *call == out => Some(()),
+        Event::CallEnded { call, reason } if *call == out => panic!("the call ended: {reason:?}"),
+        _ => None,
+    })
+    .await
+    .expect("Alice's call is up");
+
+    // Each hears the other: FCP decrypts what Alice sends and encrypts what
+    // it sends her.
+    tokio::time::sleep(Duration::from_secs(2)).await;
+    let (a, b) = (
+        alice_heard.load(Ordering::Relaxed),
+        bob_heard.load(Ordering::Relaxed),
+    );
+    assert!(a > 2000, "Alice hears Bob through SRTP: {a}");
+    assert!(b > 2000, "Bob hears Alice through FCP: {b}");
+
+    alice_phone.hangup(out).await.unwrap();
     let _ = alice_phone.shutdown().await;
     let _ = bob_phone.shutdown().await;
 }
