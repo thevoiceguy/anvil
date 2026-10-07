@@ -81,8 +81,13 @@ live in FCP: `docs/SOFTPHONE.md` in `thevoiceguy/fcp`. Anvil's phases:
         (`optional` over TLS); the CLI's `--srtp`. Needs FCP #277 (an
         encrypted caller answered encrypted, its key kept off the callee's
         leg)
-  - [ ] **A5b** FCP offering SRTP toward a softphone registered over TLS;
-        the cross-repo suite completed
+  - [x] **A5b** Called encrypted over TLS: FCP offers SDES-SRTP to a
+        softphone registered over TLS (FCP #278); proved by
+        `anvil_over_tls_is_called_encrypted` — Anvil over TLS requiring SRTP,
+        called by a plain Anvil over UDP, both heard (`ANVIL_FCP_SIPS`,
+        `ANVIL_FCP_CA`)
+  - [ ] **A5c** The cross-repo suite completed: CI against FCP (the
+        `FCP_READ_TOKEN` secret), a TLS listener in that stack
 
 ---
 
