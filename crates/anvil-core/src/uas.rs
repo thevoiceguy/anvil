@@ -38,6 +38,8 @@ pub(crate) struct AnvilUasHandler {
     pub local_user: String,
     /// The codecs offered and accepted, in order of preference.
     pub codecs: Arc<[crate::config::Codec]>,
+    /// Whether media is encrypted (SDES-SRTP).
+    pub srtp: crate::config::SrtpMode,
     /// Our advertised SIP address, used verbatim as the Contact URI host/port
     /// so remote peers send in-dialog requests (BYE, re-INVITE) to the port
     /// we're actually listening on. Omitting the port lets it default to
@@ -112,6 +114,37 @@ impl UasRequestHandler for AnvilUasHandler {
             }
         };
 
+        // SDES-SRTP (RFC 4568): an offer's key answered with ours, when
+        // media may be encrypted. A secure offer this cannot meet, or a
+        // plain one when SRTP is required, is not acceptable here.
+        let offered_keys = crate::srtp::offered(offered_body);
+        let srtp_keys = match self.srtp {
+            crate::config::SrtpMode::Off => None,
+            _ => {
+                crate::srtp::answer_to(&offered_keys).map(|(ours, theirs)| crate::call::CallSrtp {
+                    ours,
+                    theirs: Some(theirs),
+                })
+            }
+        };
+        let refuse = match (self.srtp, &srtp_keys) {
+            (crate::config::SrtpMode::Required, None) => Some("SRTP required"),
+            (crate::config::SrtpMode::Off, _) if crate::srtp::is_secure(offered_body) => {
+                Some("SRTP not enabled")
+            }
+            (_, None) if crate::srtp::is_secure(offered_body) => Some("no usable SRTP key"),
+            _ => None,
+        };
+        if let Some(why) = refuse {
+            let resp = UserAgentServer::create_response(
+                request,
+                488,
+                &format!("Not Acceptable Here ({why})"),
+            );
+            handle.send_final(resp).await;
+            return Ok(());
+        }
+
         // Build an answer SDP carrying just the chosen codec. A more liberal
         // implementation would echo back the full intersection; single-codec
         // answers are simpler and sufficient for the offer/answer model.
@@ -125,6 +158,7 @@ impl UasRequestHandler for AnvilUasHandler {
             &self.media_ip.to_string(),
             rtp_port,
             media::MediaDirection::Sendrecv,
+            srtp_keys.as_ref().map(|k| &k.ours),
         );
 
         // Build the 200 OK now (including dialog) so `answer()` can send it
@@ -197,6 +231,7 @@ impl UasRequestHandler for AnvilUasHandler {
                 negotiated_codec: None,
                 rtp_socket,
                 pipeline: None,
+                srtp: srtp_keys,
             },
         );
 
@@ -354,7 +389,7 @@ pub(crate) async fn send_answer_and_start_media(
     events: &mpsc::Sender<Event>,
     codecs: &[Codec],
 ) -> Result<Codec, crate::error::AnvilError> {
-    let (server_handle, answer_response, dialog, rtp_socket, offer_body) = {
+    let (server_handle, answer_response, dialog, rtp_socket, offer_body, srtp) = {
         let mut entry = calls
             .get_mut(&call)
             .ok_or(crate::error::AnvilError::NoSuchCall(call))?;
@@ -373,6 +408,7 @@ pub(crate) async fn send_answer_and_start_media(
             pending.dialog.clone(),
             Arc::clone(&pending.rtp_socket),
             pending.request.body().to_vec(),
+            entry.srtp.as_ref().and_then(|k| k.context()),
         )
     };
 
@@ -385,7 +421,7 @@ pub(crate) async fn send_answer_and_start_media(
     // first RTP packet lands we already have a socket reading it. Losing the
     // first few packets isn't audible but is avoidable.
     let pipeline = if let Some(remote) = remote {
-        start_media_inbound(call, codec, audio, rtp_socket, remote, events.clone()).await
+        start_media_inbound(call, codec, audio, rtp_socket, remote, events.clone(), srtp).await
     } else {
         tracing::warn!("no remote RTP address in offer; answering without media");
         None
@@ -450,7 +486,7 @@ async fn handle_reinvite(
 
     // Look up the call so we can reuse its RTP port and flip hold state.
     let call_id = find_call_by_dialog_id(calls, dialog.id().call_id());
-    let (rtp_port, codec, hold_state) = match call_id {
+    let (rtp_port, codec, hold_state, crypto) = match call_id {
         Some(id) => {
             let entry = match calls.get(&id) {
                 Some(e) => e,
@@ -474,7 +510,8 @@ async fn handle_reinvite(
             };
             let codec = entry.negotiated_codec.unwrap_or(Codec::Pcmu);
             let hold = entry.pipeline.as_ref().map(|p| Arc::clone(&p.hold));
-            (rtp_port, codec, hold)
+            let crypto = entry.srtp.as_ref().map(|k| k.ours.clone());
+            (rtp_port, codec, hold, crypto)
         }
         None => {
             let resp =
@@ -490,6 +527,7 @@ async fn handle_reinvite(
         &media_ip.to_string(),
         rtp_port,
         our_direction,
+        crypto.as_ref(),
     );
 
     // Build 200 OK with our SDP answer. Skip `UserAgentServer::accept_invite`
@@ -527,6 +565,7 @@ async fn start_media_inbound(
     rtp_socket: Arc<UdpSocket>,
     remote: std::net::SocketAddr,
     events: mpsc::Sender<Event>,
+    srtp: Option<forge_rtp::srtp::SrtpContext>,
 ) -> Option<media::MediaPipeline> {
     let fmt = media::CodecSpec::for_codec(codec).audio_format();
     let capture = audio.make_capture(fmt).ok()?;
@@ -537,5 +576,14 @@ async fn start_media_inbound(
         interval: std::time::Duration::from_secs(2),
         events,
     };
-    media::start_pipeline(codec, rtp_socket, remote, capture, playback, Some(sink)).ok()
+    media::start_pipeline(
+        codec,
+        rtp_socket,
+        remote,
+        capture,
+        playback,
+        Some(sink),
+        srtp,
+    )
+    .ok()
 }

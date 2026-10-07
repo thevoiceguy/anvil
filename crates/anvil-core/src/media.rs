@@ -187,6 +187,25 @@ struct SeqState {
     received: u32,
 }
 
+/// A packet ready for the wire: encrypted under our key when the call is
+/// SRTP. `None` when it cannot be (logged; the packet is not sent).
+fn protect(
+    srtp: Option<&Arc<parking_lot::Mutex<forge_rtp::srtp::SrtpContext>>>,
+    packet: impl Into<Bytes>,
+) -> Option<Bytes> {
+    let packet: Bytes = packet.into();
+    match srtp {
+        None => Some(packet),
+        Some(ctx) => match ctx.lock().protect_rtp(&packet) {
+            Ok(sealed) => Some(Bytes::from(sealed)),
+            Err(e) => {
+                tracing::warn!(%e, "srtp protect failed");
+                None
+            }
+        },
+    }
+}
+
 /// 20 ms frame duration across every codec we support today.
 const FRAME_MS: u32 = 20;
 
@@ -528,6 +547,7 @@ pub(crate) fn build_sdp(
     addr: &str,
     rtp_port: u16,
     direction: MediaDirection,
+    crypto: Option<&crate::srtp::Crypto>,
 ) -> String {
     use std::time::{SystemTime, UNIX_EPOCH};
     let session_id = SystemTime::now()
@@ -560,6 +580,13 @@ pub(crate) fn build_sdp(
         .expect("valid rtpmap")
         .add_attribute("fmtp", "101 0-16")
         .expect("valid attribute");
+    // SDES-SRTP (RFC 4568): the secure profile and our key.
+    if let Some(crypto) = crypto {
+        media.protocol = sip_sdp::Protocol::RtpSavp;
+        media = media
+            .add_attribute("crypto", &crypto.attribute())
+            .expect("valid attribute");
+    }
 
     sip_sdp::SessionDescription::builder()
         .origin(username, &session_id, addr)
@@ -636,7 +663,11 @@ pub(crate) fn start_pipeline(
     mut capture: Box<dyn AudioSource>,
     mut playback: Box<dyn AudioSink>,
     stats_sink: Option<StatsSink>,
+    srtp: Option<forge_rtp::srtp::SrtpContext>,
 ) -> Result<MediaPipeline, AnvilError> {
+    // One context for both directions: it holds our key for what we send
+    // and theirs for what we receive.
+    let srtp = srtp.map(|ctx| Arc::new(parking_lot::Mutex::new(ctx)));
     let send_driver =
         make_driver(codec).ok_or_else(|| AnvilError::Codec(format!("no driver for {codec:?}")))?;
     let recv_driver =
@@ -665,6 +696,7 @@ pub(crate) fn start_pipeline(
     let sock_send = Arc::clone(&rtp_socket);
     let metrics_send = Arc::clone(&metrics);
     let hold_send = Arc::clone(&hold);
+    let srtp_send = srtp.clone();
     let send_task = tokio::spawn(async move {
         let mut driver = send_driver;
         let mut seq = initial_seq;
@@ -687,6 +719,7 @@ pub(crate) fn start_pipeline(
                         ts,
                         ssrc,
                         send_spec.rtp_clock_rate,
+                        srtp_send.as_ref(),
                     ).await {
                         Ok(advanced) => {
                             ts = ts.wrapping_add(advanced);
@@ -729,7 +762,11 @@ pub(crate) fn start_pipeline(
                         Bytes::from(payload),
                         marker,
                     );
-                    let bytes = packet.to_bytes();
+                    let Some(bytes) = protect(srtp_send.as_ref(), packet.to_bytes()) else {
+                        seq = seq.wrapping_add(1);
+                        ts = ts.wrapping_add(ts_per_frame);
+                        continue;
+                    };
                     match sock_send.send_to(&bytes, remote_rtp).await {
                         Ok(_) => metrics_send.on_rtp_tx(bytes.len()),
                         Err(e) => tracing::warn!(%e, %remote_rtp, "rtp send failed"),
@@ -753,6 +790,7 @@ pub(crate) fn start_pipeline(
     let recv_fmt = recv_spec.audio_format();
     let metrics_recv = Arc::clone(&metrics);
     let hold_recv = Arc::clone(&hold);
+    let srtp_recv = srtp.clone();
     let dtmf_events = stats_sink.as_ref().map(|s| (s.call, s.events.clone()));
     let recv_task = tokio::spawn(async move {
         let mut driver = recv_driver;
@@ -769,7 +807,18 @@ pub(crate) fn start_pipeline(
             };
             let arrival = Instant::now();
 
-            let data = Bytes::copy_from_slice(&buf[..len]);
+            let data = match &srtp_recv {
+                // Anything that does not authenticate under their key is
+                // dropped (RFC 3711 §3.3).
+                Some(ctx) => match ctx.lock().unprotect_rtp(&buf[..len]) {
+                    Ok(plain) => Bytes::from(plain),
+                    Err(e) => {
+                        tracing::debug!(%e, "srtp unprotect failed; dropping");
+                        continue;
+                    }
+                },
+                None => Bytes::copy_from_slice(&buf[..len]),
+            };
             let packet = match RtpPacket::parse(data) {
                 Ok(p) => p,
                 Err(e) => {
@@ -929,6 +978,7 @@ async fn send_dtmf_digit(
     start_ts: u32,
     ssrc: u32,
     rtp_clock_rate: u32,
+    srtp: Option<&Arc<parking_lot::Mutex<forge_rtp::srtp::SrtpContext>>>,
 ) -> anyhow::Result<u32> {
     let digit = DtmfDigit::from_char(ch)
         .map_err(|e| anyhow::anyhow!("invalid DTMF digit {:?}: {:?}", ch, e))?;
@@ -958,7 +1008,10 @@ async fn send_dtmf_digit(
 
         let payload = Bytes::from(event.to_bytes());
         let packet = RtpPacket::build(DTMF_PAYLOAD_TYPE, *seq, start_ts, ssrc, payload, is_first);
-        let bytes = packet.to_bytes();
+        let Some(bytes) = protect(srtp, packet.to_bytes()) else {
+            *seq = seq.wrapping_add(1);
+            continue;
+        };
         match socket.send_to(&bytes, remote).await {
             Ok(_) => metrics.on_rtp_tx(bytes.len()),
             Err(e) => tracing::warn!(%e, "DTMF send_to failed"),
@@ -1167,6 +1220,24 @@ mod tests {
     }
 
     async fn round_trip_for(codec: Codec, sample_rate: u32) {
+        let (frames_a, rms_a, frames_b, rms_b) = round_trip_keyed(codec, sample_rate, None).await;
+        assert!(frames_a >= 30, "{codec:?}: A frames={frames_a}");
+        assert!(frames_b >= 30, "{codec:?}: B frames={frames_b}");
+        assert!(rms_a > 3000, "{codec:?}: A rms={rms_a} (silent?)");
+        assert!(rms_b > 3000, "{codec:?}: B rms={rms_b} (silent?)");
+    }
+
+    /// Two pipelines trading a tone for a second, each with its SRTP
+    /// context when given; the peak RMS each heard.
+    async fn round_trip_keyed(
+        codec: Codec,
+        sample_rate: u32,
+        srtp: Option<(forge_rtp::srtp::SrtpContext, forge_rtp::srtp::SrtpContext)>,
+    ) -> (u64, u64, u64, u64) {
+        let (srtp_a, srtp_b) = match srtp {
+            Some((a, b)) => (Some(a), Some(b)),
+            None => (None, None),
+        };
         let loopback = IpAddr::V4(Ipv4Addr::LOCALHOST);
         let sock_a = Arc::new(UdpSocket::bind(SocketAddr::new(loopback, 0)).await.unwrap());
         let sock_b = Arc::new(UdpSocket::bind(SocketAddr::new(loopback, 0)).await.unwrap());
@@ -1188,6 +1259,7 @@ mod tests {
                 peak_rms_q: Arc::clone(&rms_a),
             }),
             None,
+            srtp_a,
         )
         .expect("pipeline A");
 
@@ -1201,6 +1273,7 @@ mod tests {
                 peak_rms_q: Arc::clone(&rms_b),
             }),
             None,
+            srtp_b,
         )
         .expect("pipeline B");
 
@@ -1215,10 +1288,66 @@ mod tests {
         let rms_b = rms_b.load(Ordering::Relaxed);
 
         println!("{codec:?}: A={frames_a} fr, rms {rms_a}; B={frames_b} fr, rms {rms_b}");
-        assert!(frames_a >= 30, "{codec:?}: A frames={frames_a}");
-        assert!(frames_b >= 30, "{codec:?}: B frames={frames_b}");
-        assert!(rms_a > 3000, "{codec:?}: A rms={rms_a} (silent?)");
-        assert!(rms_b > 3000, "{codec:?}: B rms={rms_b} (silent?)");
+        (frames_a, rms_a, frames_b, rms_b)
+    }
+
+    /// Keys from an SDES offer and its answer: the caller's and callee's
+    /// contexts.
+    fn sdes_pair() -> (crate::srtp::Crypto, crate::srtp::Crypto) {
+        let offer = crate::srtp::Crypto::generate(1, crate::srtp::Suite::AesCm128HmacSha1_80);
+        let (answer, _) = crate::srtp::answer_to(std::slice::from_ref(&offer)).unwrap();
+        (offer, answer)
+    }
+
+    /// SDES-SRTP both ways: the audio survives encryption.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+    async fn rtp_round_trip_srtp() {
+        let (offer, answer) = sdes_pair();
+        let a = crate::srtp::context(&offer, &answer).unwrap();
+        let b = crate::srtp::context(&answer, &offer).unwrap();
+        let (frames_a, rms_a, frames_b, rms_b) =
+            round_trip_keyed(Codec::Pcmu, 8000, Some((a, b))).await;
+        assert!(
+            frames_a >= 30 && frames_b >= 30,
+            "A {frames_a}, B {frames_b} frames"
+        );
+        assert!(rms_a > 3000 && rms_b > 3000, "A {rms_a}, B {rms_b}");
+    }
+
+    /// A side keyed wrong hears nothing: every packet fails to authenticate
+    /// and is dropped, rather than played as noise.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+    async fn srtp_under_the_wrong_key_is_silence() {
+        let (offer, answer) = sdes_pair();
+        let (_, stranger) = sdes_pair();
+        let a = crate::srtp::context(&offer, &answer).unwrap();
+        let b = crate::srtp::context(&answer, &stranger).unwrap();
+        let (frames_a, rms_a, frames_b, _) =
+            round_trip_keyed(Codec::Pcmu, 8000, Some((a, b))).await;
+        assert!(
+            frames_a >= 30 && rms_a > 3000,
+            "A still hears B: {frames_a} frames, {rms_a}"
+        );
+        assert_eq!(frames_b, 0, "B played packets it could not authenticate");
+    }
+
+    #[test]
+    fn an_encrypted_offer_is_savp_with_our_key() {
+        let (offer, _) = sdes_pair();
+        let body = super::build_sdp(
+            &[Codec::Pcmu],
+            "alice",
+            "127.0.0.1",
+            5000,
+            MediaDirection::Sendrecv,
+            Some(&offer),
+        );
+        assert!(body.contains("m=audio 5000 RTP/SAVP 0 101"), "{body}");
+        assert!(
+            body.contains(&format!("a=crypto:{}", offer.attribute())),
+            "{body}"
+        );
+        assert_eq!(crate::srtp::offered(body.as_bytes()), vec![offer]);
     }
 
     /// Two RTP pipelines trade µ-law audio over loopback for one second.
@@ -1273,7 +1402,7 @@ mod tests {
             MediaDirection::Recvonly,
             MediaDirection::Inactive,
         ] {
-            let body = super::build_sdp(&[Codec::G722], "alice", "127.0.0.1", 5000, dir);
+            let body = super::build_sdp(&[Codec::G722], "alice", "127.0.0.1", 5000, dir, None);
             assert_eq!(super::extract_direction(body.as_bytes()), dir, "{dir:?}");
         }
     }

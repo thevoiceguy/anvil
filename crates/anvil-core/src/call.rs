@@ -53,6 +53,23 @@ pub(crate) struct CallEntry {
     /// pipeline starts. `None` until then. Dropping it aborts the
     /// send / receive tasks.
     pub pipeline: Option<MediaPipeline>,
+    /// The call's SDES-SRTP keys when its media is encrypted: ours (sent in
+    /// every offer and answer, re-INVITEs included) and theirs once known.
+    pub srtp: Option<CallSrtp>,
+}
+
+/// A call's SRTP keys.
+#[derive(Debug, Clone)]
+pub(crate) struct CallSrtp {
+    pub ours: crate::srtp::Crypto,
+    pub theirs: Option<crate::srtp::Crypto>,
+}
+
+impl CallSrtp {
+    /// The context once both keys are known.
+    pub fn context(&self) -> Option<forge_rtp::srtp::SrtpContext> {
+        crate::srtp::context(&self.ours, self.theirs.as_ref()?)
+    }
 }
 
 /// Bind a UDP socket for RTP.
