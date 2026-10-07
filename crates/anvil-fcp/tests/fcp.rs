@@ -1097,3 +1097,103 @@ async fn anvil_encrypts_its_media_and_fcp_answers_in_srtp() {
     let _ = alice_phone.shutdown().await;
     let _ = bob_phone.shutdown().await;
 }
+
+/// A softphone registered over TLS is called encrypted: FCP offers it
+/// SDES-SRTP (FCP's A5b). Bob requires SRTP, so a plain offer would be
+/// refused; Alice, over UDP, is plain. Needs `ANVIL_FCP_SIPS` (FCP's TLS
+/// listener) and `ANVIL_FCP_CA` (the CA its certificate is from).
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn anvil_over_tls_is_called_encrypted() {
+    use std::sync::atomic::{AtomicU64, Ordering};
+    let _ = tracing_subscriber::fmt()
+        .with_env_filter(tracing_subscriber::EnvFilter::from_default_env())
+        .with_test_writer()
+        .try_init();
+    let fcp = fcp_or_skip!();
+    let (Ok(sips), Ok(ca)) = (
+        std::env::var("ANVIL_FCP_SIPS"),
+        std::env::var("ANVIL_FCP_CA"),
+    ) else {
+        eprintln!("ANVIL_FCP_SIPS and ANVIL_FCP_CA not set; skipping");
+        return;
+    };
+    let (alice_client, _) = signed_in(&fcp, "tls-alice").await;
+    let (bob_client, bob) = signed_in(&fcp, "tls-bob").await;
+    let (alice_heard, bob_heard) = (Arc::new(AtomicU64::new(0)), Arc::new(AtomicU64::new(0)));
+
+    // Bob's softphone over TLS, requiring SRTP.
+    let config = bob_client.softphone().await.unwrap();
+    let mut account = bob_client.account_config(&config).await.unwrap();
+    account.transport = anvil_core::Transport::Tls;
+    // As FCP names a TLS server in `/me/softphone`: the registrar is the
+    // domain, the outbound proxy the server with `;transport=tls`.
+    account.outbound_proxy = Some(format!("sip:{sips};transport=tls"));
+    account.tls_extra_ca_pem = Some(std::fs::read(&ca).expect("the CA"));
+    account.bind_addr = Some("127.0.0.92:0".into());
+    let (bob_phone, mut bob_events) = Anvil::start(AnvilConfig {
+        account,
+        media: MediaConfig {
+            srtp: anvil_core::config::SrtpMode::Required,
+            ..MediaConfig::default()
+        },
+        audio: Box::new(Tone {
+            hz: 660.0,
+            heard: Arc::clone(&bob_heard),
+        }),
+        brand: BrandConfig::default(),
+    })
+    .await
+    .expect("anvil starts");
+    bob_phone.register().await.expect("registers over TLS");
+    expect(&mut bob_events, SOON, |e| match e {
+        Event::RegistrationChanged {
+            state: RegState::Registered,
+            ..
+        } => Some(()),
+        _ => None,
+    })
+    .await
+    .expect("registered over TLS");
+
+    let (alice_phone, mut alice_events) = softphone_with(
+        &alice_client,
+        "127.0.0.93",
+        MediaConfig::default(),
+        Box::new(Tone {
+            hz: 440.0,
+            heard: Arc::clone(&alice_heard),
+        }),
+    )
+    .await;
+    let out = alice_phone
+        .place_call(&format!("sip:{bob}@{}", config.account.domain))
+        .await
+        .unwrap();
+    // A plain offer would have been refused 488 before ringing.
+    let at_bob = expect(&mut bob_events, SOON, |e| match e {
+        Event::IncomingCall { call, .. } => Some(*call),
+        _ => None,
+    })
+    .await
+    .expect("Bob's softphone rings: the offer was encrypted");
+    bob_phone.answer(at_bob).await.unwrap();
+    expect(&mut alice_events, SOON, |e| match e {
+        Event::CallEstablished { call, .. } if *call == out => Some(()),
+        Event::CallEnded { call, reason } if *call == out => panic!("the call ended: {reason:?}"),
+        _ => None,
+    })
+    .await
+    .expect("Alice's call is up");
+
+    tokio::time::sleep(Duration::from_secs(2)).await;
+    let (a, b) = (
+        alice_heard.load(Ordering::Relaxed),
+        bob_heard.load(Ordering::Relaxed),
+    );
+    assert!(a > 2000, "Alice hears Bob, who speaks SRTP: {a}");
+    assert!(b > 2000, "Bob hears Alice through SRTP: {b}");
+
+    alice_phone.hangup(out).await.unwrap();
+    let _ = alice_phone.shutdown().await;
+    let _ = bob_phone.shutdown().await;
+}
