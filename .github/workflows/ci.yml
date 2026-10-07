@@ -41,6 +41,19 @@ jobs:
       - uses: Swatinem/rust-cache@v2
       - run: cargo test --workspace
 
+  # The workspace on Windows (MSVC): it builds, and its tests pass. Audio
+  # goes through WASAPI, so no headers to install; libopus is built with
+  # the runner's CMake.
+  windows:
+    name: Windows
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo build --workspace --all-targets
+      - run: cargo test --workspace
+
   # Anvil against FCP: FCP's compose stack from its nightly images, and
   # the tests against it (users made through the admin API, calls through
   # the call manager). FCP's repository and images are private: the
