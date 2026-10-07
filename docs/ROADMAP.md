@@ -98,7 +98,14 @@ live in FCP: `docs/SOFTPHONE.md` in `thevoiceguy/fcp`. Anvil's phases:
       Unix socket or a named pipe, this user only), `anvil-cli run` with a
       prompt, and `anvil-cli call|answer|decline|hangup|hold|resume|mute|
       unmute|dtmf|transfer|attended|dnd|status|watch` driving it
-- [ ] **U1** The app's skeleton on desktop (Flutter, `flutter_rust_bridge`)
+- [x] **U1** The app's skeleton on desktop: `app/` (Flutter 3.47,
+      `flutter_rust_bridge` 2.13 over `anvil-app` in `app/rust`, a workspace
+      member); sign-in, the keypad, an incoming call, the in-call controls
+      (mute, hold, end); Anvil's theme with Inter bundled and the tenant's
+      brand applied live; every string in `lib/l10n`; the app serves the
+      control socket; CI analyses, tests the screens against a fake phone,
+      checks the bindings, and builds and starts the app on Linux, Windows
+      and macOS
 - [ ] **U2** The desktop app
 - [ ] **U3** Desktop distribution
 - [ ] **U4** The app on mobile

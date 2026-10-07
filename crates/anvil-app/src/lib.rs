@@ -21,7 +21,9 @@ use parking_lot::Mutex;
 use tokio::sync::{broadcast, RwLock};
 
 pub use command::{Command, Response};
-pub use state::{CallState, CallView, Change, Direction, MessageWaiting, Registration, State};
+pub use state::{
+    Brand, CallState, CallView, Change, Direction, MessageWaiting, Registration, State,
+};
 
 /// What can go wrong running the phone.
 #[derive(Debug, thiserror::Error)]
@@ -406,6 +408,25 @@ async fn follow(inner: std::sync::Weak<Inner>, mut events: EventStream) {
                 let _ = inner.changes.send(Change::MessageWaiting {
                     message_waiting: mw,
                 });
+            }
+            Event::BrandUpdated { profile } => {
+                let brand = Brand {
+                    app_name: profile.app_name.clone(),
+                    primary: profile.colors.primary.map(|c| c.to_hex()),
+                    accent: profile.colors.accent.map(|c| c.to_hex()),
+                    logo: profile
+                        .logo
+                        .as_ref()
+                        .map(|a| a.bytes.clone())
+                        .filter(|b| !b.is_empty()),
+                };
+                let app_name = Some(brand.app_name.clone());
+                inner.state.lock().brand = Some(brand);
+                let _ = inner.changes.send(Change::Brand { app_name });
+            }
+            Event::BrandCleared => {
+                inner.state.lock().brand = None;
+                let _ = inner.changes.send(Change::Brand { app_name: None });
             }
             Event::TransferProgress { call, code, reason } => {
                 let _ = inner.changes.send(Change::TransferProgress {

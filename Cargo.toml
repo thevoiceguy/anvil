@@ -8,6 +8,7 @@ members = [
     "crates/anvil-ffi",
     "crates/anvil-fcp",
     "crates/anvil-app",
+    "app/rust",
     "bins/anvil-cli",
 ]
 
