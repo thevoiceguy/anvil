@@ -100,6 +100,7 @@ pub async fn start_phone(session_path: String) -> anyhow::Result<()> {
     if PHONE.lock().is_some() {
         return Ok(());
     }
+    let settings_path = std::path::Path::new(&session_path).with_file_name("settings.json");
     let phone = on_runtime(async move {
         let store = Arc::new(FileTokenStore::new(session_path));
         let session = store
@@ -120,6 +121,7 @@ pub async fn start_phone(session_path: String) -> anyhow::Result<()> {
             },
             fcp: Some(client),
             register: true,
+            settings_path: Some(settings_path),
         })
         .await?;
         let served = phone.clone();
@@ -308,6 +310,13 @@ pub fn phone_changes(sink: StreamSink<PhoneChange>) -> anyhow::Result<()> {
                     call: Some(id),
                     reason: Some(format!("{code} {reason}")),
                 },
+                // The screens read what changed from the state.
+                C::Calling { .. } => kind_only("calling"),
+                C::Recents { .. } => kind_only("recents"),
+                C::People { .. } => kind_only("people"),
+                C::Person { .. } => kind_only("person"),
+                C::Voicemail { .. } => kind_only("voicemail"),
+                C::Audio { .. } => kind_only("audio"),
             };
             if sink.add(out).is_err() {
                 return;
@@ -315,6 +324,14 @@ pub fn phone_changes(sink: StreamSink<PhoneChange>) -> anyhow::Result<()> {
         }
     });
     Ok(())
+}
+
+fn kind_only(kind: &str) -> PhoneChange {
+    PhoneChange {
+        kind: kind.into(),
+        call: None,
+        reason: None,
+    }
 }
 
 /// Carry out a command on the running phone; the call a `call` placed.

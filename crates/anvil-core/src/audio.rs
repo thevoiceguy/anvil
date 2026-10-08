@@ -41,6 +41,19 @@ pub trait AudioHost: Send + Sync {
     fn make_playback(&self, cfg: AudioFormat) -> Result<Box<dyn AudioSink>, AnvilError>;
     /// Enumerate devices. Returns an empty vec on hosts that don't expose enumeration.
     fn devices(&self) -> Vec<DeviceInfo>;
+    /// Use these devices (by [`DeviceInfo::id`]; `None` is the system's
+    /// default) for the streams opened from now on. A host with no choice
+    /// of device refuses.
+    fn choose_devices(&self, input: Option<&str>, output: Option<&str>) -> Result<(), AnvilError> {
+        let _ = (input, output);
+        Err(AnvilError::AudioDevice(
+            "this audio host has no choice of device".into(),
+        ))
+    }
+    /// The devices chosen, `None` for the system's default.
+    fn chosen_devices(&self) -> (Option<String>, Option<String>) {
+        (None, None)
+    }
 }
 
 /// Microphone-side stream. Produces one frame per call.

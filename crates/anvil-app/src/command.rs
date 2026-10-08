@@ -56,10 +56,40 @@ pub enum Command {
     TransferAttended { call: u64, to: u64 },
     /// Do not disturb on or off (needs FCP).
     Dnd { on: bool },
+    /// Change the calling settings: forwards, call waiting (needs FCP).
+    Calling { update: anvil_fcp::CallingUpdate },
+    /// Park a call with FCP's park code.
+    Park {
+        #[serde(default)]
+        call: Option<u64>,
+    },
+    /// Mark a voicemail message heard.
+    Heard { id: String },
+    /// Delete a voicemail message.
+    DeleteVoicemail { id: String },
+    /// Make someone in the directory a favourite, or not.
+    Favourite { who: String, on: bool },
+    /// Use this microphone or speaker (by id; `None` for the system's
+    /// default) for the calls set up from now on.
+    Audio {
+        kind: AudioKind,
+        #[serde(default)]
+        device: Option<String>,
+    },
+    /// Read the user's data from FCP again.
+    Refresh,
     /// The phone as it is now.
     Status,
     /// On the control socket: every change from now on, one per line.
     Subscribe,
+}
+
+/// A microphone or a speaker.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum AudioKind {
+    Input,
+    Output,
 }
 
 /// What a command answered.
@@ -99,7 +129,10 @@ impl Response {
 impl Command {
     /// A prompt line: `call 1002`, `answer`, `hangup 3`, `hold`, `resume`,
     /// `mute`, `unmute`, `dtmf 123#`, `transfer 1003`, `attended 1 2`,
-    /// `dnd on`, `status`. A trailing number names the call.
+    /// `park`, `dnd on`, `forward busy 1003`, `forward all off`,
+    /// `waiting off`, `heard <id>`, `delete <id>`, `favourite alice`,
+    /// `unfavourite alice`, `audio in USB Headset`, `audio out default`,
+    /// `refresh`, `status`. A trailing number names the call.
     pub fn parse_line(line: &str) -> Result<Self, String> {
         let words: Vec<&str> = line.split_whitespace().collect();
         let id = |w: Option<&&str>| -> Result<Option<u64>, String> {
@@ -151,16 +184,81 @@ impl Command {
                 to: id(words.get(2))?.ok_or("attended needs two call ids")?,
             },
             "dnd" => Command::Dnd {
-                on: match words.get(1).map(|w| w.to_ascii_lowercase()).as_deref() {
-                    Some("on") | Some("true") | Some("yes") => true,
-                    Some("off") | Some("false") | Some("no") => false,
-                    _ => return Err("dnd needs on or off".into()),
+                on: on_off(words.get(1)).ok_or("dnd needs on or off")?,
+            },
+            "waiting" => Command::Calling {
+                update: anvil_fcp::CallingUpdate {
+                    call_waiting: Some(on_off(words.get(1)).ok_or("waiting needs on or off")?),
+                    ..Default::default()
                 },
             },
+            "forward" => {
+                let when = need(words.get(1), "all, busy, no-answer or unreachable")?;
+                let to = need(words.get(2), "a number, or off")?;
+                // An empty forward clears it.
+                let to = Some(if to.eq_ignore_ascii_case("off") {
+                    String::new()
+                } else {
+                    to
+                });
+                let mut update = anvil_fcp::CallingUpdate::default();
+                match when.to_ascii_lowercase().as_str() {
+                    "all" | "always" => update.forward_all = to,
+                    "busy" => update.forward_busy = to,
+                    "no-answer" | "noanswer" => update.forward_no_answer = to,
+                    "unreachable" => update.forward_unreachable = to,
+                    other => {
+                        return Err(format!(
+                            "{other:?}: forward all, busy, no-answer or unreachable"
+                        ))
+                    }
+                }
+                Command::Calling { update }
+            }
+            "park" => Command::Park {
+                call: id(words.get(1))?,
+            },
+            "heard" => Command::Heard {
+                id: need(words.get(1), "a message id")?,
+            },
+            "delete" => Command::DeleteVoicemail {
+                id: need(words.get(1), "a message id")?,
+            },
+            "favourite" | "favorite" | "unfavourite" | "unfavorite" => Command::Favourite {
+                who: rest(&words, 1).ok_or_else(|| format!("{verb} needs a name"))?,
+                on: !verb.to_ascii_lowercase().starts_with("un"),
+            },
+            "audio" => {
+                let kind = match words.get(1).map(|w| w.to_ascii_lowercase()).as_deref() {
+                    Some("in") | Some("input") | Some("mic") => AudioKind::Input,
+                    Some("out") | Some("output") | Some("speaker") => AudioKind::Output,
+                    _ => return Err("audio needs in or out".into()),
+                };
+                let device = rest(&words, 2).ok_or("audio needs a device, or default")?;
+                Command::Audio {
+                    kind,
+                    device: (!device.eq_ignore_ascii_case("default")).then_some(device),
+                }
+            }
+            "refresh" => Command::Refresh,
             "status" => Command::Status,
             other => return Err(format!("{other:?} is not a command")),
         })
     }
+}
+
+/// `on` or `off` (or yes/no, true/false).
+fn on_off(word: Option<&&str>) -> Option<bool> {
+    match word.map(|w| w.to_ascii_lowercase()).as_deref() {
+        Some("on") | Some("true") | Some("yes") => Some(true),
+        Some("off") | Some("false") | Some("no") => Some(false),
+        _ => None,
+    }
+}
+
+/// The words from `from` on, as one (a device's or a person's name).
+fn rest(words: &[&str], from: usize) -> Option<String> {
+    (words.len() > from).then(|| words[from..].join(" "))
 }
 
 #[cfg(test)]
@@ -190,6 +288,41 @@ mod tests {
             Command::parse_line("dnd on").unwrap(),
             Command::Dnd { on: true }
         );
+        assert_eq!(
+            Command::parse_line("forward busy 1003").unwrap(),
+            Command::Calling {
+                update: anvil_fcp::CallingUpdate {
+                    forward_busy: Some("1003".into()),
+                    ..Default::default()
+                }
+            }
+        );
+        let Command::Calling { update } = Command::parse_line("forward all off").unwrap() else {
+            panic!("a calling command");
+        };
+        assert_eq!(update.forward_all.as_deref(), Some(""));
+        assert_eq!(
+            Command::parse_line("audio in USB Headset").unwrap(),
+            Command::Audio {
+                kind: AudioKind::Input,
+                device: Some("USB Headset".into())
+            }
+        );
+        assert_eq!(
+            Command::parse_line("audio out default").unwrap(),
+            Command::Audio {
+                kind: AudioKind::Output,
+                device: None
+            }
+        );
+        assert_eq!(
+            Command::parse_line("unfavourite Alice Smith").unwrap(),
+            Command::Favourite {
+                who: "Alice Smith".into(),
+                on: false
+            }
+        );
+        assert!(Command::parse_line("forward sometimes 1003").is_err());
         assert!(Command::parse_line("hangup x").is_err());
         assert!(Command::parse_line("call").is_err());
         assert!(Command::parse_line("fly").is_err());

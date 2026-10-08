@@ -106,7 +106,7 @@ pub struct CallingSettings {
 
 /// A change to the calling settings: each field left out is kept. A
 /// forward is cleared with an empty string.
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct CallingUpdate {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub dnd: Option<bool>,

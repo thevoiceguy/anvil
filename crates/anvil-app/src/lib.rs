@@ -11,8 +11,12 @@
 
 mod command;
 pub mod control;
+mod data;
+mod settings;
 mod state;
 
+use std::collections::BTreeMap;
+use std::path::PathBuf;
 use std::sync::Arc;
 
 use anvil_core::{Anvil, AnvilConfig, CallId, EndReason, Event, EventStream};
@@ -20,10 +24,14 @@ use anvil_fcp::FcpClient;
 use parking_lot::Mutex;
 use tokio::sync::{broadcast, RwLock};
 
-pub use command::{Command, Response};
+pub use anvil_fcp::{CallingSettings, CallingUpdate};
+pub use command::{AudioKind, Command, Response};
 pub use state::{
-    Brand, CallState, CallView, Change, Direction, MessageWaiting, Registration, State,
+    AudioDevice, AudioDevices, Brand, CallState, CallView, Change, Direction, MessageWaiting,
+    Person, Quality, Recent, Registration, State, Voicemail,
 };
+
+use settings::LocalSettings;
 
 /// What can go wrong running the phone.
 #[derive(Debug, thiserror::Error)]
@@ -43,6 +51,9 @@ pub struct PhoneConfig {
     pub fcp: Option<Arc<FcpClient>>,
     /// Register on start (a phone talking only peer to peer does not).
     pub register: bool,
+    /// Where this device's own settings are kept (favourites, the audio
+    /// devices chosen); `None` keeps them only while the phone runs.
+    pub settings_path: Option<PathBuf>,
 }
 
 /// The phone: cheap to clone, every clone the same phone.
@@ -60,15 +71,35 @@ struct Inner {
     state: Mutex<State>,
     changes: broadcast::Sender<Change>,
     events: Mutex<Option<tokio::task::JoinHandle<()>>>,
+    /// Following FCP's live events.
+    fcp_events: Mutex<Option<tokio::task::JoinHandle<()>>>,
+    settings_path: Option<PathBuf>,
+    local: Mutex<LocalSettings>,
+    /// FCP's feature codes by name (`park`, `retrieve`, …).
+    features: Mutex<BTreeMap<String, String>>,
 }
 
 impl Phone {
     /// Start the phone: Anvil up, events followed, registered when asked
-    /// (and message waiting subscribed), do not disturb read from FCP.
+    /// (and message waiting subscribed). Signed in to FCP, the calling
+    /// settings are read before it returns, and the rest of the user's data
+    /// and FCP's live events follow.
     pub async fn start(cfg: PhoneConfig) -> Result<Self, PhoneError> {
         let aor = cfg.anvil.account.aor.clone();
         let domain = domain_of(&aor);
+        let local = cfg
+            .settings_path
+            .as_deref()
+            .map(LocalSettings::load)
+            .unwrap_or_default();
         let (anvil, events) = Anvil::start(cfg.anvil).await?;
+        if local.audio_input.is_some() || local.audio_output.is_some() {
+            if let Err(e) = anvil
+                .choose_audio_devices(local.audio_input.as_deref(), local.audio_output.as_deref())
+            {
+                tracing::warn!(%e, "the audio devices chosen are not here; using the defaults");
+            }
+        }
         let (changes, _) = broadcast::channel(256);
         let inner = Arc::new(Inner {
             sip_address: anvil.sip_address(),
@@ -78,10 +109,15 @@ impl Phone {
             state: Mutex::new(State::new(aor)),
             changes,
             events: Mutex::new(None),
+            fcp_events: Mutex::new(None),
+            settings_path: cfg.settings_path,
+            local: Mutex::new(local),
+            features: Mutex::new(BTreeMap::new()),
         });
         let follower = tokio::spawn(follow(Arc::downgrade(&inner), events));
         *inner.events.lock() = Some(follower);
         let phone = Self { inner };
+        phone.read_audio_devices().await;
 
         if cfg.register {
             phone.anvil().await?.register().await?;
@@ -89,11 +125,23 @@ impl Phone {
                 tracing::debug!(%e, "no message waiting subscription");
             }
         }
-        if let Some(fcp) = &phone.inner.fcp {
-            match fcp.calling().await {
-                Ok(settings) => phone.set_dnd(settings.dnd),
-                Err(e) => tracing::debug!(%e, "calling settings not read"),
-            }
+        if let Some(fcp) = phone.inner.fcp.clone() {
+            data::refresh_calling(&phone.inner, &fcp).await;
+            let inner = Arc::clone(&phone.inner);
+            let first = Arc::clone(&fcp);
+            tokio::spawn(async move {
+                match first.softphone().await {
+                    Ok(config) => *inner.features.lock() = config.feature_codes,
+                    Err(e) => tracing::debug!(%e, "feature codes not read"),
+                }
+                tokio::join!(
+                    data::refresh_recents(&inner, &first),
+                    data::refresh_people(&inner, &first),
+                    data::refresh_voicemail(&inner, &first),
+                );
+            });
+            let task = tokio::spawn(data::follow(Arc::downgrade(&phone.inner), fcp));
+            *phone.inner.fcp_events.lock() = Some(task);
         }
         Ok(phone)
     }
@@ -118,21 +166,13 @@ impl Phone {
         match command {
             Command::Call { target } => {
                 let target = self.dial_target(&target);
+                self.hold_the_others(None).await?;
                 let to = target.clone();
                 let call = self.anvil().await?.place_call(&to).await?;
                 self.update_call(
                     call.0,
                     |c| c.remote = target.clone(),
-                    || CallView {
-                        id: call.0,
-                        direction: Direction::Outgoing,
-                        remote: target.clone(),
-                        display_name: None,
-                        state: CallState::Dialing,
-                        held: false,
-                        muted: false,
-                        codec: None,
-                    },
+                    || CallView::new(call.0, Direction::Outgoing, &target, CallState::Dialing),
                 );
                 Ok(Response {
                     call: Some(call.0),
@@ -143,6 +183,7 @@ impl Phone {
                 let id = self.pick(call, "no call to answer", |c| {
                     c.direction == Direction::Incoming && c.state == CallState::Ringing
                 })?;
+                self.hold_the_others(Some(id)).await?;
                 self.anvil().await?.answer(CallId(id)).await.map(|_| ())?;
                 Ok(Response::ok())
             }
@@ -223,7 +264,76 @@ impl Phone {
                         ..Default::default()
                     })
                     .await?;
-                self.set_dnd(settings.dnd);
+                self.inner.set_calling(settings);
+                Ok(Response::ok())
+            }
+            Command::Calling { update } => {
+                let settings = self.fcp("calling settings")?.set_calling(&update).await?;
+                self.inner.set_calling(settings);
+                Ok(Response::ok())
+            }
+            Command::Park { call } => {
+                let id = self.pick(call, "no call to park", |c| c.state == CallState::Connected)?;
+                let code = self.inner.features.lock().get("park").cloned();
+                let code = code
+                    .ok_or_else(|| PhoneError::Refused("park needs FCP's feature codes".into()))?;
+                let target = self.dial_target(&code);
+                self.anvil().await?.transfer(CallId(id), &target).await?;
+                Ok(Response::ok())
+            }
+            Command::Heard { id } => {
+                self.fcp("voicemail")?
+                    .set_voicemail_status(&id, "heard")
+                    .await?;
+                self.inner.update_voicemail(|list| {
+                    if let Some(m) = list.iter_mut().find(|m| m.id == id) {
+                        m.new = false;
+                    }
+                });
+                Ok(Response::ok())
+            }
+            Command::DeleteVoicemail { id } => {
+                self.fcp("voicemail")?.delete_voicemail(&id).await?;
+                self.inner
+                    .update_voicemail(|list| list.retain(|m| m.id != id));
+                Ok(Response::ok())
+            }
+            Command::Favourite { who, on } => {
+                let key = self.person_key(&who)?;
+                {
+                    let mut local = self.inner.local.lock();
+                    if on {
+                        local.favourites.insert(key.clone());
+                    } else {
+                        local.favourites.remove(&key);
+                    }
+                }
+                self.inner.save_settings();
+                self.inner.update_person_by_key(&key, |p| p.favourite = on);
+                Ok(Response::ok())
+            }
+            Command::Audio { kind, device } => {
+                let (mut input, mut output) = self.anvil().await?.chosen_audio_devices();
+                match kind {
+                    AudioKind::Input => input = device,
+                    AudioKind::Output => output = device,
+                }
+                self.anvil()
+                    .await?
+                    .choose_audio_devices(input.as_deref(), output.as_deref())?;
+                {
+                    let mut local = self.inner.local.lock();
+                    local.audio_input = input;
+                    local.audio_output = output;
+                }
+                self.inner.save_settings();
+                self.read_audio_devices().await;
+                Ok(Response::ok())
+            }
+            Command::Refresh => {
+                let fcp = Arc::clone(self.fcp("the user's data")?);
+                data::refresh_all(&self.inner, &fcp).await;
+                self.read_audio_devices().await;
                 Ok(Response::ok())
             }
             Command::Status => Ok(Response {
@@ -236,9 +346,17 @@ impl Phone {
         }
     }
 
+    /// A voicemail message's audio (WAV), to play.
+    pub async fn voicemail_audio(&self, id: &str) -> Result<Vec<u8>, PhoneError> {
+        Ok(self.fcp("voicemail")?.voicemail_audio(id).await?)
+    }
+
     /// Stop the phone: its calls end, it unregisters.
     pub async fn shutdown(&self) {
         if let Some(task) = self.inner.events.lock().take() {
+            task.abort();
+        }
+        if let Some(task) = self.inner.fcp_events.lock().take() {
             task.abort();
         }
         if let Some(anvil) = self.inner.anvil.write().await.take() {
@@ -298,30 +416,171 @@ impl Phone {
         update_call(&self.inner, id, change, new);
     }
 
-    fn set_dnd(&self, on: bool) {
+    /// FCP, for what needs it.
+    fn fcp(&self, what: &str) -> Result<&Arc<FcpClient>, PhoneError> {
+        self.inner
+            .fcp
+            .as_ref()
+            .ok_or_else(|| PhoneError::Refused(format!("{what} needs a phone signed in to FCP")))
+    }
+
+    /// Hold every connected call but `except`: a second call placed or
+    /// answered puts the first on hold, as a desk phone does.
+    async fn hold_the_others(&self, except: Option<u64>) -> Result<(), PhoneError> {
+        let others: Vec<u64> = self
+            .inner
+            .state
+            .lock()
+            .calls
+            .iter()
+            .filter(|c| Some(c.id) != except && c.state == CallState::Connected && !c.held)
+            .map(|c| c.id)
+            .collect();
+        for id in others {
+            self.anvil().await?.hold(CallId(id), true).await?;
+            self.update_call(id, |c| c.held = true, || unreachable_view(id));
+        }
+        Ok(())
+    }
+
+    /// A person by key, extension or name, as the directory has them.
+    fn person_key(&self, who: &str) -> Result<String, PhoneError> {
+        let state = self.inner.state.lock();
+        state
+            .people
+            .iter()
+            .find(|p| p.key == who || p.extension.as_deref() == Some(who))
+            .or_else(|| {
+                let mut named = state
+                    .people
+                    .iter()
+                    .filter(|p| p.name.eq_ignore_ascii_case(who));
+                match (named.next(), named.next()) {
+                    (Some(p), None) => Some(p),
+                    _ => None,
+                }
+            })
+            .map(|p| p.key.clone())
+            .ok_or_else(|| PhoneError::Refused(format!("{who:?} is not in the directory")))
+    }
+
+    /// The audio devices as the host has them now.
+    async fn read_audio_devices(&self) {
+        let Ok(anvil) = self.anvil().await else {
+            return;
+        };
+        let (input, output) = anvil.chosen_audio_devices();
+        let mut audio = AudioDevices {
+            input,
+            output,
+            ..Default::default()
+        };
+        for d in anvil.audio_devices() {
+            let device = AudioDevice {
+                id: d.id,
+                name: d.name,
+                default: d.is_default,
+            };
+            if d.is_input {
+                audio.inputs.push(device);
+            } else {
+                audio.outputs.push(device);
+            }
+        }
+        drop(anvil);
         let changed = {
             let mut state = self.inner.state.lock();
+            let changed = state.audio != audio;
+            state.audio = audio.clone();
+            changed
+        };
+        if changed {
+            let _ = self.inner.changes.send(Change::Audio { audio });
+        }
+    }
+}
+
+impl Inner {
+    fn set_dnd(&self, on: bool) {
+        let changed = {
+            let mut state = self.state.lock();
             let changed = state.dnd != Some(on);
             state.dnd = Some(on);
             changed
         };
         if changed {
-            let _ = self.inner.changes.send(Change::Dnd { on });
+            let _ = self.changes.send(Change::Dnd { on });
+        }
+    }
+
+    fn set_calling(&self, settings: CallingSettings) {
+        self.set_dnd(settings.dnd);
+        let changed = {
+            let mut state = self.state.lock();
+            let changed = state.calling.as_ref() != Some(&settings);
+            state.calling = Some(settings.clone());
+            changed
+        };
+        if changed {
+            let _ = self.changes.send(Change::Calling { settings });
+        }
+    }
+
+    /// The person at `aor` (by its user part: their name or extension).
+    fn update_person(&self, aor: &str, change: impl FnOnce(&mut Person)) {
+        let user = data::user_of(aor);
+        let key = self
+            .state
+            .lock()
+            .people
+            .iter()
+            .find(|p| p.key == user || p.extension.as_deref() == Some(user))
+            .map(|p| p.key.clone());
+        if let Some(key) = key {
+            self.update_person_by_key(&key, change);
+        }
+    }
+
+    fn update_person_by_key(&self, key: &str, change: impl FnOnce(&mut Person)) {
+        let person = {
+            let mut state = self.state.lock();
+            let Some(p) = state.people.iter_mut().find(|p| p.key == key) else {
+                return;
+            };
+            let before = p.clone();
+            change(p);
+            (*p != before).then(|| p.clone())
+        };
+        if let Some(person) = person {
+            let _ = self.changes.send(Change::Person { person });
+        }
+    }
+
+    fn update_voicemail(&self, change: impl FnOnce(&mut Vec<Voicemail>)) {
+        let (new, total) = {
+            let mut state = self.state.lock();
+            change(&mut state.voicemail);
+            (
+                state.voicemail.iter().filter(|m| m.new).count() as u32,
+                state.voicemail.len() as u32,
+            )
+        };
+        let _ = self.changes.send(Change::Voicemail { new, total });
+    }
+
+    fn save_settings(&self) {
+        let Some(path) = &self.settings_path else {
+            return;
+        };
+        let local = self.local.lock().clone();
+        if let Err(e) = local.save(path) {
+            tracing::warn!(%e, path = %path.display(), "settings not saved");
         }
     }
 }
 
 fn unreachable_view(id: u64) -> CallView {
-    CallView {
-        id,
-        direction: Direction::Outgoing,
-        remote: String::new(),
-        display_name: None,
-        state: CallState::Connected,
-        held: false,
-        muted: false,
-        codec: None,
-    }
+    CallView::new(id, Direction::Outgoing, "", CallState::Connected)
 }
 
 fn update_call(
@@ -364,14 +623,8 @@ async fn follow(inner: std::sync::Weak<Inner>, mut events: EventStream) {
                 display_name,
             } => {
                 let view = CallView {
-                    id: call.0,
-                    direction: Direction::Incoming,
-                    remote: from,
                     display_name,
-                    state: CallState::Ringing,
-                    held: false,
-                    muted: false,
-                    codec: None,
+                    ..CallView::new(call.0, Direction::Incoming, &from, CallState::Ringing)
                 };
                 let v = view.clone();
                 update_call(&inner, call.0, |_| {}, move || v);
@@ -382,21 +635,52 @@ async fn follow(inner: std::sync::Weak<Inner>, mut events: EventStream) {
                 |c| c.state = CallState::Ringing,
                 || outgoing(call.0),
             ),
-            Event::CallEstablished { call, codec } => update_call(
-                &inner,
-                call.0,
-                |c| {
-                    c.state = CallState::Connected;
-                    c.codec = Some(format!("{codec:?}").to_ascii_lowercase());
-                },
-                || outgoing(call.0),
-            ),
+            Event::CallEstablished { call, codec } => {
+                let encrypted = match inner.anvil.read().await.as_ref() {
+                    Some(anvil) => anvil.is_encrypted(call),
+                    None => false,
+                };
+                update_call(
+                    &inner,
+                    call.0,
+                    |c| {
+                        c.state = CallState::Connected;
+                        c.codec = Some(format!("{codec:?}").to_ascii_lowercase());
+                        c.encrypted = encrypted;
+                    },
+                    || outgoing(call.0),
+                )
+            }
+            Event::MediaStats { call, stats } => {
+                let quality = Quality {
+                    jitter_ms: stats.jitter_ms.round() as u32,
+                    packet_loss_permille: (stats.packet_loss_pct * 10.0).round() as u32,
+                    rtt_ms: stats.rtt_ms.map(|r| r.round() as u32),
+                };
+                let known = inner.state.lock().call(call.0).is_some();
+                if known {
+                    update_call(
+                        &inner,
+                        call.0,
+                        |c| c.quality = Some(quality),
+                        || outgoing(call.0),
+                    );
+                }
+            }
             Event::CallEnded { call, reason } => {
                 inner.state.lock().calls.retain(|c| c.id != call.0);
                 let _ = inner.changes.send(Change::CallEnded {
                     id: call.0,
                     reason: end_reason(&reason),
                 });
+                // The call's record, once FCP has written it.
+                if let Some(fcp) = inner.fcp.clone() {
+                    let inner = Arc::clone(&inner);
+                    tokio::spawn(async move {
+                        tokio::time::sleep(data::RECORD_LAG).await;
+                        data::refresh_recents(&inner, &fcp).await;
+                    });
+                }
             }
             Event::MessageWaiting { summary } => {
                 let mw = MessageWaiting {
@@ -441,16 +725,7 @@ async fn follow(inner: std::sync::Weak<Inner>, mut events: EventStream) {
 }
 
 fn outgoing(id: u64) -> CallView {
-    CallView {
-        id,
-        direction: Direction::Outgoing,
-        remote: String::new(),
-        display_name: None,
-        state: CallState::Dialing,
-        held: false,
-        muted: false,
-        codec: None,
-    }
+    CallView::new(id, Direction::Outgoing, "", CallState::Dialing)
 }
 
 fn end_reason(reason: &EndReason) -> String {

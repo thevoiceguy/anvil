@@ -1,5 +1,7 @@
 //! What the phone shows: its registration, its calls, message waiting and
-//! do not disturb — and the changes to them, as the app and the CLI see them.
+//! do not disturb, and, signed in to FCP, the user's recent calls, the
+//! directory with presence, voicemail and calling settings — and the changes
+//! to them, as the app and the CLI see them.
 
 use serde::{Deserialize, Serialize};
 
@@ -16,6 +18,15 @@ pub struct State {
     pub dnd: Option<bool>,
     /// The tenant's brand, once fetched.
     pub brand: Option<Brand>,
+    /// The user's calling settings, as FCP has them; `None` without FCP.
+    pub calling: Option<anvil_fcp::CallingSettings>,
+    /// The latest calls, newest first.
+    pub recents: Vec<Recent>,
+    /// The tenant's directory, with presence where the tenant shows it.
+    pub people: Vec<Person>,
+    /// The mailbox's messages, newest first.
+    pub voicemail: Vec<Voicemail>,
+    pub audio: AudioDevices,
 }
 
 /// The tenant's brand, as a screen applies it (`docs/BRANDING.md`).
@@ -40,6 +51,11 @@ impl State {
             message_waiting: None,
             dnd: None,
             brand: None,
+            calling: None,
+            recents: Vec::new(),
+            people: Vec::new(),
+            voicemail: Vec::new(),
+            audio: AudioDevices::default(),
         }
     }
 
@@ -91,6 +107,113 @@ pub struct CallView {
     pub muted: bool,
     /// The codec in use once connected (`opus`, `pcmu`, …).
     pub codec: Option<String>,
+    /// The media is encrypted (SRTP).
+    #[serde(default)]
+    pub encrypted: bool,
+    /// How the media is doing, once measured.
+    #[serde(default)]
+    pub quality: Option<Quality>,
+}
+
+impl CallView {
+    /// A call just seen: not held, not muted, nothing measured yet.
+    pub fn new(id: u64, direction: Direction, remote: &str, state: CallState) -> Self {
+        Self {
+            id,
+            direction,
+            remote: remote.to_string(),
+            display_name: None,
+            state,
+            held: false,
+            muted: false,
+            codec: None,
+            encrypted: false,
+            quality: None,
+        }
+    }
+}
+
+/// A connected call's media, as last measured.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Quality {
+    pub jitter_ms: u32,
+    /// Packets lost, per thousand.
+    pub packet_loss_permille: u32,
+    pub rtt_ms: Option<u32>,
+}
+
+/// One call in the user's history.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Recent {
+    /// FCP's record id.
+    pub id: String,
+    pub direction: Direction,
+    /// Who the call was with: what to dial back.
+    pub remote: String,
+    pub display_name: Option<String>,
+    /// An incoming call nobody answered.
+    pub missed: bool,
+    /// RFC 3339.
+    pub started_at: String,
+    pub duration_secs: Option<u64>,
+}
+
+/// Someone in the tenant's directory: a user, or an extension that is not
+/// a user's (a queue, a ring group).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Person {
+    /// The user's login name, or the extension when it is not a user's.
+    pub key: String,
+    pub name: String,
+    pub extension: Option<String>,
+    pub department: Option<String>,
+    pub job_title: Option<String>,
+    /// `available`, `busy`, `away`, `dnd`, `offline`, … when shown.
+    pub presence: Option<String>,
+    /// On a call now (their busy lamp).
+    pub on_call: bool,
+    /// One of this user's favourites.
+    pub favourite: bool,
+}
+
+impl Person {
+    /// What to dial: the extension, else the user's name.
+    pub fn dial(&self) -> &str {
+        self.extension.as_deref().unwrap_or(&self.key)
+    }
+}
+
+/// One voicemail message.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Voicemail {
+    pub id: String,
+    pub caller: String,
+    pub caller_name: Option<String>,
+    /// Not yet heard.
+    pub new: bool,
+    pub urgent: bool,
+    pub duration_secs: u64,
+    pub transcription: Option<String>,
+    /// RFC 3339.
+    pub received_at: String,
+}
+
+/// The microphones and speakers, and which are in use.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct AudioDevices {
+    pub inputs: Vec<AudioDevice>,
+    pub outputs: Vec<AudioDevice>,
+    /// The chosen microphone's id; `None` is the system's default.
+    pub input: Option<String>,
+    pub output: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct AudioDevice {
+    pub id: String,
+    pub name: String,
+    /// The system's default.
+    pub default: bool,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -151,5 +274,30 @@ pub enum Change {
         id: u64,
         code: u16,
         reason: String,
+    },
+    /// The calling settings changed (here or elsewhere).
+    Calling {
+        settings: anvil_fcp::CallingSettings,
+    },
+    /// The recent calls were read again; `missed` of them unanswered.
+    Recents {
+        missed: u32,
+    },
+    /// The directory was read again.
+    People {
+        count: u32,
+    },
+    /// One person's presence, busy lamp or favourite changed.
+    Person {
+        person: Person,
+    },
+    /// The mailbox's messages were read again.
+    Voicemail {
+        new: u32,
+        total: u32,
+    },
+    /// The devices, or the choice of them, changed.
+    Audio {
+        audio: AudioDevices,
     },
 }
