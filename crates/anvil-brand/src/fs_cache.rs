@@ -243,6 +243,7 @@ impl BrandCache for FsBrandCache {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::sync::atomic::{AtomicU32, Ordering};
 
     fn asset(bytes: &[u8], mime: &str) -> BrandAsset {
         BrandAsset {
@@ -266,11 +267,16 @@ mod tests {
     }
 
     fn tempdir() -> PathBuf {
+        // Windows' clock can hand two tests running at once the same
+        // instant, so a counter keeps their directories apart.
+        static NEXT: AtomicU32 = AtomicU32::new(0);
         let nanos = SystemTime::now()
             .duration_since(SystemTime::UNIX_EPOCH)
             .unwrap()
             .as_nanos();
-        let dir = std::env::temp_dir().join(format!("anvil-brand-{}-{nanos}", std::process::id()));
+        let n = NEXT.fetch_add(1, Ordering::Relaxed);
+        let dir =
+            std::env::temp_dir().join(format!("anvil-brand-{}-{nanos}-{n}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
         dir
     }

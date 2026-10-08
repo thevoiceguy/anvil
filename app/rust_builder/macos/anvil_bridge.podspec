@@ -35,6 +35,10 @@ A new Flutter FFI plugin project.
     # created by this build step.
     :output_files => ["${BUILT_PRODUCTS_DIR}/libanvil_bridge.a"],
   }
+  # The Rust library is static: the system frameworks its crates call
+  # (cpal's audio units, hickory's resolver configuration, rustls'
+  # trust store) are linked by the pod that carries it.
+  s.frameworks = 'CoreAudio', 'AudioToolbox', 'CoreFoundation', 'SystemConfiguration', 'Security'
   s.pod_target_xcconfig = {
     'DEFINES_MODULE' => 'YES',
     # Flutter.framework does not contain a i386 slice.
