@@ -1,6 +1,6 @@
 # The Anvil app
 
-Designed 2026-10-07; agreed the same day on every recommendation in §8 (Flutter, `app/` in this repository, the desktop app serving the control socket, desktop first, one design everywhere, self-updating desktop builds, strings externalised from U1). Certificates and store accounts (§8 Q6) are the owner's to obtain; builds stay unsigned until then. Progress: U0 done: `anvil-app` (the running phone, its state and changes, the commands; mute added to `anvil-core`), the control socket, and `anvil-cli run` with the commands that drive it.
+Designed 2026-10-07; agreed the same day on every recommendation in §8 (Flutter, `app/` in this repository, the desktop app serving the control socket, desktop first, one design everywhere, self-updating desktop builds, strings externalised from U1). Certificates and store accounts (§8 Q6) are the owner's to obtain; builds stay unsigned until then. Progress: U0 done: `anvil-app` (the running phone, its state and changes, the commands; mute added to `anvil-core`), the control socket, and `anvil-cli run` with the commands that drive it. U1 under way: `app/` (Flutter 3.47, `flutter_rust_bridge` 2.13 over `anvil-app` in `app/rust`), sign-in, keypad, incoming and in-call screens, Anvil's theme with Inter bundled, strings in `lib/l10n`, CI building all three desktops.
 
 Anvil works: it signs in to FCP, registers, places and takes calls, holds,
 transfers, encrypts its media, shows message waiting, presence and busy lamps,

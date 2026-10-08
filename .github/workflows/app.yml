@@ -1,0 +1,92 @@
+name: App
+
+# The Flutter app (`app/`, docs/APP.md): analysed and its widget tests run;
+# its generated bindings checked against the Rust API; built for Windows,
+# macOS and Linux, its integration test run on each, and each build kept as
+# the run's artifact.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+env:
+  CARGO_TERM_COLOR: always
+  FLUTTER_VERSION: "3.47.6"
+  FRB_VERSION: "2.13.0"
+
+jobs:
+  checks:
+    name: analyze, widget tests, bindings
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: app
+    steps:
+      - uses: actions/checkout@v5
+      - uses: subosito/flutter-action@v2
+        with:
+          flutter-version: ${{ env.FLUTTER_VERSION }}
+          channel: stable
+          cache: true
+      - run: flutter pub get
+      - run: flutter analyze
+      - run: flutter test
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: The generator
+        working-directory: .
+        run: |
+          if ! flutter_rust_bridge_codegen --version 2>/dev/null | grep -q "$FRB_VERSION"; then
+            cargo install flutter_rust_bridge_codegen --version "$FRB_VERSION" --locked
+          fi
+      - name: The bindings match the Rust API
+        run: |
+          sudo apt-get update && sudo apt-get install -y libasound2-dev
+          flutter_rust_bridge_codegen generate
+          git diff --exit-code -- lib/src/rust rust/src/frb_generated.rs
+
+  desktop:
+    name: ${{ matrix.name }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { name: Linux, os: ubuntu-latest, target: linux, out: build/linux/x64/release/bundle }
+          - { name: Windows, os: windows-latest, target: windows, out: build/windows/x64/runner/Release }
+          - { name: macOS, os: macos-latest, target: macos, out: build/macos/Build/Products/Release }
+    defaults:
+      run:
+        working-directory: app
+    steps:
+      - uses: actions/checkout@v5
+      - uses: subosito/flutter-action@v2
+        with:
+          flutter-version: ${{ env.FLUTTER_VERSION }}
+          channel: stable
+          cache: true
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: ". -> app/build"
+      - name: Linux build tools
+        if: matrix.target == 'linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y clang cmake ninja-build pkg-config libgtk-3-dev liblzma-dev libasound2-dev xvfb
+      - run: flutter pub get
+      - run: flutter build ${{ matrix.target }} --release
+      - name: The app starts with its Rust core
+        shell: bash
+        run: |
+          if [ "${{ matrix.target }}" = linux ]; then
+            xvfb-run -a flutter test integration_test -d linux
+          else
+            flutter test integration_test -d ${{ matrix.target }}
+          fi
+      - uses: actions/upload-artifact@v4
+        with:
+          name: anvil-app-${{ matrix.target }}
+          path: app/${{ matrix.out }}

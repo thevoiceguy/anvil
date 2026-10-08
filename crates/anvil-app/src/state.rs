@@ -14,6 +14,21 @@ pub struct State {
     pub message_waiting: Option<MessageWaiting>,
     /// Do not disturb, as FCP has it; `None` without FCP.
     pub dnd: Option<bool>,
+    /// The tenant's brand, once fetched.
+    pub brand: Option<Brand>,
+}
+
+/// The tenant's brand, as a screen applies it (`docs/BRANDING.md`).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Brand {
+    pub app_name: String,
+    /// `#RRGGBB`.
+    pub primary: Option<String>,
+    pub accent: Option<String>,
+    /// The logo's bytes (PNG or SVG as the tenant uploaded it); not sent on
+    /// the control socket.
+    #[serde(skip)]
+    pub logo: Option<Vec<u8>>,
 }
 
 impl State {
@@ -24,6 +39,7 @@ impl State {
             calls: Vec::new(),
             message_waiting: None,
             dnd: None,
+            brand: None,
         }
     }
 
@@ -125,6 +141,10 @@ pub enum Change {
     },
     Dnd {
         on: bool,
+    },
+    /// The brand arrived or changed; `None` when the tenant has none.
+    Brand {
+        app_name: Option<String>,
     },
     /// A transfer of `id` progressed: the server's status for it.
     TransferProgress {

@@ -394,6 +394,9 @@ fn print_change(change: &anvil_app::Change) {
             println!("[voicemail] {} new, {} old", m.new, m.old)
         }
         C::Dnd { on } => println!("[dnd] {}", if *on { "on" } else { "off" }),
+        C::Brand { app_name } => {
+            println!("[brand] {}", app_name.as_deref().unwrap_or("none"))
+        }
         C::TransferProgress { id, code, reason } => {
             println!("[transfer] call {id}: {code} {reason}")
         }
