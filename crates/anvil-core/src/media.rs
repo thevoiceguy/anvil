@@ -807,7 +807,7 @@ pub(crate) fn start_pipeline(
         let mut dtmf_dedup = DtmfDeduplicator::new();
         let mut buf = vec![0u8; 2048];
         loop {
-            let (len, _peer) = match sock_recv.recv_from(&mut buf).await {
+            let (len, _peer) = match recv_rtp(&sock_recv, &mut buf).await {
                 Ok(x) => x,
                 Err(e) => {
                     tracing::warn!(%e, "rtp recv failed");
@@ -1106,6 +1106,24 @@ pub(crate) fn extract_remote_rtp_addr(body: &[u8]) -> Option<SocketAddr> {
     Some(SocketAddr::new(ip, port))
 }
 
+/// The next datagram on a call's RTP socket. On Windows a datagram the
+/// other end's port refused (ICMP port unreachable, say after it hung up
+/// or before it opened) surfaces as `ConnectionReset` on the next receive;
+/// that is not this socket failing, so the receive goes on.
+async fn recv_rtp(
+    socket: &tokio::net::UdpSocket,
+    buf: &mut [u8],
+) -> std::io::Result<(usize, std::net::SocketAddr)> {
+    loop {
+        match socket.recv_from(buf).await {
+            Err(e) if e.kind() == std::io::ErrorKind::ConnectionReset => {
+                tracing::debug!(%e, "rtp: an earlier datagram was refused");
+            }
+            other => return other,
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     //! End-to-end validation of the RTP pipeline: two sockets, two
@@ -1344,13 +1362,20 @@ mod tests {
             None,
         )
         .unwrap();
+        // A's sender is running before the mute lands, so a frame or two of
+        // tone may already be on the wire or in B's jitter buffer: judge
+        // only what B hears once those are through.
+        tokio::time::sleep(Duration::from_millis(200)).await;
+        frames_b.store(0, Ordering::Relaxed);
+        rms_b.store(0, Ordering::Relaxed);
         tokio::time::sleep(Duration::from_millis(600)).await;
         drop((pipe_a, pipe_b));
         assert!(
             frames_b.load(Ordering::Relaxed) >= 20,
             "B still receives frames"
         );
-        assert!(rms_b.load(Ordering::Relaxed) < 100, "B hears silence");
+        let rms = rms_b.load(Ordering::Relaxed);
+        assert!(rms < 100, "B hears silence (peak rms {rms})");
     }
 
     /// SDES-SRTP both ways: the audio survives encryption.
@@ -1465,5 +1490,32 @@ mod tests {
     #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
     async fn rtp_round_trip_opus() {
         round_trip_for(Codec::Opus, 48000).await;
+    }
+
+    #[tokio::test]
+    async fn a_refused_datagram_does_not_end_the_rtp_receive() {
+        let socket = tokio::net::UdpSocket::bind("127.0.0.1:0").await.unwrap();
+        // A port nobody holds: on Windows the refusal comes back as a
+        // ConnectionReset on this socket's next receive.
+        let closed = {
+            let s = std::net::UdpSocket::bind("127.0.0.1:0").unwrap();
+            s.local_addr().unwrap()
+        };
+        socket.send_to(b"x", closed).await.unwrap();
+        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+        let peer = tokio::net::UdpSocket::bind("127.0.0.1:0").await.unwrap();
+        peer.send_to(b"rtp", socket.local_addr().unwrap())
+            .await
+            .unwrap();
+        let mut buf = [0u8; 16];
+        let (n, from) = tokio::time::timeout(
+            std::time::Duration::from_secs(2),
+            recv_rtp(&socket, &mut buf),
+        )
+        .await
+        .expect("the packet arrives")
+        .expect("the receive survives the refusal");
+        assert_eq!(&buf[..n], b"rtp");
+        assert_eq!(from, peer.local_addr().unwrap());
     }
 }

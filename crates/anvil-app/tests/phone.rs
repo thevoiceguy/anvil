@@ -91,6 +91,20 @@ fn endpoint(tag: &str) -> Endpoint {
     }
 }
 
+/// The phones' SIP and call log, captured by the test harness and shown
+/// only when the test fails (`ANVIL_LOG` replaces the filter).
+fn log() {
+    let filter = std::env::var("ANVIL_LOG").unwrap_or_else(|_| {
+        "anvil_core=debug,anvil_app=debug,sip_uac=debug,sip_uas=debug,\
+         sip_transaction=debug,sip_transport=info"
+            .into()
+    });
+    let _ = tracing_subscriber::fmt()
+        .with_env_filter(tracing_subscriber::EnvFilter::new(filter))
+        .with_test_writer()
+        .try_init();
+}
+
 async fn until(phone: &Phone, what: &str, done: impl Fn(&anvil_app::State) -> bool) {
     let deadline = tokio::time::Instant::now() + SOON;
     while !done(&phone.state()) {
@@ -105,6 +119,7 @@ async fn until(phone: &Phone, what: &str, done: impl Fn(&anvil_app::State) -> bo
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn a_running_phone_is_driven_through_its_control_socket() {
+    log();
     let alice = phone("alice", "127.0.0.30").await;
     let bob = phone("bob", "127.0.0.31").await;
     let at = endpoint("drive");
