@@ -1362,13 +1362,20 @@ mod tests {
             None,
         )
         .unwrap();
+        // A's sender is running before the mute lands, so a frame or two of
+        // tone may already be on the wire or in B's jitter buffer: judge
+        // only what B hears once those are through.
+        tokio::time::sleep(Duration::from_millis(200)).await;
+        frames_b.store(0, Ordering::Relaxed);
+        rms_b.store(0, Ordering::Relaxed);
         tokio::time::sleep(Duration::from_millis(600)).await;
         drop((pipe_a, pipe_b));
         assert!(
             frames_b.load(Ordering::Relaxed) >= 20,
             "B still receives frames"
         );
-        assert!(rms_b.load(Ordering::Relaxed) < 100, "B hears silence");
+        let rms = rms_b.load(Ordering::Relaxed);
+        assert!(rms < 100, "B hears silence (peak rms {rms})");
     }
 
     /// SDES-SRTP both ways: the audio survives encryption.
