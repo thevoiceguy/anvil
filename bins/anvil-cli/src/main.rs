@@ -31,12 +31,13 @@ struct Cli {
     #[command(subcommand)]
     command: Option<Command>,
 
-    /// Where the FCP session is kept (default: the user's config directory).
     /// The running phone's control socket (a path, or `\\.\pipe\name` on
     /// Windows); unset, this user's default.
     #[arg(long, env = "ANVIL_CONTROL", global = true)]
     control: Option<String>,
 
+    /// Where the FCP session is kept (default: the user's config
+    /// directory); the phone's own settings are kept beside it.
     #[arg(long, env = "ANVIL_SESSION", global = true)]
     session: Option<std::path::PathBuf>,
 
@@ -255,6 +256,44 @@ enum Command {
         #[arg(value_parser = ["on", "off"])]
         state: String,
     },
+    /// Park the call with FCP's park code.
+    Park {
+        #[arg(long)]
+        id: Option<u64>,
+    },
+    /// Forward calls: always, when busy, unanswered or unreachable; `off`
+    /// clears it.
+    Forward {
+        #[arg(value_parser = ["all", "busy", "no-answer", "unreachable"])]
+        when: String,
+        /// A number or address, or `off`.
+        target: String,
+    },
+    /// Call waiting on or off.
+    Waiting {
+        #[arg(value_parser = ["on", "off"])]
+        state: String,
+    },
+    /// Mark a voicemail message heard.
+    Heard { id: String },
+    /// Delete a voicemail message.
+    Delete { id: String },
+    /// Make someone in the directory a favourite (`--off` to stop).
+    Favourite {
+        /// Their name, login or extension.
+        who: Vec<String>,
+        #[arg(long)]
+        off: bool,
+    },
+    /// Use this microphone (`in`) or speaker (`out`); `default` for the
+    /// system's.
+    Audio {
+        #[arg(value_parser = ["in", "out"])]
+        kind: String,
+        device: Vec<String>,
+    },
+    /// Read the user's data from FCP again.
+    Refresh,
     /// The running phone: registration, calls, message waiting.
     Status,
     /// Print the running phone's changes until Ctrl+C.
@@ -289,6 +328,27 @@ impl Command {
                 to: *to,
             },
             Command::Dnd { state } => P::Dnd { on: state == "on" },
+            Command::Park { id } => P::Park { call: *id },
+            Command::Forward { when, target } => {
+                return anvil_app::Command::parse_line(&format!("forward {when} {target}")).ok()
+            }
+            Command::Waiting { state } => {
+                return anvil_app::Command::parse_line(&format!("waiting {state}")).ok()
+            }
+            Command::Heard { id } => P::Heard { id: id.clone() },
+            Command::Delete { id } => P::DeleteVoicemail { id: id.clone() },
+            Command::Favourite { who, off } => P::Favourite {
+                who: who.join(" "),
+                on: !off,
+            },
+            Command::Audio { kind, device } => {
+                return anvil_app::Command::parse_line(&format!(
+                    "audio {kind} {}",
+                    device.join(" ")
+                ))
+                .ok()
+            }
+            Command::Refresh => P::Refresh,
             Command::Status => P::Status,
             _ => return None,
         })
@@ -344,6 +404,56 @@ fn print_state(state: &anvil_app::State) {
     if let Some(mw) = state.message_waiting {
         println!("voicemail: {} new, {} old", mw.new, mw.old);
     }
+    if let Some(calling) = &state.calling {
+        let forwards: Vec<String> = [
+            ("all", &calling.forward_all),
+            ("busy", &calling.forward_busy),
+            ("no answer", &calling.forward_no_answer),
+            ("unreachable", &calling.forward_unreachable),
+        ]
+        .into_iter()
+        .filter_map(|(when, to)| to.as_ref().map(|to| format!("{when} to {to}")))
+        .collect();
+        println!(
+            "call waiting: {}; forward: {}",
+            if calling.call_waiting { "on" } else { "off" },
+            if forwards.is_empty() {
+                "none".to_string()
+            } else {
+                forwards.join(", ")
+            }
+        );
+    }
+    if !state.recents.is_empty() {
+        let missed = state.recents.iter().filter(|r| r.missed).count();
+        println!("recent calls: {}, {missed} missed", state.recents.len());
+    }
+    let favourites: Vec<String> = state
+        .people
+        .iter()
+        .filter(|p| p.favourite)
+        .map(|p| {
+            let mut about: Vec<&str> = p.presence.iter().map(String::as_str).collect();
+            if p.on_call {
+                about.push("on a call");
+            }
+            if about.is_empty() {
+                p.name.clone()
+            } else {
+                format!("{} ({})", p.name, about.join(", "))
+            }
+        })
+        .collect();
+    if !favourites.is_empty() {
+        println!("favourites: {}", favourites.join(", "));
+    }
+    if !state.audio.inputs.is_empty() || !state.audio.outputs.is_empty() {
+        println!(
+            "audio: in {}, out {}",
+            state.audio.input.as_deref().unwrap_or("default"),
+            state.audio.output.as_deref().unwrap_or("default"),
+        );
+    }
     if state.calls.is_empty() {
         println!("no calls");
     }
@@ -359,6 +469,9 @@ fn call_line(c: &anvil_app::CallView) -> String {
     }
     if c.muted {
         flags.push("muted");
+    }
+    if c.encrypted {
+        flags.push("encrypted");
     }
     format!(
         "call {}  {:?} {:?}  {}{}{}",
@@ -400,6 +513,32 @@ fn print_change(change: &anvil_app::Change) {
         C::TransferProgress { id, code, reason } => {
             println!("[transfer] call {id}: {code} {reason}")
         }
+        C::Calling { settings } => {
+            let forward = |f: &Option<String>| f.as_deref().unwrap_or("-").to_string();
+            println!(
+                "[calling] dnd {}, waiting {}, forward all {}, busy {}, no answer {}",
+                if settings.dnd { "on" } else { "off" },
+                if settings.call_waiting { "on" } else { "off" },
+                forward(&settings.forward_all),
+                forward(&settings.forward_busy),
+                forward(&settings.forward_no_answer),
+            )
+        }
+        C::Recents { missed } => println!("[recents] {missed} missed"),
+        C::People { count } => println!("[people] {count}"),
+        C::Person { person } => println!(
+            "[person] {} {}{}{}",
+            person.name,
+            person.presence.as_deref().unwrap_or("-"),
+            if person.on_call { ", on a call" } else { "" },
+            if person.favourite { ", favourite" } else { "" },
+        ),
+        C::Voicemail { new, total } => println!("[voicemail] {new} new of {total}"),
+        C::Audio { audio } => println!(
+            "[audio] in {}, out {}",
+            audio.input.as_deref().unwrap_or("default"),
+            audio.output.as_deref().unwrap_or("default"),
+        ),
     }
 }
 
@@ -411,6 +550,7 @@ async fn run_phone(cli: &Cli) -> Result<()> {
         anvil,
         fcp,
         register: true,
+        settings_path: Some(settings_path(cli)),
     })
     .await?;
     let endpoint = control_endpoint(cli);
@@ -478,6 +618,11 @@ fn session_path(cli: &Cli) -> std::path::PathBuf {
             .unwrap_or_else(|| std::path::PathBuf::from("."));
         base.join("anvil").join("session.json")
     })
+}
+
+/// Where this device's phone settings live: beside the session.
+fn settings_path(cli: &Cli) -> std::path::PathBuf {
+    session_path(cli).with_file_name("settings.json")
 }
 
 /// `anvil-cli login`: sign in, keep the session.

@@ -36,6 +36,8 @@ pub struct CpalHost {
     /// Per-call capture-side processor factory. Defaults to a no-op
     /// passthrough; use `with_capture_processor` to attach AGC etc.
     capture_processor: ProcessorFactory,
+    /// The devices chosen by name; `None` is the system's default.
+    chosen: Mutex<(Option<String>, Option<String>)>,
 }
 
 impl CpalHost {
@@ -44,6 +46,7 @@ impl CpalHost {
     pub fn new() -> Result<Self, AnvilError> {
         Ok(Self {
             capture_processor: Box::new(|| Box::new(NullProcessor)),
+            chosen: Mutex::new((None, None)),
         })
     }
 
@@ -61,11 +64,33 @@ impl CpalHost {
 impl AudioHost for CpalHost {
     fn make_capture(&self, cfg: AudioFormat) -> Result<Box<dyn AudioSource>, AnvilError> {
         let processor = (self.capture_processor)();
-        CpalCapture::open(cfg, processor).map(|h| Box::new(h) as Box<dyn AudioSource>)
+        let device = self.chosen.lock().0.clone();
+        CpalCapture::open(cfg, processor, device).map(|h| Box::new(h) as Box<dyn AudioSource>)
     }
 
     fn make_playback(&self, cfg: AudioFormat) -> Result<Box<dyn AudioSink>, AnvilError> {
-        CpalPlayback::open(cfg).map(|h| Box::new(h) as Box<dyn AudioSink>)
+        let device = self.chosen.lock().1.clone();
+        CpalPlayback::open(cfg, device).map(|h| Box::new(h) as Box<dyn AudioSink>)
+    }
+
+    fn choose_devices(&self, input: Option<&str>, output: Option<&str>) -> Result<(), AnvilError> {
+        let devices = self.devices();
+        let known =
+            |id: &str, is_input: bool| devices.iter().any(|d| d.id == id && d.is_input == is_input);
+        for (id, is_input) in [(input, true), (output, false)] {
+            if let Some(id) = id.filter(|id| !known(id, is_input)) {
+                return Err(AnvilError::AudioDevice(format!(
+                    "no {} device {id:?}",
+                    if is_input { "input" } else { "output" }
+                )));
+            }
+        }
+        *self.chosen.lock() = (input.map(String::from), output.map(String::from));
+        Ok(())
+    }
+
+    fn chosen_devices(&self) -> (Option<String>, Option<String>) {
+        self.chosen.lock().clone()
     }
 
     fn devices(&self) -> Vec<DeviceInfo> {
@@ -101,6 +126,25 @@ impl AudioHost for CpalHost {
     }
 }
 
+/// The device named `wanted` among `devices`; `None` when none was asked
+/// for, or the one asked for has gone (unplugged), so the default is used.
+fn named<I>(devices: Result<I, cpal::DevicesError>, wanted: Option<&str>) -> Option<cpal::Device>
+where
+    I: Iterator<Item = cpal::Device>,
+{
+    let wanted = wanted?;
+    let found = devices
+        .ok()?
+        .find(|d| d.name().ok().as_deref() == Some(wanted));
+    if found.is_none() {
+        tracing::warn!(
+            device = wanted,
+            "the chosen audio device is gone; using the default"
+        );
+    }
+    found
+}
+
 // ─── Capture ────────────────────────────────────────────────────────────────
 
 struct CpalCapture {
@@ -112,14 +156,18 @@ struct CpalCapture {
 }
 
 impl CpalCapture {
-    fn open(cfg: AudioFormat, processor: Box<dyn AudioProcessor>) -> Result<Self, AnvilError> {
+    fn open(
+        cfg: AudioFormat,
+        processor: Box<dyn AudioProcessor>,
+        device: Option<String>,
+    ) -> Result<Self, AnvilError> {
         // 8 frames of headroom; beyond that we drop to avoid unbounded memory
         // growth if the RTP send task stalls.
         let (frame_tx, frame_rx) = mpsc::channel::<AudioFrame>(8);
 
         let worker = thread::Builder::new()
             .name("anvil-capture".into())
-            .spawn(move || run_capture(cfg, frame_tx))
+            .spawn(move || run_capture(cfg, frame_tx, device))
             .map_err(|e| AnvilError::AudioDevice(format!("spawn capture thread: {e}")))?;
 
         Ok(Self {
@@ -139,9 +187,11 @@ impl AudioSource for CpalCapture {
     }
 }
 
-fn run_capture(cfg: AudioFormat, frame_tx: mpsc::Sender<AudioFrame>) {
+fn run_capture(cfg: AudioFormat, frame_tx: mpsc::Sender<AudioFrame>, wanted: Option<String>) {
     let host = cpal::default_host();
-    let device = match host.default_input_device() {
+    let device = match named(host.input_devices(), wanted.as_deref())
+        .or_else(|| host.default_input_device())
+    {
         Some(d) => d,
         None => {
             tracing::error!("no default input device");
@@ -298,12 +348,12 @@ struct CpalPlayback {
 }
 
 impl CpalPlayback {
-    fn open(cfg: AudioFormat) -> Result<Self, AnvilError> {
+    fn open(cfg: AudioFormat, device: Option<String>) -> Result<Self, AnvilError> {
         let (frame_tx, frame_rx) = mpsc::channel::<AudioFrame>(8);
 
         let worker = thread::Builder::new()
             .name("anvil-playback".into())
-            .spawn(move || run_playback(cfg, frame_rx))
+            .spawn(move || run_playback(cfg, frame_rx, device))
             .map_err(|e| AnvilError::AudioDevice(format!("spawn playback thread: {e}")))?;
 
         Ok(Self {
@@ -324,9 +374,15 @@ impl AudioSink for CpalPlayback {
     }
 }
 
-fn run_playback(cfg: AudioFormat, mut frame_rx: mpsc::Receiver<AudioFrame>) {
+fn run_playback(
+    cfg: AudioFormat,
+    mut frame_rx: mpsc::Receiver<AudioFrame>,
+    wanted: Option<String>,
+) {
     let host = cpal::default_host();
-    let device = match host.default_output_device() {
+    let device = match named(host.output_devices(), wanted.as_deref())
+        .or_else(|| host.default_output_device())
+    {
         Some(d) => d,
         None => {
             tracing::error!("no default output device");

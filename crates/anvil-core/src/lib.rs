@@ -849,6 +849,33 @@ impl Anvil {
         Ok(())
     }
 
+    /// Whether a call's media is encrypted: SRTP keyed both ways.
+    pub fn is_encrypted(&self, call: CallId) -> bool {
+        self.calls
+            .get(&call)
+            .is_some_and(|e| e.srtp.as_ref().is_some_and(|k| k.theirs.is_some()))
+    }
+
+    /// The microphones and speakers the audio host offers.
+    pub fn audio_devices(&self) -> Vec<audio::DeviceInfo> {
+        self.audio.devices()
+    }
+
+    /// Use these devices (by id; `None` for the system's default) for the
+    /// calls set up from now on.
+    pub fn choose_audio_devices(
+        &self,
+        input: Option<&str>,
+        output: Option<&str>,
+    ) -> Result<(), AnvilError> {
+        self.audio.choose_devices(input, output)
+    }
+
+    /// The devices chosen, `None` for the system's default.
+    pub fn chosen_audio_devices(&self) -> (Option<String>, Option<String>) {
+        self.audio.chosen_devices()
+    }
+
     /// Blind-transfer a call to `target` (RFC 3515): a REFER in its dialog.
     /// The server's progress arrives as [`Event::TransferProgress`]; on
     /// success the server ends the call (a BYE, [`Event::CallEnded`]).

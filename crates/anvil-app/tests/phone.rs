@@ -1,10 +1,12 @@
 //! Two phones calling each other with no server: one driven only through its
 //! control socket, as `anvil-cli call …` drives a running phone.
 
+use std::path::PathBuf;
+use std::sync::Arc;
 use std::time::Duration;
 
 use anvil_app::control::{Client, Endpoint};
-use anvil_app::{CallState, Change, Command, Phone, PhoneConfig};
+use anvil_app::{AudioKind, CallState, Change, Command, Phone, PhoneConfig};
 use anvil_core::audio::{AudioFormat, AudioFrame, AudioHost, AudioSink, AudioSource, DeviceInfo};
 use anvil_core::config::{AccountConfig, MediaConfig};
 use anvil_core::{AnvilConfig, AnvilError, BrandConfig, Transport};
@@ -51,6 +53,15 @@ impl AudioHost for Quiet {
 }
 
 async fn phone(user: &str, ip: &str) -> Phone {
+    phone_with(user, ip, Box::new(Quiet), None).await
+}
+
+async fn phone_with(
+    user: &str,
+    ip: &str,
+    audio: Box<dyn AudioHost>,
+    settings_path: Option<PathBuf>,
+) -> Phone {
     Phone::start(PhoneConfig {
         anvil: AnvilConfig {
             account: AccountConfig {
@@ -68,11 +79,12 @@ async fn phone(user: &str, ip: &str) -> Phone {
                 provisioning_url: None,
             },
             media: MediaConfig::default(),
-            audio: Box::new(Quiet),
+            audio,
             brand: BrandConfig::default(),
         },
         fcp: None,
         register: false,
+        settings_path,
     })
     .await
     .expect("the phone starts")
@@ -227,4 +239,191 @@ async fn a_running_phone_is_driven_through_its_control_socket() {
     server.abort();
     alice.shutdown().await;
     bob.shutdown().await;
+}
+
+/// Quiet audio with a choice of two microphones and one speaker; what was
+/// chosen is shared with the test.
+struct Devices(Arc<parking_lot::Mutex<(Option<String>, Option<String>)>>);
+
+impl AudioHost for Devices {
+    fn make_capture(&self, cfg: AudioFormat) -> Result<Box<dyn AudioSource>, AnvilError> {
+        Quiet.make_capture(cfg)
+    }
+    fn make_playback(&self, cfg: AudioFormat) -> Result<Box<dyn AudioSink>, AnvilError> {
+        Quiet.make_playback(cfg)
+    }
+    fn devices(&self) -> Vec<DeviceInfo> {
+        let device = |id: &str, is_input, is_default| DeviceInfo {
+            id: id.into(),
+            name: id.into(),
+            is_input,
+            is_default,
+        };
+        vec![
+            device("Built-in Microphone", true, true),
+            device("USB Headset", true, false),
+            device("Speakers", false, true),
+        ]
+    }
+    fn choose_devices(&self, input: Option<&str>, output: Option<&str>) -> Result<(), AnvilError> {
+        for id in [input, output].into_iter().flatten() {
+            if !self.devices().iter().any(|d| d.id == id) {
+                return Err(AnvilError::AudioDevice(format!("no device {id:?}")));
+            }
+        }
+        *self.0.lock() = (input.map(String::from), output.map(String::from));
+        Ok(())
+    }
+    fn chosen_devices(&self) -> (Option<String>, Option<String>) {
+        self.0.lock().clone()
+    }
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn the_audio_devices_chosen_are_kept_for_the_next_start() {
+    log();
+    let dir = std::env::temp_dir().join(format!("anvil-app-audio-{}", std::process::id()));
+    let settings = dir.join("settings.json");
+    let _ = std::fs::remove_dir_all(&dir);
+
+    let chosen = Arc::new(parking_lot::Mutex::new((None, None)));
+    let alice = phone_with(
+        "alice",
+        "127.0.0.32",
+        Box::new(Devices(Arc::clone(&chosen))),
+        Some(settings.clone()),
+    )
+    .await;
+    let audio = alice.state().audio;
+    assert_eq!(audio.inputs.len(), 2, "{audio:?}");
+    assert_eq!(audio.outputs.len(), 1, "{audio:?}");
+    assert_eq!((audio.input, audio.output), (None, None));
+
+    // The headset, then a device that is not there.
+    let used = alice
+        .execute(Command::Audio {
+            kind: AudioKind::Input,
+            device: Some("USB Headset".into()),
+        })
+        .await
+        .unwrap();
+    assert!(used.ok, "{used:?}");
+    assert_eq!(alice.state().audio.input.as_deref(), Some("USB Headset"));
+    assert!(alice
+        .execute(Command::Audio {
+            kind: AudioKind::Output,
+            device: Some("Nowhere".into()),
+        })
+        .await
+        .is_err());
+    assert_eq!(
+        chosen.lock().clone(),
+        (Some("USB Headset".to_string()), None),
+        "a refused device changes nothing"
+    );
+    alice.shutdown().await;
+
+    // Started again with the same settings: the headset is chosen at once.
+    let again = Arc::new(parking_lot::Mutex::new((None, None)));
+    let alice = phone_with(
+        "alice",
+        "127.0.0.32",
+        Box::new(Devices(Arc::clone(&again))),
+        Some(settings.clone()),
+    )
+    .await;
+    assert_eq!(again.lock().0.as_deref(), Some("USB Headset"));
+    assert_eq!(alice.state().audio.input.as_deref(), Some("USB Headset"));
+
+    // Back to the default.
+    assert!(
+        alice
+            .execute(Command::Audio {
+                kind: AudioKind::Input,
+                device: None,
+            })
+            .await
+            .unwrap()
+            .ok
+    );
+    assert_eq!(again.lock().0, None);
+    alice.shutdown().await;
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn answering_a_second_call_holds_the_first() {
+    log();
+    let alice = phone("alice", "127.0.0.33").await;
+    let bob = phone("bob", "127.0.0.34").await;
+    let carol = phone("carol", "127.0.0.35").await;
+
+    // Alice and Bob talking.
+    let first = alice
+        .execute(Command::Call {
+            target: format!("sip:bob@{}", bob.sip_address()),
+        })
+        .await
+        .unwrap()
+        .call
+        .unwrap();
+    until(&bob, "Bob rings", |s| {
+        s.calls.iter().any(|c| c.state == CallState::Ringing)
+    })
+    .await;
+    assert!(
+        bob.execute(Command::Answer { call: None })
+            .await
+            .unwrap()
+            .ok
+    );
+    until(&alice, "Alice and Bob talk", |s| {
+        s.call_state(first) == Some(CallState::Connected)
+    })
+    .await;
+    let view = alice
+        .state()
+        .calls
+        .into_iter()
+        .find(|c| c.id == first)
+        .unwrap();
+    assert!(!view.encrypted, "a plain call: {view:?}");
+
+    // Carol calls Alice, who answers: Bob is held, Carol is on.
+    carol
+        .execute(Command::Call {
+            target: format!("sip:alice@{}", alice.sip_address()),
+        })
+        .await
+        .unwrap();
+    until(&alice, "Carol rings at Alice", |s| {
+        s.calls.iter().any(|c| c.state == CallState::Ringing)
+    })
+    .await;
+    assert!(
+        alice
+            .execute(Command::Answer { call: None })
+            .await
+            .unwrap()
+            .ok
+    );
+    until(&alice, "Bob held, Carol on", |s| {
+        s.calls.len() == 2
+            && s.calls.iter().all(|c| c.state == CallState::Connected)
+            && s.calls.iter().any(|c| c.id == first && c.held)
+            && s.calls.iter().any(|c| c.id != first && !c.held)
+    })
+    .await;
+
+    // Without FCP, what needs it says so.
+    let refused = alice.execute(Command::Heard { id: "m1".into() }).await;
+    assert!(
+        matches!(&refused, Err(e) if e.to_string().contains("FCP")),
+        "{:?}",
+        refused.map(|r| r.ok)
+    );
+
+    alice.shutdown().await;
+    bob.shutdown().await;
+    carol.shutdown().await;
 }

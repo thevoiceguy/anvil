@@ -189,6 +189,28 @@ Each phase is a branch and a PR, as before.
 - Tray, notifications, start at login, audio devices.
 - Golden screenshots on all three desktops.
 
+Three PRs, the screens thin over the state as §3 has it:
+
+- **U2a, the data in `anvil-app`.** The state gains the calling settings,
+  the recent calls, the directory as people (presence, a busy lamp,
+  favourites), the mailbox's messages, the audio devices, and on each call
+  whether it is encrypted and how its media is doing. FCP's data is read at
+  start and again when `/me/events` says it changed (a call ended, a
+  message, settings changed elsewhere); a status or a lamp changes one
+  person in place. New commands: `calling` (forwards, call waiting),
+  `park` (FCP's park code), `heard`, `delete_voicemail`, `favourite`,
+  `audio` and `refresh`; a call placed or answered while another is up
+  holds that one, as a desk phone does. Favourites and the devices chosen
+  are this device's own, kept beside the session (`settings.json`); a
+  device chosen applies to the calls set up after it. FCP has no
+  "send to voicemail": declining is what sends a call there, when the user
+  has a mailbox and no busy forward. Lamps for the whole directory come
+  from FCP's events, not a SIP subscription per person.
+- **U2b, the screens:** in a call, transfer, a second call, recents,
+  people, voicemail, settings.
+- **U2c, the desktop:** tray, notifications, start at login, golden
+  screenshots.
+
 ### U3: desktop distribution
 - Installers for the three desktops built on a tag, the auto-updater, signing
   as soon as the certificates exist.

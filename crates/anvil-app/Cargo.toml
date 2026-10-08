@@ -25,3 +25,6 @@ async-trait = { workspace = true }
 tracing-subscriber = { workspace = true }
 reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "json"] }
 rand    = "0.8"
+# Seeds a voicemail message into FCP's database (ANVIL_FCP_DATABASE_URL):
+# FCP's API has no way to leave one.
+tokio-postgres = "0.7"
