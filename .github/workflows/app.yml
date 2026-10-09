@@ -167,7 +167,14 @@ jobs:
           target: google_apis
           disable-animations: true
           working-directory: app
-          script: flutter test integration_test/mobile_test.dart -d emulator-5554
+          script: tool/android_test.sh
+      - name: The emulator's log
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: android-logcat
+          path: app/logcat.txt
+          if-no-files-found: ignore
 
   ios:
     name: iOS
