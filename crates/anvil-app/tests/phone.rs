@@ -352,7 +352,7 @@ async fn the_audio_devices_chosen_are_kept_for_the_next_start() {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-async fn answering_a_second_call_holds_the_first() {
+async fn answering_a_second_call_holds_the_first_and_resuming_swaps() {
     log();
     let alice = phone("alice", "127.0.0.33").await;
     let bob = phone("bob", "127.0.0.34").await;
@@ -412,6 +412,24 @@ async fn answering_a_second_call_holds_the_first() {
             && s.calls.iter().all(|c| c.state == CallState::Connected)
             && s.calls.iter().any(|c| c.id == first && c.held)
             && s.calls.iter().any(|c| c.id != first && !c.held)
+    })
+    .await;
+    assert!(
+        alice.state().calls.iter().all(|c| c.connected_at.is_some()),
+        "a connected call says since when"
+    );
+
+    // Back to Bob: Carol is held in turn, a swap.
+    assert!(
+        alice
+            .execute(Command::Resume { call: Some(first) })
+            .await
+            .unwrap()
+            .ok
+    );
+    until(&alice, "Bob on, Carol held", |s| {
+        s.calls.iter().any(|c| c.id == first && !c.held)
+            && s.calls.iter().any(|c| c.id != first && c.held)
     })
     .await;
 

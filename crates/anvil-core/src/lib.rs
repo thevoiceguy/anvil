@@ -856,6 +856,13 @@ impl Anvil {
             .is_some_and(|e| e.srtp.as_ref().is_some_and(|k| k.theirs.is_some()))
     }
 
+    /// Play mono PCM (a voicemail message, a ringtone) through the speaker
+    /// calls use, paced in real time. The task ends when the clip has
+    /// played; abort it to stop.
+    pub fn play(&self, samples: Vec<i16>, sample_rate: u32) -> Result<JoinHandle<()>, AnvilError> {
+        audio::play(self.audio.as_ref(), samples, sample_rate)
+    }
+
     /// The microphones and speakers the audio host offers.
     pub fn audio_devices(&self) -> Vec<audio::DeviceInfo> {
         self.audio.devices()
@@ -1121,8 +1128,20 @@ async fn dispatch_request(
                 .get("Call-ID")
                 .map(|s| s.to_string())
                 .unwrap_or_default();
-            let existing_dialog = uas::find_call_by_dialog_id(&handler.calls, &call_id_str)
-                .and_then(|id| handler.calls.get(&id).and_then(|e| e.dialog.clone()));
+            // The call's dialog: an incoming call's, or an outgoing call's
+            // from its handle (the callee holding us).
+            let existing =
+                uas::find_call_by_dialog_id(&handler.calls, &call_id_str).and_then(|id| {
+                    handler
+                        .calls
+                        .get(&id)
+                        .map(|e| (e.dialog.clone(), e.outbound_handle.clone()))
+                });
+            let existing_dialog = match existing {
+                Some((Some(dialog), _)) => Some(dialog),
+                Some((None, Some(handle))) => Some(handle.dialog.read().await.clone()),
+                _ => None,
+            };
             if let Err(e) = handler
                 .on_invite(&request, handle, &ctx, existing_dialog.as_ref())
                 .await

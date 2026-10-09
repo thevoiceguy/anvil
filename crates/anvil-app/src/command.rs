@@ -67,6 +67,11 @@ pub enum Command {
     Heard { id: String },
     /// Delete a voicemail message.
     DeleteVoicemail { id: String },
+    /// Play a voicemail message through the speaker calls use (and mark it
+    /// heard); one plays at a time.
+    Play { id: String },
+    /// Stop the message playing.
+    Stop,
     /// Make someone in the directory a favourite, or not.
     Favourite { who: String, on: bool },
     /// Use this microphone or speaker (by id; `None` for the system's
@@ -130,7 +135,8 @@ impl Command {
     /// A prompt line: `call 1002`, `answer`, `hangup 3`, `hold`, `resume`,
     /// `mute`, `unmute`, `dtmf 123#`, `transfer 1003`, `attended 1 2`,
     /// `park`, `dnd on`, `forward busy 1003`, `forward all off`,
-    /// `waiting off`, `heard <id>`, `delete <id>`, `favourite alice`,
+    /// `waiting off`, `heard <id>`, `delete <id>`, `play <id>`, `stop`,
+    /// `favourite alice`,
     /// `unfavourite alice`, `audio in USB Headset`, `audio out default`,
     /// `refresh`, `status`. A trailing number names the call.
     pub fn parse_line(line: &str) -> Result<Self, String> {
@@ -224,6 +230,10 @@ impl Command {
             "delete" => Command::DeleteVoicemail {
                 id: need(words.get(1), "a message id")?,
             },
+            "play" => Command::Play {
+                id: need(words.get(1), "a message id")?,
+            },
+            "stop" => Command::Stop,
             "favourite" | "favorite" | "unfavourite" | "unfavorite" => Command::Favourite {
                 who: rest(&words, 1).ok_or_else(|| format!("{verb} needs a name"))?,
                 on: !verb.to_ascii_lowercase().starts_with("un"),
@@ -322,6 +332,11 @@ mod tests {
                 on: false
             }
         );
+        assert_eq!(
+            Command::parse_line("play vm-1").unwrap(),
+            Command::Play { id: "vm-1".into() }
+        );
+        assert_eq!(Command::parse_line("stop").unwrap(), Command::Stop);
         assert!(Command::parse_line("forward sometimes 1003").is_err());
         assert!(Command::parse_line("hangup x").is_err());
         assert!(Command::parse_line("call").is_err());

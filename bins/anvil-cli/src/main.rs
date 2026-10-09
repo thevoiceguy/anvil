@@ -278,6 +278,10 @@ enum Command {
     Heard { id: String },
     /// Delete a voicemail message.
     Delete { id: String },
+    /// Play a voicemail message on the running phone (and mark it heard).
+    Play { id: String },
+    /// Stop the message playing.
+    Stop,
     /// Make someone in the directory a favourite (`--off` to stop).
     Favourite {
         /// Their name, login or extension.
@@ -337,6 +341,8 @@ impl Command {
             }
             Command::Heard { id } => P::Heard { id: id.clone() },
             Command::Delete { id } => P::DeleteVoicemail { id: id.clone() },
+            Command::Play { id } => P::Play { id: id.clone() },
+            Command::Stop => P::Stop,
             Command::Favourite { who, off } => P::Favourite {
                 who: who.join(" "),
                 on: !off,
@@ -539,6 +545,10 @@ fn print_change(change: &anvil_app::Change) {
             audio.input.as_deref().unwrap_or("default"),
             audio.output.as_deref().unwrap_or("default"),
         ),
+        C::Playing { id } => match id {
+            Some(id) => println!("[voicemail] playing {id}"),
+            None => println!("[voicemail] stopped"),
+        },
     }
 }
 
@@ -565,7 +575,7 @@ async fn run_phone(cli: &Cli) -> Result<()> {
         "Anvil is running as {} — commands here or `anvil-cli <command>` (control: {endpoint}).",
         phone.state().aor
     );
-    println!("call <number>, answer, decline, hangup, hold, resume, mute, unmute, dtmf <digits>, transfer <number>, attended <call> <to>, dnd on|off, status, quit");
+    println!("call <number>, answer, decline, hangup, hold, resume, mute, unmute, dtmf <digits>, transfer <number>, attended <call> <to>, dnd on|off, park, play <message>, stop, status, quit");
     let mut lines = tokio::io::BufReader::new(tokio::io::stdin()).lines();
     loop {
         tokio::select! {

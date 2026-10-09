@@ -1,6 +1,6 @@
 # The Anvil app
 
-Designed 2026-10-07; agreed the same day on every recommendation in §8 (Flutter, `app/` in this repository, the desktop app serving the control socket, desktop first, one design everywhere, self-updating desktop builds, strings externalised from U1). Certificates and store accounts (§8 Q6) are the owner's to obtain; builds stay unsigned until then. Progress: U0 done: `anvil-app` (the running phone, its state and changes, the commands; mute added to `anvil-core`), the control socket, and `anvil-cli run` with the commands that drive it. U1 under way: `app/` (Flutter 3.47, `flutter_rust_bridge` 2.13 over `anvil-app` in `app/rust`), sign-in, keypad, incoming and in-call screens, Anvil's theme with Inter bundled, strings in `lib/l10n`, CI building all three desktops.
+Designed 2026-10-07; agreed the same day on every recommendation in §8 (Flutter, `app/` in this repository, the desktop app serving the control socket, desktop first, one design everywhere, self-updating desktop builds, strings externalised from U1). Certificates and store accounts (§8 Q6) are the owner's to obtain; builds stay unsigned until then. Progress: U0 done: `anvil-app` (the running phone, its state and changes, the commands; mute added to `anvil-core`), the control socket, and `anvil-cli run` with the commands that drive it. U1 done: `app/` (Flutter 3.47, `flutter_rust_bridge` 2.13 over `anvil-app` in `app/rust`), sign-in, keypad, incoming and in-call screens, Anvil's theme with Inter bundled, strings in `lib/l10n`, CI building all three desktops. U2a done: the user's data in `anvil-app`. U2b done: the screens (in a call, transfer, a second call, recents, people, voicemail, settings) and voicemail played through the call speaker.
 
 Anvil works: it signs in to FCP, registers, places and takes calls, holds,
 transfers, encrypts its media, shows message waiting, presence and busy lamps,
@@ -208,6 +208,25 @@ Three PRs, the screens thin over the state as §3 has it:
   from FCP's events, not a SIP subscription per person.
 - **U2b, the screens:** in a call, transfer, a second call, recents,
   people, voicemail, settings.
+  - The navigation is a rail beside the page, or a bar below it on a
+    narrow window: keypad, recents (missed calls counted), people,
+    voicemail (new messages counted), settings. A call ringing in shows
+    over every page, and so does the call up, which leads back to it.
+  - In a call: mute, hold, a keypad sending each digit as pressed, park,
+    the call's timer, a lock when its media is encrypted, its quality as
+    good, fair or poor, its codec. Transfer takes a number or a person
+    from the directory, then goes at once (blind) or after talking to
+    them first: the call is held, the second placed, and "complete
+    transfer" joins the two (attended). "Add call" places a second call
+    and holds the first; resuming a held call holds the other, so the two
+    swap, in `anvil-app` as at the CLI.
+  - Recents and voicemail name callers from the directory; a tap calls
+    back. Voicemail plays through the speaker calls use, decoded from
+    FCP's WAV (PCM, float, A-law, μ-law) in `anvil-app`, so `anvil play
+    <id>` and `anvil stop` do the same; a message played is heard.
+  - Settings: do not disturb, call waiting, the four forwards (and how
+    long to ring before "not answered"), the microphone and speaker for
+    the next call, the account and sign-out.
 - **U2c, the desktop:** tray, notifications, start at login, golden
   screenshots.
 

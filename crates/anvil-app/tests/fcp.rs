@@ -457,13 +457,27 @@ async fn the_phone_keeps_the_users_data() {
             .expect("FCP's database");
         tokio::spawn(connection);
         let id = format!("msg-anvil-{}", std::process::id());
+        // A recording FCP can read when it shares a directory with the test
+        // (`ANVIL_FCP_VOICEMAIL_DIR`); else one it cannot.
+        let recording = match std::env::var("ANVIL_FCP_VOICEMAIL_DIR") {
+            Ok(dir) => {
+                let path = PathBuf::from(dir).join(format!("{id}.wav"));
+                std::fs::write(&path, half_a_second_wav()).expect("the recording written");
+                Some(path)
+            }
+            Err(_) => None,
+        };
+        let recording_path = recording
+            .as_ref()
+            .map(|p| p.display().to_string())
+            .unwrap_or_else(|| "/nonexistent/anvil.wav".into());
         db.execute(
             "INSERT INTO voicemail_messages \
              (id, mailbox_id, caller, caller_name, status, priority, duration, \
               recording_path, transcription) \
              VALUES ($1, $2, '+15125550100', 'Carol', 'new', 'urgent', 7, \
-                     '/nonexistent/anvil.wav', 'Call me back')",
-            &[&id, &mailbox_id],
+                     $3, 'Call me back')",
+            &[&id, &mailbox_id, &recording_path],
         )
         .await
         .expect("a message left");
@@ -478,6 +492,29 @@ async fn the_phone_keeps_the_users_data() {
         assert!(message.new && message.urgent, "{message:?}");
         assert_eq!(message.transcription.as_deref(), Some("Call me back"));
         assert_eq!(message.duration_secs, 7);
+
+        if recording.is_some() {
+            // Played: playing while it plays, heard, then nothing playing.
+            assert!(
+                bob_phone
+                    .execute(Command::Play { id: id.clone() })
+                    .await
+                    .unwrap()
+                    .ok
+            );
+            let state = bob_phone.state();
+            assert_eq!(state.playing.as_deref(), Some(id.as_str()));
+            assert!(state.voicemail.iter().any(|m| m.id == id && !m.new));
+            until(&bob_phone, "the message plays out", |s| s.playing.is_none()).await;
+        } else {
+            // A recording FCP cannot read is refused, and nothing plays.
+            assert!(bob_phone
+                .execute(Command::Play { id: id.clone() })
+                .await
+                .is_err());
+            assert_eq!(bob_phone.state().playing, None);
+            eprintln!("ANVIL_FCP_VOICEMAIL_DIR not set; playing tried only as a refusal");
+        }
 
         assert!(
             bob_phone
@@ -507,6 +544,9 @@ async fn the_phone_keeps_the_users_data() {
         assert!(bob_phone.state().voicemail.iter().all(|m| m.id != id));
         let page = bob_fcp.voicemail(None, None).await.unwrap();
         assert!(page.data.iter().all(|m| m.id != id), "{page:?}");
+        if let Some(path) = recording {
+            let _ = std::fs::remove_file(path);
+        }
     } else {
         eprintln!("ANVIL_FCP_DATABASE_URL not set; voicemail not tried");
     }
@@ -514,4 +554,29 @@ async fn the_phone_keeps_the_users_data() {
     alice_phone.shutdown().await;
     bob_phone.shutdown().await;
     let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// Half a second of a 440 Hz tone: an 8 kHz, 16-bit mono WAV.
+fn half_a_second_wav() -> Vec<u8> {
+    let samples: Vec<i16> = (0..4000)
+        .map(|i| ((i as f32 * 440.0 * std::f32::consts::TAU / 8000.0).sin() * 8000.0) as i16)
+        .collect();
+    let data: Vec<u8> = samples.iter().flat_map(|s| s.to_le_bytes()).collect();
+    let mut wav = Vec::new();
+    wav.extend_from_slice(b"RIFF");
+    wav.extend_from_slice(&(36 + data.len() as u32).to_le_bytes());
+    wav.extend_from_slice(b"WAVEfmt ");
+    wav.extend_from_slice(&16u32.to_le_bytes());
+    wav.extend_from_slice(&1u16.to_le_bytes());
+    wav.extend_from_slice(&1u16.to_le_bytes());
+    wav.extend_from_slice(&8000u32.to_le_bytes());
+    wav.extend_from_slice(&16000u32.to_le_bytes());
+    wav.extend_from_slice(&2u16.to_le_bytes());
+    wav.extend_from_slice(&16u16.to_le_bytes());
+    wav.extend_from_slice(b"data");
+    wav.extend_from_slice(&(data.len() as u32).to_le_bytes());
+    wav.extend_from_slice(&data);
+    let clip = anvil_app::decode_wav(&wav).expect("our own WAV decodes");
+    assert_eq!((clip.samples.len(), clip.sample_rate), (4000, 8000));
+    wav
 }

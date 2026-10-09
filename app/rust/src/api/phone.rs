@@ -196,6 +196,88 @@ pub struct Call {
     pub held: bool,
     pub muted: bool,
     pub codec: Option<String>,
+    /// The media is encrypted (SRTP).
+    pub encrypted: bool,
+    /// How the media is doing, once measured.
+    pub quality: Option<Quality>,
+    /// When it connected, in Unix seconds.
+    pub connected_at: Option<u64>,
+}
+
+/// A connected call's media, as last measured.
+pub struct Quality {
+    pub jitter_ms: u32,
+    pub packet_loss_permille: u32,
+    pub rtt_ms: Option<u32>,
+}
+
+/// One call in the user's history.
+pub struct Recent {
+    pub id: String,
+    pub direction: Direction,
+    pub remote: String,
+    pub display_name: Option<String>,
+    pub missed: bool,
+    /// RFC 3339.
+    pub started_at: String,
+    pub duration_secs: Option<u64>,
+}
+
+/// Someone in the tenant's directory.
+pub struct Person {
+    pub key: String,
+    pub name: String,
+    pub extension: Option<String>,
+    pub department: Option<String>,
+    pub job_title: Option<String>,
+    /// `available`, `busy`, `away`, `dnd`, `offline`, … when shown.
+    pub presence: Option<String>,
+    pub on_call: bool,
+    pub favourite: bool,
+    /// What to dial.
+    pub dial: String,
+}
+
+/// One voicemail message.
+pub struct Voicemail {
+    pub id: String,
+    pub caller: String,
+    pub caller_name: Option<String>,
+    pub new: bool,
+    pub urgent: bool,
+    pub duration_secs: u64,
+    pub transcription: Option<String>,
+    /// RFC 3339.
+    pub received_at: String,
+}
+
+/// A microphone or a speaker.
+pub struct AudioDevice {
+    pub id: String,
+    pub name: String,
+    pub default: bool,
+}
+
+/// The user's calling settings, as FCP has them.
+pub struct CallingSettings {
+    pub dnd: bool,
+    pub call_waiting: bool,
+    pub forward_all: Option<String>,
+    pub forward_busy: Option<String>,
+    pub forward_no_answer: Option<String>,
+    pub forward_unreachable: Option<String>,
+    pub no_answer_secs: Option<u32>,
+}
+
+/// A change to the calling settings: each field left out is kept, and an
+/// empty forward clears it.
+pub struct CallingChange {
+    pub call_waiting: Option<bool>,
+    pub forward_all: Option<String>,
+    pub forward_busy: Option<String>,
+    pub forward_no_answer: Option<String>,
+    pub forward_unreachable: Option<String>,
+    pub no_answer_secs: Option<u32>,
 }
 
 /// The phone as a screen shows it.
@@ -209,12 +291,44 @@ pub struct PhoneState {
     pub brand_name: Option<String>,
     pub brand_primary: Option<String>,
     pub brand_logo: Option<Vec<u8>>,
+    /// Signed in to FCP: the calling settings, once read.
+    pub calling: Option<CallingSettings>,
+    /// The latest calls, newest first.
+    pub recents: Vec<Recent>,
+    pub people: Vec<Person>,
+    /// The mailbox's messages, newest first.
+    pub voicemail: Vec<Voicemail>,
+    pub inputs: Vec<AudioDevice>,
+    pub outputs: Vec<AudioDevice>,
+    /// The devices chosen; `None` is the system's default.
+    pub input: Option<String>,
+    pub output: Option<String>,
+    /// The voicemail message playing.
+    pub playing: Option<String>,
+}
+
+fn direction(d: anvil_app::Direction) -> Direction {
+    match d {
+        anvil_app::Direction::Incoming => Direction::Incoming,
+        anvil_app::Direction::Outgoing => Direction::Outgoing,
+    }
+}
+
+fn devices(list: Vec<anvil_app::AudioDevice>) -> Vec<AudioDevice> {
+    list.into_iter()
+        .map(|d| AudioDevice {
+            id: d.id,
+            name: d.name,
+            default: d.default,
+        })
+        .collect()
 }
 
 /// What changed: the screen redraws from [`phone_state`] and may say why.
 pub struct PhoneChange {
     /// `registration`, `call`, `call_ended`, `message_waiting`, `dnd`,
-    /// `transfer_progress`.
+    /// `brand`, `transfer_progress`, `calling`, `recents`, `people`,
+    /// `person`, `voicemail`, `audio`, `playing`.
     pub kind: String,
     /// The call it is about, if any.
     pub call: Option<u64>,
@@ -239,10 +353,7 @@ pub fn phone_state() -> anyhow::Result<PhoneState> {
             .into_iter()
             .map(|c| Call {
                 id: c.id,
-                direction: match c.direction {
-                    anvil_app::Direction::Incoming => Direction::Incoming,
-                    anvil_app::Direction::Outgoing => Direction::Outgoing,
-                },
+                direction: direction(c.direction),
                 remote: c.remote,
                 display_name: c.display_name,
                 state: match c.state {
@@ -253,6 +364,13 @@ pub fn phone_state() -> anyhow::Result<PhoneState> {
                 held: c.held,
                 muted: c.muted,
                 codec: c.codec,
+                encrypted: c.encrypted,
+                quality: c.quality.map(|q| Quality {
+                    jitter_ms: q.jitter_ms,
+                    packet_loss_permille: q.packet_loss_permille,
+                    rtt_ms: q.rtt_ms,
+                }),
+                connected_at: c.connected_at,
             })
             .collect(),
         voicemail_new: s.message_waiting.map(|m| m.new).unwrap_or(0),
@@ -260,6 +378,62 @@ pub fn phone_state() -> anyhow::Result<PhoneState> {
         brand_name: s.brand.as_ref().map(|b| b.app_name.clone()),
         brand_primary: s.brand.as_ref().and_then(|b| b.primary.clone()),
         brand_logo: s.brand.and_then(|b| b.logo),
+        calling: s.calling.map(|c| CallingSettings {
+            dnd: c.dnd,
+            call_waiting: c.call_waiting,
+            forward_all: c.forward_all,
+            forward_busy: c.forward_busy,
+            forward_no_answer: c.forward_no_answer,
+            forward_unreachable: c.forward_unreachable,
+            no_answer_secs: c.no_answer_secs,
+        }),
+        recents: s
+            .recents
+            .into_iter()
+            .map(|r| Recent {
+                id: r.id,
+                direction: direction(r.direction),
+                remote: r.remote,
+                display_name: r.display_name,
+                missed: r.missed,
+                started_at: r.started_at,
+                duration_secs: r.duration_secs,
+            })
+            .collect(),
+        people: s
+            .people
+            .into_iter()
+            .map(|p| Person {
+                dial: p.dial().to_string(),
+                key: p.key,
+                name: p.name,
+                extension: p.extension,
+                department: p.department,
+                job_title: p.job_title,
+                presence: p.presence,
+                on_call: p.on_call,
+                favourite: p.favourite,
+            })
+            .collect(),
+        voicemail: s
+            .voicemail
+            .into_iter()
+            .map(|m| Voicemail {
+                id: m.id,
+                caller: m.caller,
+                caller_name: m.caller_name,
+                new: m.new,
+                urgent: m.urgent,
+                duration_secs: m.duration_secs,
+                transcription: m.transcription,
+                received_at: m.received_at,
+            })
+            .collect(),
+        inputs: devices(s.audio.inputs),
+        outputs: devices(s.audio.outputs),
+        input: s.audio.input,
+        output: s.audio.output,
+        playing: s.playing,
     })
 }
 
@@ -317,6 +491,7 @@ pub fn phone_changes(sink: StreamSink<PhoneChange>) -> anyhow::Result<()> {
                 C::Person { .. } => kind_only("person"),
                 C::Voicemail { .. } => kind_only("voicemail"),
                 C::Audio { .. } => kind_only("audio"),
+                C::Playing { .. } => kind_only("playing"),
             };
             if sink.add(out).is_err() {
                 return;
@@ -383,6 +558,84 @@ pub async fn mute(call: Option<u64>, on: bool) -> anyhow::Result<()> {
 
 pub async fn send_digits(call: Option<u64>, digits: String) -> anyhow::Result<()> {
     execute(Command::Dtmf { digits, call }).await.map(|_| ())
+}
+
+/// Blind-transfer a call to a number, an extension or an address.
+pub async fn transfer(call: Option<u64>, target: String) -> anyhow::Result<()> {
+    execute(Command::Transfer { target, call })
+        .await
+        .map(|_| ())
+}
+
+/// Join `call`'s party to `to`'s (attended transfer), ending both of ours.
+pub async fn transfer_attended(call: u64, to: u64) -> anyhow::Result<()> {
+    execute(Command::TransferAttended { call, to })
+        .await
+        .map(|_| ())
+}
+
+/// Park a call with FCP's park code.
+pub async fn park(call: Option<u64>) -> anyhow::Result<()> {
+    execute(Command::Park { call }).await.map(|_| ())
+}
+
+pub async fn set_dnd(on: bool) -> anyhow::Result<()> {
+    execute(Command::Dnd { on }).await.map(|_| ())
+}
+
+/// Change the calling settings: forwards, call waiting.
+pub async fn set_calling(change: CallingChange) -> anyhow::Result<()> {
+    execute(Command::Calling {
+        update: anvil_app::CallingUpdate {
+            dnd: None,
+            call_waiting: change.call_waiting,
+            forward_all: change.forward_all,
+            forward_busy: change.forward_busy,
+            forward_no_answer: change.forward_no_answer,
+            forward_unreachable: change.forward_unreachable,
+            no_answer_secs: change.no_answer_secs,
+        },
+    })
+    .await
+    .map(|_| ())
+}
+
+pub async fn mark_heard(id: String) -> anyhow::Result<()> {
+    execute(Command::Heard { id }).await.map(|_| ())
+}
+
+pub async fn delete_voicemail(id: String) -> anyhow::Result<()> {
+    execute(Command::DeleteVoicemail { id }).await.map(|_| ())
+}
+
+/// Play a voicemail message through the speaker calls use.
+pub async fn play_voicemail(id: String) -> anyhow::Result<()> {
+    execute(Command::Play { id }).await.map(|_| ())
+}
+
+pub async fn stop_playing() -> anyhow::Result<()> {
+    execute(Command::Stop).await.map(|_| ())
+}
+
+/// Make someone (by key, extension or name) a favourite, or not.
+pub async fn favourite(who: String, on: bool) -> anyhow::Result<()> {
+    execute(Command::Favourite { who, on }).await.map(|_| ())
+}
+
+/// Use this microphone (`input`) or speaker by id, `None` for the system's
+/// default, for the calls set up from now on.
+pub async fn choose_audio(input: bool, device: Option<String>) -> anyhow::Result<()> {
+    let kind = if input {
+        anvil_app::AudioKind::Input
+    } else {
+        anvil_app::AudioKind::Output
+    };
+    execute(Command::Audio { kind, device }).await.map(|_| ())
+}
+
+/// Read the user's data from FCP again.
+pub async fn refresh() -> anyhow::Result<()> {
+    execute(Command::Refresh).await.map(|_| ())
 }
 
 #[frb(init)]
