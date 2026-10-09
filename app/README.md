@@ -4,15 +4,34 @@ Anvil's desktop and mobile app (`../docs/APP.md`): Flutter over `anvil-app`
 through `flutter_rust_bridge`. The screens are in `lib/src/screens`, the phone
 they drive is `lib/src/phone` (the real one is `anvil-app`, in `rust/`), the
 desktop around the app (tray, notifications, the window, start at login) is
-`lib/src/desktop`, the design is `lib/src/design`, and every string is in
-`lib/l10n`.
+`lib/src/desktop`, the phone around it on Android and iOS (the microphone,
+the audio session) is `lib/src/mobile` with its native side in
+`android/app/src/main/kotlin` and `ios/Runner/AppDelegate.swift`, the design
+is `lib/src/design`, and every string is in `lib/l10n`.
 
 ```bash
 flutter pub get
 flutter run -d linux            # or windows, macos
 flutter test                    # the screens against a fake phone, and the goldens
-flutter test integration_test -d linux   # the app as built, its Rust core loaded
+flutter test integration_test/app_test.dart -d linux   # the app as built, its Rust core loaded
 ```
+
+On a phone:
+
+```bash
+flutter build apk                     # Android: JDK 17, the SDK, NDK 28.2.13676358
+flutter build ios --no-codesign       # iOS: Xcode, on a Mac
+flutter test integration_test/mobile_test.dart -d <emulator or simulator>
+```
+
+The Rust core is built for each Android ABI and iOS target by cargokit
+(`rustup target add aarch64-linux-android armv7-linux-androideabi
+x86_64-linux-android i686-linux-android`, or `aarch64-apple-ios
+aarch64-apple-ios-sim x86_64-apple-ios`); libopus is built with CMake,
+which cargokit points at the NDK (`ANDROID_NDK_ROOT`). On Android,
+`MainActivity` loads the library before Dart does and hands it the JVM and
+the application context (`rust/src/android.rs`): cpal's Android audio
+reaches the system through them.
 
 After changing `rust/src/api`, regenerate the bindings:
 
@@ -34,8 +53,8 @@ flutter test test/goldens --update-goldens
 A failed comparison leaves the images and their difference in
 `test/goldens/failures` (CI keeps them as the run's artifact).
 
-The tray's icons are drawn by `tool/tray_icons.py` (no dependencies):
-`python3 tool/tray_icons.py`. On Linux the tray needs an AppIndicator host
+The tray's icons and the app's (desktop, Android, iOS) are drawn by
+`tool/icons.py` (no dependencies): `python3 tool/icons.py`. On Linux the tray needs an AppIndicator host
 and, to build, `libayatana-appindicator3-dev`.
 
 The font is Inter (SIL Open Font License, `assets/fonts/OFL.txt`), declared in

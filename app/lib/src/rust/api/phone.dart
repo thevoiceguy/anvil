@@ -41,6 +41,12 @@ Future<void> stopPhone() => RustLib.instance.api.crateApiPhoneStopPhone();
 Future<void> signOut({required String sessionPath}) =>
     RustLib.instance.api.crateApiPhoneSignOut(sessionPath: sessionPath);
 
+/// The system's microphones and speakers, before any phone starts: whether
+/// the platform's audio is reachable at all (on Android, through the JVM
+/// the app hands over at launch).
+Future<SystemAudio> systemAudio() =>
+    RustLib.instance.api.crateApiPhoneSystemAudio();
+
 /// The phone as it is now.
 PhoneState phoneState() => RustLib.instance.api.crateApiPhonePhoneState();
 
@@ -570,6 +576,25 @@ class Recent {
 
 /// Whether the account is registered.
 enum Registration { unregistered, registering, registered, failed }
+
+/// The system's microphones and speakers.
+class SystemAudio {
+  final List<AudioDevice> inputs;
+  final List<AudioDevice> outputs;
+
+  const SystemAudio({required this.inputs, required this.outputs});
+
+  @override
+  int get hashCode => inputs.hashCode ^ outputs.hashCode;
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is SystemAudio &&
+          runtimeType == other.runtimeType &&
+          inputs == other.inputs &&
+          outputs == other.outputs;
+}
 
 /// One voicemail message.
 class Voicemail {

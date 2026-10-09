@@ -5,8 +5,10 @@
 - The tray's (assets/tray): a disc in the phone's state colour with a white
   handset, as PNG (Linux, macOS) and ICO (Windows).
 - The app's: the handset on a rounded square in Anvil's accent colour, for
-  macOS (the AppIcon set), Windows (app_icon.ico) and Linux
-  (linux/packaging/anvil.png, the installers' icon)."""
+  macOS (the AppIcon set), Windows (app_icon.ico), Linux
+  (linux/packaging/anvil.png, the installers' icon) and Android (the
+  launcher's mipmaps); on a full, opaque square for iOS (the AppIcon set),
+  which rounds the corners itself and refuses an alpha channel."""
 
 import math
 import os
@@ -51,7 +53,12 @@ def tile(x, y):
     return math.hypot(dx, dy) <= radius, 1.75
 
 
-def render(size, colour, shape=disc, ss=SS):
+def square(x, y):
+    """The whole square: iOS draws its own corners."""
+    return True, 1.45
+
+
+def render(size, colour, shape=disc, ss=SS, opaque=False):
     rows = []
     for py in range(size):
         row = bytearray([0])  # PNG filter: none
@@ -71,17 +78,18 @@ def render(size, colour, shape=disc, ss=SS):
             alpha = disc / n
             w = white / disc if disc else 0
             rgb = [round(c * (1 - w) + 255 * w) for c in colour]
-            row += bytes(rgb + [round(alpha * 255)])
+            row += bytes(rgb if opaque else rgb + [round(alpha * 255)])
         rows.append(bytes(row))
-    return png(size, b"".join(rows))
+    return png(size, b"".join(rows), opaque)
 
 
-def png(size, raw):
+def png(size, raw, opaque=False):
     def chunk(kind, data):
         body = kind + data
         return struct.pack(">I", len(data)) + body + struct.pack(">I", zlib.crc32(body))
 
-    header = struct.pack(">IIBBBBB", size, size, 8, 6, 0, 0, 0)
+    # Colour type 2 is RGB, 6 is RGBA.
+    header = struct.pack(">IIBBBBB", size, size, 8, 2 if opaque else 6, 0, 0, 0)
     return (
         b"\x89PNG\r\n\x1a\n"
         + chunk(b"IHDR", header)
@@ -128,6 +136,20 @@ def main():
     os.makedirs(linux, exist_ok=True)
     with open(os.path.join(linux, "anvil.png"), "wb") as f:
         f.write(icons[512])
+
+    res = os.path.join(app, "android", "app", "src", "main", "res")
+    for density, size in (("mdpi", 48), ("hdpi", 72), ("xhdpi", 96), ("xxhdpi", 144), ("xxxhdpi", 192)):
+        with open(os.path.join(res, f"mipmap-{density}", "ic_launcher.png"), "wb") as f:
+            f.write(app_icon(size))
+
+    ios = os.path.join(app, "ios", "Runner", "Assets.xcassets", "AppIcon.appiconset")
+    for name in sorted(os.listdir(ios)):
+        if name.startswith("Icon-App-") and name.endswith(".png"):
+            # Icon-App-83.5x83.5@2x.png: 83.5 points at 2x is 167 pixels.
+            points, scale = name[len("Icon-App-"):-len(".png")].split("@")
+            size = round(float(points.split("x")[0]) * int(scale[:-1]))
+            with open(os.path.join(ios, name), "wb") as f:
+                f.write(render(size, ACCENT, square, ss=4 if size <= 256 else 2, opaque=True))
 
 
 if __name__ == "__main__":

@@ -5,6 +5,7 @@ import 'dart:async';
 
 import 'package:flutter/foundation.dart';
 
+import '../mobile/platform.dart';
 import 'phone_api.dart';
 
 /// Something to tell the user, and what kind of thing it is, so a screen can
@@ -12,15 +13,19 @@ import 'phone_api.dart';
 class Notice {
   const Notice(this.kind, this.text);
 
-  /// `call_ended`, `transfer` or `refused`.
+  /// `call_ended`, `transfer`, `microphone` or `refused`.
   final String kind;
   final String text;
 }
 
 class PhoneModel extends ChangeNotifier {
-  PhoneModel(this.api);
+  PhoneModel(this.api, {this.mobile});
 
   final PhoneApi api;
+
+  /// The phone around the app on Android and iOS, asked for the
+  /// microphone before the phone starts.
+  final MobilePlatform? mobile;
   SignedInAccount? account;
   PhoneSnapshot snapshot = PhoneSnapshot.empty;
   bool busy = false;
@@ -84,6 +89,14 @@ class PhoneModel extends ChangeNotifier {
   }
 
   Future<void> _start() async {
+    // Without the microphone the phone still rings; the user is told why
+    // nobody hears them.
+    if (mobile != null) {
+      if (!await mobile!.requestMicrophone()) {
+        notice = const Notice('microphone', '');
+      }
+      await mobile!.startAudio();
+    }
     await api.start();
     snapshot = api.snapshot();
     _stopEvents();
@@ -152,8 +165,18 @@ class PhoneModel extends ChangeNotifier {
     return m?.group(1) ?? s;
   }
 
+  bool _disposed = false;
+
+  /// A boot, a sign-in or a command may finish after the app is gone (its
+  /// window closed, a test over); what it would have told nobody is dropped.
+  @override
+  void notifyListeners() {
+    if (!_disposed) super.notifyListeners();
+  }
+
   @override
   void dispose() {
+    _disposed = true;
     _stopEvents();
     super.dispose();
   }

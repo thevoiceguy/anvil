@@ -70,7 +70,7 @@ class RustLib extends BaseEntrypoint<RustLibApi, RustLibApiImpl, RustLibWire> {
   String get codegenVersion => '2.13.0';
 
   @override
-  int get rustContentHash => -1122596409;
+  int get rustContentHash => -1767719772;
 
   static const kDefaultExternalLibraryLoaderConfig =
       ExternalLibraryLoaderConfig(
@@ -145,6 +145,8 @@ abstract class RustLibApi extends BaseApi {
   Future<void> crateApiPhoneStopPhone();
 
   Future<void> crateApiPhoneStopPlaying();
+
+  Future<SystemAudio> crateApiPhoneSystemAudio();
 
   Future<void> crateApiPhoneTransfer({BigInt? call, required String target});
 
@@ -986,6 +988,33 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       const TaskConstMeta(debugName: "stop_playing", argNames: []);
 
   @override
+  Future<SystemAudio> crateApiPhoneSystemAudio() {
+    return handler.executeNormal(
+      NormalTask(
+        callFfi: (port_) {
+          final serializer = SseSerializer(generalizedFrbRustBinding);
+          pdeCallFfi(
+            generalizedFrbRustBinding,
+            serializer,
+            funcId: 30,
+            port: port_,
+          );
+        },
+        codec: SseCodec(
+          decodeSuccessData: sse_decode_system_audio,
+          decodeErrorData: sse_decode_AnyhowException,
+        ),
+        constMeta: kCrateApiPhoneSystemAudioConstMeta,
+        argValues: [],
+        apiImpl: this,
+      ),
+    );
+  }
+
+  TaskConstMeta get kCrateApiPhoneSystemAudioConstMeta =>
+      const TaskConstMeta(debugName: "system_audio", argNames: []);
+
+  @override
   Future<void> crateApiPhoneTransfer({BigInt? call, required String target}) {
     return handler.executeNormal(
       NormalTask(
@@ -996,7 +1025,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 30,
+            funcId: 31,
             port: port_,
           );
         },
@@ -1028,7 +1057,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 31,
+            funcId: 32,
             port: port_,
           );
         },
@@ -1403,6 +1432,18 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   Registration dco_decode_registration(dynamic raw) {
     // Codec=Dco (DartCObject based), see doc to use other codecs
     return Registration.values[raw as int];
+  }
+
+  @protected
+  SystemAudio dco_decode_system_audio(dynamic raw) {
+    // Codec=Dco (DartCObject based), see doc to use other codecs
+    final arr = raw as List<dynamic>;
+    if (arr.length != 2)
+      throw Exception('unexpected arr length: expect 2 but see ${arr.length}');
+    return SystemAudio(
+      inputs: dco_decode_list_audio_device(arr[0]),
+      outputs: dco_decode_list_audio_device(arr[1]),
+    );
   }
 
   @protected
@@ -1935,6 +1976,14 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   }
 
   @protected
+  SystemAudio sse_decode_system_audio(SseDeserializer deserializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    var var_inputs = sse_decode_list_audio_device(deserializer);
+    var var_outputs = sse_decode_list_audio_device(deserializer);
+    return SystemAudio(inputs: var_inputs, outputs: var_outputs);
+  }
+
+  @protected
   int sse_decode_u_32(SseDeserializer deserializer) {
     // Codec=Sse (Serialization based), see doc to use other codecs
     return deserializer.buffer.getUint32();
@@ -2401,6 +2450,13 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   void sse_encode_registration(Registration self, SseSerializer serializer) {
     // Codec=Sse (Serialization based), see doc to use other codecs
     sse_encode_i_32(self.index, serializer);
+  }
+
+  @protected
+  void sse_encode_system_audio(SystemAudio self, SseSerializer serializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    sse_encode_list_audio_device(self.inputs, serializer);
+    sse_encode_list_audio_device(self.outputs, serializer);
   }
 
   @protected

@@ -85,14 +85,13 @@ pub async fn sign_in(
             .map(|s| s.client.install_id)
             .unwrap_or_else(anvil_fcp::AppClient::new_install_id);
         let server = anvil_fcp::discover(&place).await?;
-        let session = anvil_fcp::password_sign_in(
-            server,
-            anvil_fcp::AppClient::this_machine(install),
-            &username,
-            &password,
-            totp.as_deref(),
-        )
-        .await?;
+        let mut client = anvil_fcp::AppClient::this_machine(install);
+        if let Some(model) = crate::device::phone_model() {
+            client.client_name = format!("Anvil on {model}");
+        }
+        let session =
+            anvil_fcp::password_sign_in(server, client, &username, &password, totp.as_deref())
+                .await?;
         store.save(&session)?;
         Ok(Account {
             username: session.username,
@@ -132,12 +131,17 @@ pub async fn start_phone(session_path: String) -> anyhow::Result<()> {
             settings_path: Some(settings_path),
         })
         .await?;
-        let served = phone.clone();
-        tokio::spawn(async move {
-            if let Err(e) = control::serve(served, control::Endpoint::default_for_user()).await {
-                tracing::warn!(%e, "the control socket is not served");
-            }
-        });
+        // The control socket is the desktop's (`anvil call 1002` from a
+        // terminal); a phone has no terminal to drive it from.
+        if !cfg!(any(target_os = "android", target_os = "ios")) {
+            let served = phone.clone();
+            tokio::spawn(async move {
+                if let Err(e) = control::serve(served, control::Endpoint::default_for_user()).await
+                {
+                    tracing::warn!(%e, "the control socket is not served");
+                }
+            });
+        }
         Ok(phone)
     })
     .await?;
@@ -264,6 +268,34 @@ pub struct AudioDevice {
     pub id: String,
     pub name: String,
     pub default: bool,
+}
+
+/// The system's microphones and speakers.
+pub struct SystemAudio {
+    pub inputs: Vec<AudioDevice>,
+    pub outputs: Vec<AudioDevice>,
+}
+
+/// The system's microphones and speakers, before any phone starts: whether
+/// the platform's audio is reachable at all (on Android, through the JVM
+/// the app hands over at launch).
+pub fn system_audio() -> anyhow::Result<SystemAudio> {
+    use anvil_core::audio::AudioHost;
+    let host = anvil_audio::CpalHost::new().map_err(|e| anyhow::anyhow!("no audio: {e}"))?;
+    let (inputs, outputs): (Vec<_>, Vec<_>) = host.devices().into_iter().partition(|d| d.is_input);
+    let list = |l: Vec<anvil_core::audio::DeviceInfo>| {
+        l.into_iter()
+            .map(|d| AudioDevice {
+                id: d.id,
+                name: d.name,
+                default: d.is_default,
+            })
+            .collect()
+    };
+    Ok(SystemAudio {
+        inputs: list(inputs),
+        outputs: list(outputs),
+    })
 }
 
 /// The user's calling settings, as FCP has them.

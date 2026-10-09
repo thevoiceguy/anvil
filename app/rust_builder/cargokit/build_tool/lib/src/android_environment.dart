@@ -163,6 +163,9 @@ class AndroidEnvironment {
       '_CARGOKIT_NDK_LINK_TARGET': targetArg,
       '_CARGOKIT_NDK_LINK_CLANG': ccValue,
       'CARGOKIT_TOOL_TEMP_DIR': toolTempDir,
+      // Anvil: crates that build C with CMake (libopus) use CMake's own
+      // Android support, which finds the NDK here.
+      'ANDROID_NDK_ROOT': ndkPath,
     };
   }
 

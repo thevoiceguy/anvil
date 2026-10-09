@@ -322,9 +322,29 @@ Three PRs:
   notarization, once the certificates exist (§8 Q6).
 
 ### U4: the app on mobile
-- iOS and Android builds; CallKit and ConnectionService for the call screen;
-  the audio session, Bluetooth and the proximity sensor.
-- Works while the app is open.
+Works while the app is open; ringing a closed app is U5.
+
+- **U4a, the app builds and runs on a phone.**
+  - Android and iOS projects in `app/android` and `app/ios`, the same
+    application id as the desktop (`com.thevoiceguy.anvil`).
+  - The Rust core cross-built by cargokit for every Android ABI and the
+    iOS device and simulators; libopus by CMake against the NDK.
+  - Android: `MainActivity` loads the library and hands it the JVM and the
+    application context, which cpal's Android audio needs and a Flutter
+    app does not otherwise set up.
+  - The microphone asked for before the phone starts (refused, the phone
+    still rings and the user is told why); on iOS the audio session set
+    to play and record, voice chat.
+  - The desktop's pieces stay off a phone: no tray or window, no control
+    socket, no self-update (a store updates the app).
+  - The install names itself by the phone's model in the user's devices
+    ("Anvil on Google Pixel 8").
+  - CI builds the APK (debug-signed) and the iOS app (unsigned), and runs
+    the mobile integration test in an Android emulator and an iOS
+    simulator.
+- **U4b, a phone's call.** CallKit and ConnectionService for the call
+  screen, the audio routed per call (earpiece, speaker, Bluetooth), the
+  proximity sensor.
 
 ### U5: ringing a sleeping phone (with FCP)
 - FCP's push project: RFC 8599 push parameters in REGISTER, APNs and FCM
