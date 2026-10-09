@@ -4,6 +4,7 @@
 // ignore_for_file: unused_import, unused_element, unnecessary_import, duplicate_ignore, invalid_use_of_internal_member, annotate_overrides, non_constant_identifier_names, curly_braces_in_flow_control_structures, prefer_const_literals_to_create_immutables, unused_field
 
 import 'api/phone.dart';
+import 'api/update.dart';
 
 import 'dart:async';
 import 'dart:convert';
@@ -63,6 +64,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   BigInt dco_decode_box_autoadd_u_64(dynamic raw);
 
   @protected
+  UpdateInfo dco_decode_box_autoadd_update_info(dynamic raw);
+
+  @protected
   Call dco_decode_call(dynamic raw);
 
   @protected
@@ -120,6 +124,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   BigInt? dco_decode_opt_box_autoadd_u_64(dynamic raw);
 
   @protected
+  UpdateInfo? dco_decode_opt_box_autoadd_update_info(dynamic raw);
+
+  @protected
   Uint8List? dco_decode_opt_list_prim_u_8_strict(dynamic raw);
 
   @protected
@@ -151,6 +158,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   void dco_decode_unit(dynamic raw);
+
+  @protected
+  UpdateInfo dco_decode_update_info(dynamic raw);
 
   @protected
   Voicemail dco_decode_voicemail(dynamic raw);
@@ -199,6 +209,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   BigInt sse_decode_box_autoadd_u_64(SseDeserializer deserializer);
+
+  @protected
+  UpdateInfo sse_decode_box_autoadd_update_info(SseDeserializer deserializer);
 
   @protected
   Call sse_decode_call(SseDeserializer deserializer);
@@ -260,6 +273,11 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   BigInt? sse_decode_opt_box_autoadd_u_64(SseDeserializer deserializer);
 
   @protected
+  UpdateInfo? sse_decode_opt_box_autoadd_update_info(
+    SseDeserializer deserializer,
+  );
+
+  @protected
   Uint8List? sse_decode_opt_list_prim_u_8_strict(SseDeserializer deserializer);
 
   @protected
@@ -291,6 +309,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   void sse_decode_unit(SseDeserializer deserializer);
+
+  @protected
+  UpdateInfo sse_decode_update_info(SseDeserializer deserializer);
 
   @protected
   Voicemail sse_decode_voicemail(SseDeserializer deserializer);
@@ -345,6 +366,12 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   void sse_encode_box_autoadd_u_64(BigInt self, SseSerializer serializer);
+
+  @protected
+  void sse_encode_box_autoadd_update_info(
+    UpdateInfo self,
+    SseSerializer serializer,
+  );
 
   @protected
   void sse_encode_call(Call self, SseSerializer serializer);
@@ -425,6 +452,12 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   void sse_encode_opt_box_autoadd_u_64(BigInt? self, SseSerializer serializer);
 
   @protected
+  void sse_encode_opt_box_autoadd_update_info(
+    UpdateInfo? self,
+    SseSerializer serializer,
+  );
+
+  @protected
   void sse_encode_opt_list_prim_u_8_strict(
     Uint8List? self,
     SseSerializer serializer,
@@ -459,6 +492,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   void sse_encode_unit(void self, SseSerializer serializer);
+
+  @protected
+  void sse_encode_update_info(UpdateInfo self, SseSerializer serializer);
 
   @protected
   void sse_encode_voicemail(Voicemail self, SseSerializer serializer);

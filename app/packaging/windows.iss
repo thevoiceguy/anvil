@@ -48,3 +48,12 @@ Root: HKCU; Subkey: "Software\Microsoft\Windows\CurrentVersion\Run"; ValueName: 
 
 [Run]
 Filename: "{app}\anvil.exe"; Description: "{cm:LaunchProgram,Anvil}"; Flags: nowait postinstall skipifsilent
+; The app updating itself runs this setup silently with /relaunch=1
+; (crates/anvil-update): it starts again once installed.
+Filename: "{app}\anvil.exe"; Flags: nowait; Check: Relaunch
+
+[Code]
+function Relaunch: Boolean;
+begin
+  Result := WizardSilent and (ExpandConstant('{param:relaunch|0}') = '1');
+end;

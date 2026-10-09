@@ -4,7 +4,8 @@ name: Release
 # release: anvil-cli for Windows (a zip), and the app's installers — a
 # Windows setup, a macOS disk image, a Linux AppImage and .deb — each
 # installed, started and removed again before it is published, with
-# SHA256SUMS over the lot. Nothing is code-signed yet (docs/APP.md §5).
+# SHA256SUMS over the lot, and latest.json with its Ed25519 signature for
+# the app's updater. Nothing is code-signed yet (docs/APP.md §5).
 #
 # A pull request that changes this file or the packaging builds and checks
 # everything the same way without publishing it (the files are the run's
@@ -269,11 +270,39 @@ jobs:
     needs: [version, cli-windows, app-linux, app-windows, app-macos]
     runs-on: ubuntu-latest
     steps:
+      - uses: actions/checkout@v5
       - uses: actions/download-artifact@v4
         with:
           pattern: release-*
           merge-multiple: true
           path: dist
+      # latest.json, which the app updates from (crates/anvil-update), signed
+      # with the ANVIL_UPDATE_KEY secret on a tag and checked against the
+      # public key the app has built in. Elsewhere a throwaway key proves the
+      # same steps.
+      - name: The update manifest, signed
+        env:
+          UPDATE_KEY: ${{ secrets.ANVIL_UPDATE_KEY }}
+        run: |
+          app/packaging/manifest.py ${{ needs.version.outputs.version }} \
+            "${{ needs.version.outputs.label }}" "$GITHUB_REPOSITORY" dist
+          key=$(mktemp)
+          if [[ "$GITHUB_REF" == refs/tags/v* ]]; then
+            if [ -z "$UPDATE_KEY" ]; then
+              echo "::error::the ANVIL_UPDATE_KEY secret is not set"
+              exit 1
+            fi
+            printf '%s\n' "$UPDATE_KEY" > "$key"
+            public=app/packaging/update-key.pub.pem
+          else
+            openssl genpkey -algorithm ed25519 -out "$key"
+            public=$(mktemp)
+            openssl pkey -in "$key" -pubout -out "$public"
+          fi
+          openssl pkeyutl -sign -inkey "$key" -rawin -in dist/latest.json -out dist/latest.json.sig
+          rm -f "$key"
+          openssl pkeyutl -verify -pubin -inkey "$public" -rawin \
+            -in dist/latest.json -sigfile dist/latest.json.sig
       - name: SHA256SUMS
         working-directory: dist
         run: |

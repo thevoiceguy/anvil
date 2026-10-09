@@ -1,0 +1,24 @@
+[package]
+name = "anvil-update"
+description = "The app updating itself: a release's manifest, signed with Ed25519 and checked against the key built in, the file downloaded and checked, and installed the way this copy was."
+version.workspace      = true
+edition.workspace      = true
+rust-version.workspace = true
+license.workspace      = true
+authors.workspace      = true
+repository.workspace   = true
+homepage.workspace     = true
+
+[dependencies]
+ring       = "0.17"
+semver     = "1"
+serde      = { workspace = true }
+serde_json = { workspace = true }
+thiserror  = { workspace = true }
+tracing    = { workspace = true }
+tokio      = { workspace = true }
+reqwest    = { version = "0.12", default-features = false, features = ["rustls-tls", "stream"] }
+futures    = { workspace = true }
+
+[dev-dependencies]
+tokio = { workspace = true }

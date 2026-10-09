@@ -180,5 +180,38 @@
   "trayQuit": "Quit",
   "settingsDesktop": "This computer",
   "startAtLogin": "Start at login",
-  "startAtLoginSubtitle": "Ready for calls when you sign in to the computer"
+  "startAtLoginSubtitle": "Ready for calls when you sign in to the computer",
+  "updateAvailable": "Anvil {version} is available",
+  "@updateAvailable": {
+    "placeholders": {
+      "version": {
+        "type": "String"
+      }
+    }
+  },
+  "updateNow": "Update and restart",
+  "updateGetIt": "Download",
+  "updateLater": "Later",
+  "updateAfterCall": "After the call",
+  "updateDownloading": "Downloading the update…",
+  "updateChecking": "Checking for updates…",
+  "updateNone": "Anvil is up to date",
+  "updateFailed": "Could not update: {reason}",
+  "@updateFailed": {
+    "placeholders": {
+      "reason": {
+        "type": "String"
+      }
+    }
+  },
+  "settingsUpdates": "Updates",
+  "versionLabel": "Anvil {version}",
+  "@versionLabel": {
+    "placeholders": {
+      "version": {
+        "type": "String"
+      }
+    }
+  },
+  "checkForUpdates": "Check for updates"
 }

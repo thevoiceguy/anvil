@@ -27,6 +27,14 @@ fn runtime() -> &'static tokio::runtime::Runtime {
     })
 }
 
+/// [`on_runtime`] for the other API modules.
+#[frb(ignore)]
+pub(crate) async fn on_runtime_pub<T: Send + 'static>(
+    fut: impl std::future::Future<Output = anyhow::Result<T>> + Send + 'static,
+) -> anyhow::Result<T> {
+    on_runtime(fut).await
+}
+
 /// Run `fut` on the phone's runtime and wait for it.
 async fn on_runtime<T: Send + 'static>(
     fut: impl std::future::Future<Output = anyhow::Result<T>> + Send + 'static,

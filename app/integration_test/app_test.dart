@@ -8,6 +8,7 @@ import 'package:anvil/src/desktop/native_shell.dart';
 import 'package:anvil/src/desktop/shell.dart';
 import 'package:anvil/src/phone/rust_phone.dart';
 import 'package:anvil/src/rust/frb_generated.dart';
+import 'package:anvil/src/update/rust_updates.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:integration_test/integration_test.dart';
@@ -22,6 +23,8 @@ void main() {
     await tester.pumpWidget(AnvilApp(phone: RustPhone()));
     await tester.pumpAndSettle();
     expect(find.byKey(const Key('signIn')), findsOneWidget);
+    // The updater knows this copy's version (the workspace's).
+    expect(RustUpdates().version(), matches(RegExp(r'^\d+\.\d+\.\d+$')));
   });
 
   testWidgets('the desktop shell starts and takes the tray and a notice', (

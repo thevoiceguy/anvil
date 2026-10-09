@@ -8,6 +8,7 @@ members = [
     "crates/anvil-ffi",
     "crates/anvil-fcp",
     "crates/anvil-app",
+    "crates/anvil-update",
     "app/rust",
     "bins/anvil-cli",
 ]
@@ -75,6 +76,7 @@ anvil-brand = { path = "crates/anvil-brand" }
 anvil-codec = { path = "crates/anvil-codec" }
 anvil-fcp   = { path = "crates/anvil-fcp"   }
 anvil-app   = { path = "crates/anvil-app"   }
+anvil-update = { path = "crates/anvil-update" }
 
 [profile.release]
 lto = "thin"

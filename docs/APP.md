@@ -287,9 +287,37 @@ Three PRs:
     builds and checks the same without publishing.
   - The app is called Anvil (not Flutter's `anvil` and `com.thevoiceguy`)
     and has its own icon (`tool/icons.py`), on every platform.
-- **U3b, the app updates itself**: a manifest per release, signed, read by
-  the app, the update downloaded, checked and installed (needs a signing
-  key held as a repository secret).
+- **U3b, the app updates itself.**
+  - Each release carries `latest.json` (the version, the release's page,
+    each installer by target with its URL, size and SHA-256;
+    `app/packaging/manifest.py`) and `latest.json.sig`, an Ed25519
+    signature over it made in the release workflow with the
+    `ANVIL_UPDATE_KEY` secret and checked there against
+    `app/packaging/update-key.pub.pem` before anything is published.
+  - `crates/anvil-update` reads both from the latest release, accepts the
+    manifest only under the public key built in (`UPDATE_KEY`; a test holds
+    it to the committed PEM), downloads this copy's file and checks its size
+    and SHA-256 (a file that is not the release's is deleted), and installs
+    it the way this copy was installed:
+    - the Windows setup: the new setup runs silently (`/relaunch=1`
+      starts the app again when done);
+    - an AppImage: the new file takes the old one's place, started once the
+      app has gone;
+    - a macOS bundle in a folder the user may write: swapped once the app has
+      quit, then opened. The app is sandboxed, which allows no such write,
+      so today a Mac copy is told of the release and given the disk image —
+      self-updating needs the sandbox dropped for the direct download
+      (App Store builds would keep it and update through the store): the
+      owner's decision;
+    - the .deb, or a build run from its folder: told of the release and
+      given the file.
+  - The app checks half a minute after it starts and twice a day. A banner
+    offers "Update and restart" (not during a call; the phone unregisters
+    first) or "Download" for a copy that cannot update itself, and Later.
+    Settings show the version, check by hand and say how it went.
+  - The key's private half is the repository secret and one offline copy
+    kept by the owner. Lost, existing installs cannot take updates until
+    they are reinstalled by hand with a build carrying a new key.
 - **U3c, signing**: Windows Authenticode, macOS Developer ID and
   notarization, once the certificates exist (§8 Q6).
 
