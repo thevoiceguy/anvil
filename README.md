@@ -82,7 +82,23 @@ cargo run -p anvil-cli -- settings --dnd true
 cargo run -p anvil-cli -- events
 ```
 
-## Windows
+## Installing the app
+
+Each release on the GitHub release page has the app for every desktop:
+
+| | File | |
+|---|---|---|
+| Windows | `Anvil-vX.Y.Z-windows-x86_64-setup.exe` | installs for you alone, no administrator needed |
+| macOS | `Anvil-vX.Y.Z-macos.dmg` | drag Anvil to Applications; Apple Silicon and Intel |
+| Debian, Ubuntu | `anvil_vX.Y.Z_amd64.deb` | `sudo apt install ./anvil_vX.Y.Z_amd64.deb` |
+| Any Linux | `Anvil-vX.Y.Z-x86_64.AppImage` | `chmod +x` it and run it in place |
+
+Check a download against `SHA256SUMS`. Nothing is code-signed yet: Windows
+SmartScreen asks before the first run, and on macOS the first start is a
+right-click → Open. On Linux the tray needs an AppIndicator host (GNOME
+needs the AppIndicator extension).
+
+## anvil-cli on Windows
 
 Each release has `anvil-cli` for Windows (x86_64) on its GitHub release page:
 unzip it and run

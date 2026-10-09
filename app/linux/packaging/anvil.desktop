@@ -1,0 +1,11 @@
+[Desktop Entry]
+Type=Application
+Name=Anvil
+GenericName=Softphone
+Comment=Calls, voicemail and your colleagues, from your FCP account
+Exec=anvil
+Icon=com.thevoiceguy.anvil
+Terminal=false
+Categories=Network;Telephony;
+Keywords=phone;call;voip;sip;
+StartupWMClass=com.thevoiceguy.anvil

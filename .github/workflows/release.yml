@@ -1,27 +1,60 @@
 name: Release
 
-# A tag vX.Y.Z (the workspace's version) builds anvil-cli for Windows and
-# publishes it as a GitHub release: a zip with anvil-cli.exe, the README and
-# the licences, and its SHA-256. A pull request that changes this file
-# builds and packages the same zip without publishing it, as a run's
-# artifact, so the pipeline is proved before a tag needs it.
+# A tag vX.Y.Z (the workspace's version) builds and publishes a GitHub
+# release: anvil-cli for Windows (a zip), and the app's installers — a
+# Windows setup, a macOS disk image, a Linux AppImage and .deb — each
+# installed, started and removed again before it is published, with
+# SHA256SUMS over the lot. Nothing is code-signed yet (docs/APP.md §5).
+#
+# A pull request that changes this file or the packaging builds and checks
+# everything the same way without publishing it (the files are the run's
+# artifacts), so the pipeline is proved before a tag needs it.
 
 on:
   push:
     tags: ["v*"]
   pull_request:
-    paths: [".github/workflows/release.yml"]
+    paths:
+      - ".github/workflows/release.yml"
+      - "app/packaging/**"
+      - "app/linux/packaging/**"
   workflow_dispatch:
 
 env:
   CARGO_TERM_COLOR: always
+  FLUTTER_VERSION: "3.47.6"
 
 permissions:
   contents: write
 
 jobs:
-  windows:
+  version:
+    name: The version
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.v.outputs.version }}
+      label: ${{ steps.v.outputs.label }}
+    steps:
+      - uses: actions/checkout@v5
+      - id: v
+        run: |
+          version=$(cargo metadata --no-deps --format-version 1 \
+            | python3 -c "import json,sys; print(next(p['version'] for p in json.load(sys.stdin)['packages'] if p['name']=='anvil-cli'))")
+          if [[ "$GITHUB_REF" == refs/tags/v* ]]; then
+            if [ "v$version" != "$GITHUB_REF_NAME" ]; then
+              echo "::error::tag $GITHUB_REF_NAME is not the workspace's version v$version"
+              exit 1
+            fi
+            label=$GITHUB_REF_NAME
+          else
+            label=dev
+          fi
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "label=$label" >> "$GITHUB_OUTPUT"
+
+  cli-windows:
     name: anvil-cli for Windows
+    needs: version
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v5
@@ -29,17 +62,6 @@ jobs:
         with:
           targets: x86_64-pc-windows-msvc
       - uses: Swatinem/rust-cache@v2
-
-      - name: The tag is the workspace's version
-        if: startsWith(github.ref, 'refs/tags/v')
-        shell: bash
-        run: |
-          version=$(cargo metadata --no-deps --format-version 1 \
-            | python -c "import json,sys; print(next(p['version'] for p in json.load(sys.stdin)['packages'] if p['name']=='anvil-cli'))")
-          if [ "v$version" != "${GITHUB_REF_NAME}" ]; then
-            echo "::error::tag ${GITHUB_REF_NAME} is not the workspace's version v$version"
-            exit 1
-          fi
 
       # The C runtime linked in, so the exe runs without the Visual C++
       # redistributable installed.
@@ -49,35 +71,231 @@ jobs:
         run: cargo build --release --locked -p anvil-cli --target x86_64-pc-windows-msvc
 
       - name: Package
-        id: package
         shell: pwsh
         run: |
-          $name = if ($env:GITHUB_REF -like 'refs/tags/v*') { "anvil-cli-$env:GITHUB_REF_NAME-windows-x86_64" } else { "anvil-cli-dev-windows-x86_64" }
+          $name = "anvil-cli-${{ needs.version.outputs.label }}-windows-x86_64"
           New-Item -ItemType Directory -Path $name | Out-Null
           Copy-Item target/x86_64-pc-windows-msvc/release/anvil-cli.exe $name/
           Copy-Item README.md $name/
           Get-ChildItem -Filter 'LICENSE*' | Copy-Item -Destination $name/
-          Compress-Archive -Path $name -DestinationPath "$name.zip"
-          $hash = (Get-FileHash "$name.zip" -Algorithm SHA256).Hash.ToLower()
-          "$hash  $name.zip" | Out-File -Encoding ascii "$name.zip.sha256"
-          "name=$name" | Out-File -Append -Encoding utf8 $env:GITHUB_OUTPUT
+          New-Item -ItemType Directory -Path dist | Out-Null
+          Compress-Archive -Path $name -DestinationPath "dist/$name.zip"
           # It runs: the exe answers --help.
           & "$name/anvil-cli.exe" --help | Select-Object -First 3
 
       - uses: actions/upload-artifact@v4
         with:
-          name: ${{ steps.package.outputs.name }}
-          path: |
-            ${{ steps.package.outputs.name }}.zip
-            ${{ steps.package.outputs.name }}.zip.sha256
+          name: release-cli-windows
+          path: dist/
 
-      - name: Publish the release
+  app-linux:
+    name: The app for Linux
+    needs: version
+    runs-on: ubuntu-latest
+    env:
+      APPIMAGETOOL: ${{ github.workspace }}/appimagetool
+      APPIMAGE_RUNTIME: ${{ github.workspace }}/runtime-x86_64
+      # appimagetool is itself an AppImage; runners have no FUSE.
+      APPIMAGE_EXTRACT_AND_RUN: "1"
+    steps:
+      - uses: actions/checkout@v5
+      - uses: subosito/flutter-action@v2
+        with:
+          flutter-version: ${{ env.FLUTTER_VERSION }}
+          channel: stable
+          cache: true
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: ". -> app/build"
+      - name: Build tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y clang cmake ninja-build pkg-config libgtk-3-dev liblzma-dev \
+            libasound2-dev libayatana-appindicator3-dev xvfb
+      # Pinned by digest: appimagetool 1.9.1 and the type2 runtime 20251108.
+      - name: appimagetool
+        run: |
+          curl -fsSL -o appimagetool https://github.com/AppImage/appimagetool/releases/download/1.9.1/appimagetool-x86_64.AppImage
+          curl -fsSL -o runtime-x86_64 https://github.com/AppImage/type2-runtime/releases/download/20251108/runtime-x86_64
+          sha256sum -c <<SUMS
+          ed4ce84f0d9caff66f50bcca6ff6f35aae54ce8135408b3fa33abfc3cb384eb0  appimagetool
+          2fca8b443c92510f1483a883f60061ad09b46b978b2631c807cd873a47ec260d  runtime-x86_64
+          SUMS
+          chmod +x appimagetool
+      - name: Build
+        working-directory: app
+        run: |
+          flutter pub get
+          flutter build linux --release \
+            --build-name ${{ needs.version.outputs.version }} --build-number ${{ github.run_number }}
+      - name: Package
+        run: app/packaging/linux.sh ${{ needs.version.outputs.version }} ${{ needs.version.outputs.label }} app/build/linux/x64/release/bundle dist
+      # Installed as a user would, then started: it must still be running
+      # ten seconds later (timeout's 124), then removed.
+      - name: The .deb installs, starts and goes
+        run: |
+          sudo apt-get install -y ./dist/anvil_*_amd64.deb
+          test -x /opt/anvil/anvil && command -v anvil
+          ! ldd /opt/anvil/anvil /opt/anvil/lib/*.so | grep "not found"
+          set +e; xvfb-run -a timeout 10 anvil; code=$?; set -e
+          [ "$code" = 124 ] || { echo "::error::anvil exited with $code"; exit 1; }
+          sudo apt-get remove -y anvil
+          test ! -e /opt/anvil/anvil
+      - name: The AppImage starts
+        run: |
+          chmod +x dist/Anvil-*.AppImage
+          set +e; xvfb-run -a timeout 10 dist/Anvil-*.AppImage; code=$?; set -e
+          [ "$code" = 124 ] || { echo "::error::the AppImage exited with $code"; exit 1; }
+      - uses: actions/upload-artifact@v4
+        with:
+          name: release-app-linux
+          path: dist/
+
+  app-windows:
+    name: The app for Windows
+    needs: version
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: subosito/flutter-action@v2
+        with:
+          flutter-version: ${{ env.FLUTTER_VERSION }}
+          channel: stable
+          cache: true
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: ". -> app/build"
+      - name: Build
+        working-directory: app
+        run: |
+          flutter pub get
+          flutter build windows --release --build-name ${{ needs.version.outputs.version }} --build-number ${{ github.run_number }}
+      # Flutter's Windows apps need the Visual C++ runtime; it goes beside
+      # the exe (app-local), so nobody has to install the redistributable.
+      - name: The C++ runtime beside the app
+        shell: pwsh
+        run: |
+          foreach ($dll in 'msvcp140.dll', 'vcruntime140.dll', 'vcruntime140_1.dll') {
+            Copy-Item "$env:SystemRoot\System32\$dll" app/build/windows/x64/runner/Release/
+          }
+      - name: Inno Setup
+        shell: pwsh
+        run: |
+          if (-not (Get-Command iscc -ErrorAction SilentlyContinue)) {
+            $iscc = "${env:ProgramFiles(x86)}\Inno Setup 6"
+            if (-not (Test-Path "$iscc\ISCC.exe")) { choco install innosetup -y --no-progress }
+            "${env:ProgramFiles(x86)}\Inno Setup 6" | Out-File -Append -Encoding utf8 $env:GITHUB_PATH
+          }
+      - name: Package
+        working-directory: app/packaging
+        shell: pwsh
+        run: |
+          iscc /Q "/DVersion=${{ needs.version.outputs.version }}" "/DLabel=${{ needs.version.outputs.label }}" `
+            "/DBundle=$env:GITHUB_WORKSPACE\app\build\windows\x64\runner\Release" "/DOut=$env:GITHUB_WORKSPACE\dist" windows.iss
+          Get-ChildItem $env:GITHUB_WORKSPACE\dist
+      # Installed silently for this user, started (still running ten seconds
+      # later), stopped, and uninstalled.
+      - name: The installer installs, starts and goes
+        shell: pwsh
+        run: |
+          $setup = Get-ChildItem dist/Anvil-*-setup.exe | Select-Object -First 1
+          Start-Process $setup.FullName -ArgumentList '/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART' -Wait
+          $dir = "$env:LOCALAPPDATA\Programs\Anvil"
+          if (-not (Test-Path "$dir\anvil.exe")) { throw "anvil.exe is not installed" }
+          $p = Start-Process "$dir\anvil.exe" -PassThru
+          Start-Sleep -Seconds 10
+          if ($p.HasExited) { throw "anvil.exe exited with $($p.ExitCode)" }
+          Stop-Process -Id $p.Id -Force
+          Start-Sleep -Seconds 2
+          Start-Process "$dir\unins000.exe" -ArgumentList '/VERYSILENT', '/SUPPRESSMSGBOXES' -Wait
+          Start-Sleep -Seconds 2
+          if (Test-Path "$dir\anvil.exe") { throw "the uninstaller left anvil.exe" }
+      - uses: actions/upload-artifact@v4
+        with:
+          name: release-app-windows
+          path: dist/
+
+  app-macos:
+    name: The app for macOS
+    needs: version
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: subosito/flutter-action@v2
+        with:
+          flutter-version: ${{ env.FLUTTER_VERSION }}
+          channel: stable
+          cache: true
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: x86_64-apple-darwin,aarch64-apple-darwin
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: ". -> app/build"
+      - name: Build
+        working-directory: app
+        run: |
+          flutter pub get
+          flutter build macos --release --build-name ${{ needs.version.outputs.version }} --build-number ${{ github.run_number }}
+      - name: Package
+        run: app/packaging/macos.sh ${{ needs.version.outputs.label }} app/build/macos/Build/Products/Release/Anvil.app dist
+      # Mounted as a user would, and checked: the version, both
+      # architectures, a valid (ad hoc) signature, and it starts.
+      - name: The disk image holds the app, and it starts
+        run: |
+          mnt=$(mktemp -d)
+          hdiutil attach -nobrowse -mountpoint "$mnt" dist/Anvil-*-macos.dmg
+          app="$mnt/Anvil.app"
+          test -L "$mnt/Applications"
+          v=$(/usr/libexec/PlistBuddy -c 'Print CFBundleShortVersionString' "$app/Contents/Info.plist")
+          [ "$v" = "${{ needs.version.outputs.version }}" ] || { echo "::error::version $v"; exit 1; }
+          lipo -archs "$app/Contents/MacOS/Anvil"
+          codesign --verify --deep "$app"
+          cp -R "$app" "$RUNNER_TEMP/"
+          hdiutil detach "$mnt"
+          "$RUNNER_TEMP/Anvil.app/Contents/MacOS/Anvil" & pid=$!
+          sleep 10
+          kill -0 $pid || { echo "::error::the app exited"; exit 1; }
+          kill $pid
+      - uses: actions/upload-artifact@v4
+        with:
+          name: release-app-macos
+          path: dist/
+
+  publish:
+    name: Publish the release
+    needs: [version, cli-windows, app-linux, app-windows, app-macos]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: release-*
+          merge-multiple: true
+          path: dist
+      - name: SHA256SUMS
+        working-directory: dist
+        run: |
+          sha256sum * > SHA256SUMS
+          cat SHA256SUMS
+      - uses: actions/upload-artifact@v4
+        with:
+          name: release
+          path: dist/
+      - name: Publish
         if: startsWith(github.ref, 'refs/tags/v')
-        shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          name=${{ steps.package.outputs.name }}
-          gh release create "$GITHUB_REF_NAME" "$name.zip" "$name.zip.sha256" \
-            --title "Anvil $GITHUB_REF_NAME" \
-            --notes "anvil-cli for Windows (x86_64). Unzip and run \`anvil-cli.exe login https://your-fcp-server\`. The exe is not code-signed yet: Windows SmartScreen may ask before running it. SHA-256 in \`$name.zip.sha256\`."
+          gh release create "$GITHUB_REF_NAME" dist/* --repo "$GITHUB_REPOSITORY" \
+            --title "Anvil $GITHUB_REF_NAME" --notes-file - <<NOTES
+          The Anvil app for Windows, macOS and Linux, and anvil-cli for Windows.
+
+          - **Windows**: \`Anvil-$GITHUB_REF_NAME-windows-x86_64-setup.exe\` installs for you alone, no administrator needed.
+          - **macOS**: open \`Anvil-$GITHUB_REF_NAME-macos.dmg\` and drag Anvil to Applications (Apple Silicon and Intel).
+          - **Linux**: \`anvil_${GITHUB_REF_NAME}_amd64.deb\` for Debian and Ubuntu, or \`Anvil-$GITHUB_REF_NAME-x86_64.AppImage\` to run in place (a tray needs an AppIndicator host).
+          - **anvil-cli** for Windows: unzip and run \`anvil-cli.exe login https://your-fcp-server\`.
+
+          Nothing is code-signed yet: Windows SmartScreen asks before the first run, and macOS needs a right-click → Open the first time. Check downloads against \`SHA256SUMS\`.
+          NOTES

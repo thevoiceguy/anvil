@@ -89,13 +89,13 @@ BEGIN
     BEGIN
         BLOCK "040904e4"
         BEGIN
-            VALUE "CompanyName", "com.thevoiceguy" "\0"
-            VALUE "FileDescription", "anvil" "\0"
+            VALUE "CompanyName", "Anvil" "\0"
+            VALUE "FileDescription", "Anvil" "\0"
             VALUE "FileVersion", VERSION_AS_STRING "\0"
             VALUE "InternalName", "anvil" "\0"
-            VALUE "LegalCopyright", "Copyright (C) 2026 com.thevoiceguy. All rights reserved." "\0"
+            VALUE "LegalCopyright", "Copyright (C) 2026 the Anvil authors. MIT or Apache-2.0." "\0"
             VALUE "OriginalFilename", "anvil.exe" "\0"
-            VALUE "ProductName", "anvil" "\0"
+            VALUE "ProductName", "Anvil" "\0"
             VALUE "ProductVersion", VERSION_AS_STRING "\0"
         END
     END
