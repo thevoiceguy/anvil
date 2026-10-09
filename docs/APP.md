@@ -342,9 +342,25 @@ Works while the app is open; ringing a closed app is U5.
   - CI builds the APK (debug-signed) and the iOS app (unsigned), and runs
     the mobile integration test in an Android emulator and an iOS
     simulator.
-- **U4b, a phone's call.** CallKit and ConnectionService for the call
-  screen, the audio routed per call (earpiece, speaker, Bluetooth), the
-  proximity sensor.
+- **U4b, the system's call screen.**
+  - The app's calls are the system's calls: CallKit on iOS, a self-managed
+    `ConnectionService` with Telecom on Android. A call ringing in rings
+    there (the lock screen too), a call placed shows as dialling, and
+    connected, held and over follow the phone (`lib/src/mobile/bridge.dart`).
+  - What the user does there reaches the phone: answer, end (a call ringing
+    in is declined), hold, mute, a key.
+  - A call the system filters (Do Not Disturb, a blocked caller) is
+    declined; one it cannot show at all still rings in the app.
+  - Android: a foreground service runs while there is a call, so the call
+    keeps its microphone when the user leaves the app, and its call-style
+    notification rings with Answer and Decline, then shows Hang up. The app
+    comes over the lock screen only while there is a call. Android 8.0 or
+    later (self-managed calls need it).
+  - iOS: the system's Recents leave the app's calls out (the app keeps its
+    own history).
+- **U4c, a call's audio.** The audio routed per call (earpiece, speaker,
+  Bluetooth, a headset) and the proximity sensor turning the screen off at
+  the ear.
 
 ### U5: ringing a sleeping phone (with FCP)
 - FCP's push project: RFC 8599 push parameters in REGISTER, APNs and FCM

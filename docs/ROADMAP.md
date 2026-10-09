@@ -140,8 +140,11 @@ live in FCP: `docs/SOFTPHONE.md` in `thevoiceguy/fcp`. Anvil's phases:
         cargokit, the JVM handed to cpal on Android, the microphone asked
         for and the iOS audio session, desktop pieces off, CI building both
         and running the app in an emulator and a simulator
-  - [ ] **U4b** CallKit and ConnectionService, audio routing per call,
-        the proximity sensor
+  - [x] **U4b** The system's call screen: CallKit, a self-managed
+        ConnectionService, the call's notification and foreground service
+        on Android; answer, end, hold, mute and keys from there
+  - [ ] **U4c** Audio routing per call (earpiece, speaker, Bluetooth), the
+        proximity sensor
 - [ ] **U5** Ringing a sleeping phone (with FCP's push)
 - [ ] **U6** Accessibility, localisation, store listings
 

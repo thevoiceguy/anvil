@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">Anvil</string>
+    <!-- The call notification's channels, as Settings lists them. -->
+    <string name="calls_ringing_channel">Incoming calls</string>
+    <string name="calls_ongoing_channel">Calls in progress</string>
+</resources>
