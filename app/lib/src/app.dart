@@ -1,3 +1,5 @@
+import 'dart:io';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_localizations/flutter_localizations.dart';
 
@@ -7,16 +9,22 @@ import 'desktop/bridge.dart';
 import 'desktop/shell.dart';
 import 'phone/phone_api.dart';
 import 'phone/phone_model.dart';
+import 'update/update_banner.dart';
+import 'update/updates.dart';
 import 'screens/home.dart';
 import 'screens/sign_in.dart';
 
 class AnvilApp extends StatefulWidget {
-  const AnvilApp({super.key, required this.phone, this.shell});
+  const AnvilApp({super.key, required this.phone, this.shell, this.updates});
   final PhoneApi phone;
 
   /// The desktop around the app (tray, notifications); none on mobile and
   /// in the screens' tests.
   final DesktopShell? shell;
+
+  /// The app updating itself; none where a store updates it, and in the
+  /// screens' tests unless they give one.
+  final UpdateApi? updates;
 
   @override
   State<AnvilApp> createState() => _AnvilAppState();
@@ -24,17 +32,32 @@ class AnvilApp extends StatefulWidget {
 
 class _AnvilAppState extends State<AnvilApp> {
   late final PhoneModel model = PhoneModel(widget.phone);
+  late final UpdateModel? updates = widget.updates == null
+      ? null
+      : UpdateModel(widget.updates!);
 
   @override
   void initState() {
     super.initState();
     model.boot();
+    updates?.schedule();
   }
 
   @override
   void dispose() {
     model.dispose();
+    updates?.dispose();
     super.dispose();
+  }
+
+  /// Quit for good: through the desktop (the tray goes too), else at once.
+  Future<void> _quit() async {
+    final shell = widget.shell;
+    if (shell != null) {
+      await shell.quit();
+    } else {
+      exit(0);
+    }
   }
 
   @override
@@ -63,13 +86,16 @@ class _AnvilAppState extends State<AnvilApp> {
         GlobalCupertinoLocalizations.delegate,
       ],
       supportedLocales: Strings.supportedLocales,
-      builder: widget.shell == null
-          ? null
-          : (context, child) => DesktopBridge(
-              model: model,
-              shell: widget.shell!,
-              child: child ?? const SizedBox.shrink(),
-            ),
+      builder: (context, child) {
+        var app = child ?? const SizedBox.shrink();
+        if (updates != null) {
+          app = UpdateScope(updates: updates!, quit: _quit, child: app);
+        }
+        if (widget.shell != null) {
+          app = DesktopBridge(model: model, shell: widget.shell!, child: app);
+        }
+        return app;
+      },
       home: ListenableBuilder(
         listenable: model,
         builder: (context, _) => model.account == null

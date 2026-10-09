@@ -19,6 +19,7 @@ anvil-app   = { workspace = true }
 anvil-core  = { workspace = true }
 anvil-fcp   = { workspace = true }
 anvil-audio = { workspace = true }
+anvil-update = { workspace = true }
 tokio       = { workspace = true }
 anyhow      = { workspace = true }
 parking_lot = { workspace = true }

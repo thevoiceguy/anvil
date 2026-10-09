@@ -740,6 +740,78 @@ abstract class Strings {
   /// In en, this message translates to:
   /// **'Ready for calls when you sign in to the computer'**
   String get startAtLoginSubtitle;
+
+  /// No description provided for @updateAvailable.
+  ///
+  /// In en, this message translates to:
+  /// **'Anvil {version} is available'**
+  String updateAvailable(String version);
+
+  /// No description provided for @updateNow.
+  ///
+  /// In en, this message translates to:
+  /// **'Update and restart'**
+  String get updateNow;
+
+  /// No description provided for @updateGetIt.
+  ///
+  /// In en, this message translates to:
+  /// **'Download'**
+  String get updateGetIt;
+
+  /// No description provided for @updateLater.
+  ///
+  /// In en, this message translates to:
+  /// **'Later'**
+  String get updateLater;
+
+  /// No description provided for @updateAfterCall.
+  ///
+  /// In en, this message translates to:
+  /// **'After the call'**
+  String get updateAfterCall;
+
+  /// No description provided for @updateDownloading.
+  ///
+  /// In en, this message translates to:
+  /// **'Downloading the update…'**
+  String get updateDownloading;
+
+  /// No description provided for @updateChecking.
+  ///
+  /// In en, this message translates to:
+  /// **'Checking for updates…'**
+  String get updateChecking;
+
+  /// No description provided for @updateNone.
+  ///
+  /// In en, this message translates to:
+  /// **'Anvil is up to date'**
+  String get updateNone;
+
+  /// No description provided for @updateFailed.
+  ///
+  /// In en, this message translates to:
+  /// **'Could not update: {reason}'**
+  String updateFailed(String reason);
+
+  /// No description provided for @settingsUpdates.
+  ///
+  /// In en, this message translates to:
+  /// **'Updates'**
+  String get settingsUpdates;
+
+  /// No description provided for @versionLabel.
+  ///
+  /// In en, this message translates to:
+  /// **'Anvil {version}'**
+  String versionLabel(String version);
+
+  /// No description provided for @checkForUpdates.
+  ///
+  /// In en, this message translates to:
+  /// **'Check for updates'**
+  String get checkForUpdates;
 }
 
 class _StringsDelegate extends LocalizationsDelegate<Strings> {

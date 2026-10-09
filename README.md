@@ -93,7 +93,11 @@ Each release on the GitHub release page has the app for every desktop:
 | Debian, Ubuntu | `anvil_vX.Y.Z_amd64.deb` | `sudo apt install ./anvil_vX.Y.Z_amd64.deb` |
 | Any Linux | `Anvil-vX.Y.Z-x86_64.AppImage` | `chmod +x` it and run it in place |
 
-Check a download against `SHA256SUMS`. Nothing is code-signed yet: Windows
+Check a download against `SHA256SUMS`. Once installed, the app updates
+itself from new releases (Windows, AppImage): it checks a manifest signed
+with Anvil's release key and the downloaded file's SHA-256 before it
+installs anything. The .deb and macOS tell you of a new release and give you
+the file. Nothing is code-signed yet: Windows
 SmartScreen asks before the first run, and on macOS the first start is a
 right-click → Open. On Linux the tray needs an AppIndicator host (GNOME
 needs the AppIndicator extension).

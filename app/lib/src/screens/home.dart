@@ -12,6 +12,7 @@ import 'people.dart';
 import 'recents.dart';
 import 'settings.dart';
 import 'voicemail.dart';
+import '../update/update_banner.dart';
 
 /// The pages, in the order the navigation shows them.
 enum Section { phone, recents, people, voicemail, settings }
@@ -81,8 +82,15 @@ class _HomeScreenState extends State<HomeScreen> {
       child: Icon(icon),
     );
 
+    final update = UpdateScope.maybeOf(context);
     final body = Column(
       children: [
+        if (update != null)
+          UpdateBanner(
+            updates: update.updates,
+            phone: model,
+            quit: update.quit,
+          ),
         for (final call in ringing) IncomingCallCard(model: model, call: call),
         if (up.isNotEmpty && _page != Section.phone)
           CallBar(

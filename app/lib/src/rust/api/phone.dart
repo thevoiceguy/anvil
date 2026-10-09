@@ -7,7 +7,7 @@ import '../frb_generated.dart';
 
 import 'package:flutter_rust_bridge/flutter_rust_bridge_for_generated.dart';
 
-// These functions are ignored because they are not marked as `pub`: `devices`, `direction`, `execute`, `kind_only`, `on_runtime`, `phone`, `runtime`
+// These functions are ignored because they are not marked as `pub`: `devices`, `direction`, `execute`, `kind_only`, `on_runtime_pub`, `on_runtime`, `phone`, `runtime`
 
 /// The session kept at `session_path`, if there is one.
 Future<Account?> savedAccount({required String sessionPath}) =>

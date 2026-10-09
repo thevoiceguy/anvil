@@ -128,7 +128,12 @@ live in FCP: `docs/SOFTPHONE.md` in `thevoiceguy/fcp`. Anvil's phases:
         image (universal), a Linux AppImage and .deb, each installed,
         started and removed in CI before publishing, `SHA256SUMS`; Anvil's
         own name and icon (`tool/icons.py`)
-  - [ ] **U3b** The app updating itself from signed release manifests
+  - [x] **U3b** The app updating itself: `latest.json` signed (Ed25519,
+        the `ANVIL_UPDATE_KEY` secret) in the release workflow,
+        `crates/anvil-update` checking it against the key built in, fetching
+        and checking the file, and installing it (Windows setup, AppImage;
+        macOS once the sandbox question is settled; .deb by hand); a banner
+        and a Settings section
   - [ ] **U3c** Code signing and notarization, once the certificates exist
 - [ ] **U4** The app on mobile
 - [ ] **U5** Ringing a sleeping phone (with FCP's push)

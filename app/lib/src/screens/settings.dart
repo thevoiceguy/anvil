@@ -6,6 +6,8 @@ import 'package:flutter/material.dart';
 
 import '../../l10n/app_localizations.dart';
 import '../desktop/shell.dart';
+import '../update/update_banner.dart';
+import '../update/updates.dart';
 import '../phone/phone_api.dart';
 import '../phone/phone_model.dart';
 
@@ -111,6 +113,10 @@ class SettingsPage extends StatelessWidget {
             when shell.canStartAtLogin) ...[
           header(s.settingsDesktop),
           _StartAtLogin(shell: shell),
+        ],
+        if (UpdateScope.maybeOf(context) case final update?) ...[
+          header(s.settingsUpdates),
+          _Updates(scope: update, model: model),
         ],
         header(s.settingsAccount),
         ListTile(
@@ -306,6 +312,61 @@ class _StartAtLoginState extends State<_StartAtLogin> {
       subtitle: Text(s.startAtLoginSubtitle),
       value: _on ?? false,
       onChanged: _on == null ? null : _set,
+    );
+  }
+}
+
+/// This copy's version, and checking for (and taking) a newer one.
+class _Updates extends StatelessWidget {
+  const _Updates({required this.scope, required this.model});
+  final UpdateScope scope;
+  final PhoneModel model;
+
+  @override
+  Widget build(BuildContext context) {
+    final s = Strings.of(context);
+    final updates = scope.updates;
+    return ListenableBuilder(
+      listenable: updates,
+      builder: (context, _) {
+        final info = updates.available;
+        final status = switch (updates.status) {
+          UpdateStatus.idle => null,
+          UpdateStatus.checking => s.updateChecking,
+          UpdateStatus.upToDate => s.updateNone,
+          UpdateStatus.available => s.updateAvailable(info!.version),
+          UpdateStatus.downloading => s.updateDownloading,
+          UpdateStatus.failed => s.updateFailed(updates.error ?? ''),
+        };
+        final busy =
+            updates.status == UpdateStatus.checking ||
+            updates.status == UpdateStatus.downloading;
+        return ListTile(
+          key: const Key('updates'),
+          leading: const Icon(Icons.system_update),
+          title: Text(s.versionLabel(updates.api.version())),
+          subtitle: Text(
+            [
+              ?status,
+              if (info != null && !info.canInstall && info.reason != null)
+                info.reason!,
+            ].join(' — '),
+          ),
+          trailing: info != null && info.canInstall
+              ? FilledButton(
+                  key: const Key('settingsUpdateNow'),
+                  onPressed: busy || model.snapshot.calls.isNotEmpty
+                      ? null
+                      : () => startUpdate(model, updates, scope.quit),
+                  child: Text(s.updateNow),
+                )
+              : OutlinedButton(
+                  key: const Key('checkForUpdates'),
+                  onPressed: busy ? null : updates.check,
+                  child: Text(s.checkForUpdates),
+                ),
+        );
+      },
     );
   }
 }

@@ -360,4 +360,46 @@ class StringsEn extends Strings {
   @override
   String get startAtLoginSubtitle =>
       'Ready for calls when you sign in to the computer';
+
+  @override
+  String updateAvailable(String version) {
+    return 'Anvil $version is available';
+  }
+
+  @override
+  String get updateNow => 'Update and restart';
+
+  @override
+  String get updateGetIt => 'Download';
+
+  @override
+  String get updateLater => 'Later';
+
+  @override
+  String get updateAfterCall => 'After the call';
+
+  @override
+  String get updateDownloading => 'Downloading the update…';
+
+  @override
+  String get updateChecking => 'Checking for updates…';
+
+  @override
+  String get updateNone => 'Anvil is up to date';
+
+  @override
+  String updateFailed(String reason) {
+    return 'Could not update: $reason';
+  }
+
+  @override
+  String get settingsUpdates => 'Updates';
+
+  @override
+  String versionLabel(String version) {
+    return 'Anvil $version';
+  }
+
+  @override
+  String get checkForUpdates => 'Check for updates';
 }
