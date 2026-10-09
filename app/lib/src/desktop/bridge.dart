@@ -32,6 +32,7 @@ class _DesktopBridgeState extends State<DesktopBridge> {
   StreamSubscription<ShellEvent>? _events;
   (TrayState, String, TrayMenu)? _tray;
   final Set<int> _notified = {};
+  bool _askedForNotifications = false;
 
   PhoneModel get model => widget.model;
   DesktopShell get shell => widget.shell;
@@ -71,6 +72,10 @@ class _DesktopBridgeState extends State<DesktopBridge> {
     if (!mounted) return;
     final s = Strings.of(context);
     final snap = model.snapshot;
+    if (model.account != null && !_askedForNotifications) {
+      _askedForNotifications = true;
+      unawaited(shell.allowNotifications());
+    }
     final state = trayState(model);
     final status = switch (state) {
       TrayState.offline => s.registrationUnregistered,

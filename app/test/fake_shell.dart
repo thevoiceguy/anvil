@@ -30,6 +30,9 @@ class FakeShell implements DesktopShell {
   }
 
   @override
+  Future<void> allowNotifications() async => log.add('allow notifications');
+
+  @override
   Future<void> showIncoming(IncomingNotice notice) async =>
       notices[notice.call] = notice;
 

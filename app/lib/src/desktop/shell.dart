@@ -77,6 +77,12 @@ abstract class DesktopShell {
   Stream<ShellEvent> get events;
 
   Future<void> setTray(TrayState state, String tooltip, TrayMenu menu);
+
+  /// Ask for leave to show notifications, where the system asks the user
+  /// (macOS). Called once someone has signed in, never awaited: the answer
+  /// is the user's to give whenever they like.
+  Future<void> allowNotifications();
+
   Future<void> showIncoming(IncomingNotice notice);
   Future<void> clearIncoming(int call);
 

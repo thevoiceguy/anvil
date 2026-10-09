@@ -55,7 +55,12 @@ class NativeShell with TrayListener, WindowListener implements DesktopShell {
             appUserModelId: _aumid,
             guid: _guid,
           ),
+          // Not asked for at start: a prompt before anyone has signed in,
+          // and one nobody answers on a build machine (it waits forever).
           macOS: DarwinInitializationSettings(
+            requestAlertPermission: false,
+            requestSoundPermission: false,
+            requestBadgePermission: false,
             notificationCategories: [
               DarwinNotificationCategory(
                 _category,
@@ -127,6 +132,18 @@ class NativeShell with TrayListener, WindowListener implements DesktopShell {
           ],
         ),
       );
+    });
+  }
+
+  @override
+  Future<void> allowNotifications() async {
+    if (!_notify || !Platform.isMacOS) return;
+    await _part('notifications', () async {
+      await _notifications
+          .resolvePlatformSpecificImplementation<
+            MacOSFlutterLocalNotificationsPlugin
+          >()
+          ?.requestPermissions(alert: true, sound: true);
     });
   }
 

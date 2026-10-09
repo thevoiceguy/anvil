@@ -99,6 +99,8 @@ jobs:
           if-no-files-found: ignore
       - run: flutter build ${{ matrix.target }} --release
       - name: The app starts with its Rust core
+        # A hang (a system prompt nobody answers) fails, not waits six hours.
+        timeout-minutes: 20
         shell: bash
         run: |
           if [ "${{ matrix.target }}" = linux ]; then

@@ -32,6 +32,7 @@ Future<(FakePhone, FakeShell)> running(WidgetTester tester) async {
 void main() {
   testWidgets('the tray follows the phone', (tester) async {
     final (phone, shell) = await running(tester);
+    expect(shell.log.where((l) => l == 'allow notifications'), hasLength(1));
     expect(shell.tray, TrayState.ready);
     expect(shell.tooltip, 'Anvil — Ready');
     expect(shell.menu!.dndAvailable, isTrue);
