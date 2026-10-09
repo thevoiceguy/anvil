@@ -22,8 +22,10 @@ flutter_rust_bridge_codegen generate   # 2.13.0
 
 `test/goldens` holds a screenshot of every screen, light and dark, drawn with
 the app's own fonts at a fixed clock. One set, made on Linux, is compared on
-Linux, Windows and macOS (within 2% of pixels; each run prints how far each
-image is), so a screen that changes on purpose needs them made again:
+Linux (exactly) and on Windows and macOS, where text's edges rasterise a few
+shades apart: there a screen matches while under 0.3% of its pixels differ
+by more than 96 of 255 (`test/goldens/tolerant_comparator.dart`; each run
+prints the figures). A screen that changes on purpose needs them made again:
 
 ```bash
 flutter test test/goldens --update-goldens

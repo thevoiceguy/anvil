@@ -251,7 +251,10 @@ Three PRs, the screens thin over the state as §3 has it:
     `MainFlutterWindow.swift`).
   - Golden screenshots of every screen, light and dark, wide and narrow,
     drawn with the app's fonts at a fixed clock: one set made on Linux,
-    compared on Linux, Windows and macOS within 2% of pixels. Making them
+    compared exactly on Linux and on Windows and macOS within what text
+    rasterisation explains (under 0.3% of pixels differing by more than
+    96/255; the first runs measured 0.03–0.06% there, against 2.4–2.6% of
+    pixels differing at all). Making them
     found Inter bundled but never declared (every platform drew its own
     font), the keypad's hint cut off, and Call and End dark on dark.
   - macOS: the sandboxed app had no network or microphone entitlement, and
