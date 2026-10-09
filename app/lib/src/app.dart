@@ -7,6 +7,7 @@ import '../l10n/app_localizations.dart';
 import 'design/theme.dart';
 import 'desktop/bridge.dart';
 import 'desktop/shell.dart';
+import 'mobile/platform.dart';
 import 'phone/phone_api.dart';
 import 'phone/phone_model.dart';
 import 'update/update_banner.dart';
@@ -15,8 +16,18 @@ import 'screens/home.dart';
 import 'screens/sign_in.dart';
 
 class AnvilApp extends StatefulWidget {
-  const AnvilApp({super.key, required this.phone, this.shell, this.updates});
+  const AnvilApp({
+    super.key,
+    required this.phone,
+    this.shell,
+    this.updates,
+    this.mobile,
+  });
   final PhoneApi phone;
+
+  /// The phone around the app (Android, iOS); none on desktop and in the
+  /// screens' tests.
+  final MobilePlatform? mobile;
 
   /// The desktop around the app (tray, notifications); none on mobile and
   /// in the screens' tests.
@@ -31,7 +42,7 @@ class AnvilApp extends StatefulWidget {
 }
 
 class _AnvilAppState extends State<AnvilApp> {
-  late final PhoneModel model = PhoneModel(widget.phone);
+  late final PhoneModel model = PhoneModel(widget.phone, mobile: widget.mobile);
   late final UpdateModel? updates = widget.updates == null
       ? null
       : UpdateModel(widget.updates!);

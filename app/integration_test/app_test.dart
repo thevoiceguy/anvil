@@ -1,6 +1,7 @@
 // The app as built, its Rust core loaded: it starts and asks to sign in, and
 // the desktop around it (window, tray, notifications, start at login)
-// starts with it. Run on a desktop: `flutter test integration_test -d linux`
+// starts with it. Run on a desktop:
+// `flutter test integration_test/app_test.dart -d linux`
 // (or windows, macos).
 
 import 'package:anvil/src/app.dart';

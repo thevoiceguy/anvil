@@ -136,6 +136,12 @@ live in FCP: `docs/SOFTPHONE.md` in `thevoiceguy/fcp`. Anvil's phases:
         and a Settings section
   - [ ] **U3c** Code signing and notarization, once the certificates exist
 - [ ] **U4** The app on mobile
+  - [x] **U4a** Android and iOS builds: the Rust core cross-built by
+        cargokit, the JVM handed to cpal on Android, the microphone asked
+        for and the iOS audio session, desktop pieces off, CI building both
+        and running the app in an emulator and a simulator
+  - [ ] **U4b** CallKit and ConnectionService, audio routing per call,
+        the proximity sensor
 - [ ] **U5** Ringing a sleeping phone (with FCP's push)
 - [ ] **U6** Accessibility, localisation, store listings
 

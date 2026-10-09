@@ -122,6 +122,10 @@ class StringsEn extends Strings {
   }
 
   @override
+  String get microphoneRefused =>
+      'Anvil may not use the microphone, so callers won\'t hear you. Allow it in the system\'s settings for Anvil.';
+
+  @override
   String commandFailed(String reason) {
     return '$reason';
   }

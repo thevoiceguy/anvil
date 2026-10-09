@@ -150,6 +150,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   Registration dco_decode_registration(dynamic raw);
 
   @protected
+  SystemAudio dco_decode_system_audio(dynamic raw);
+
+  @protected
   int dco_decode_u_32(dynamic raw);
 
   @protected
@@ -299,6 +302,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   Registration sse_decode_registration(SseDeserializer deserializer);
+
+  @protected
+  SystemAudio sse_decode_system_audio(SseDeserializer deserializer);
 
   @protected
   int sse_decode_u_32(SseDeserializer deserializer);
@@ -482,6 +488,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   void sse_encode_registration(Registration self, SseSerializer serializer);
+
+  @protected
+  void sse_encode_system_audio(SystemAudio self, SseSerializer serializer);
 
   @protected
   void sse_encode_u_32(int self, SseSerializer serializer);

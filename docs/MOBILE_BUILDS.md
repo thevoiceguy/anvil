@@ -1,5 +1,9 @@
 # Anvil — mobile cross-compilation
 
+> This page is about `anvil-ffi`, the C ABI for a native iOS or Android app.
+> Anvil's own app (Flutter, `app/`) builds its Rust core for phones through
+> cargokit instead; see `app/README.md`.
+
 Anvil's mobile artifacts come from `anvil-ffi`. This crate produces both
 a `staticlib` (for iOS) and a `cdylib` (for Android), with a
 cbindgen-generated `anvil.h` in `target/<profile>/build/anvil-ffi-*/out/`.
