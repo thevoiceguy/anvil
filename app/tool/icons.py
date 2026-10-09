@@ -1,7 +1,12 @@
 #!/usr/bin/env python3
-"""The tray's icons (assets/tray): a disc in the phone's state colour with a
-white handset, as PNG (Linux, macOS) and ICO (Windows). Pure Python, so
-anyone can run it again: `python3 tool/tray_icons.py`."""
+"""Anvil's icons, drawn in pure Python so anyone can draw them again:
+`python3 tool/icons.py`.
+
+- The tray's (assets/tray): a disc in the phone's state colour with a white
+  handset, as PNG (Linux, macOS) and ICO (Windows).
+- The app's: the handset on a rounded square in Anvil's accent colour, for
+  macOS (the AppIcon set), Windows (app_icon.ico) and Linux
+  (linux/packaging/anvil.png, the installers' icon)."""
 
 import math
 import os
@@ -15,6 +20,7 @@ STATES = {
     "in_call": (0x0E, 0x8A, 0x7E),   # AnvilColors.accent
     "ringing": (0xD9, 0x9A, 0x1E),   # AnvilColors.held
 }
+ACCENT = (0x0E, 0x8A, 0x7E)  # AnvilColors.accent
 SS = 4  # samples per pixel, each way
 
 
@@ -34,22 +40,34 @@ def handset(x, y):
     return on_arc or on_end
 
 
-def render(size, colour):
+def disc(x, y):
+    return math.hypot(x, y) <= 0.48, 1.6
+
+
+def tile(x, y):
+    """A rounded square with a margin, as macOS lays out an app icon."""
+    half, radius = 0.40, 0.13
+    dx, dy = max(abs(x) - (half - radius), 0), max(abs(y) - (half - radius), 0)
+    return math.hypot(dx, dy) <= radius, 1.75
+
+
+def render(size, colour, shape=disc, ss=SS):
     rows = []
     for py in range(size):
         row = bytearray([0])  # PNG filter: none
         for px in range(size):
             disc = white = 0
-            for sy in range(SS):
-                for sx in range(SS):
-                    x = (px + (sx + 0.5) / SS) / size - 0.5
-                    y = (py + (sy + 0.5) / SS) / size - 0.5
-                    if math.hypot(x, y) <= 0.48:
+            for sy in range(ss):
+                for sx in range(ss):
+                    x = (px + (sx + 0.5) / ss) / size - 0.5
+                    y = (py + (sy + 0.5) / ss) / size - 0.5
+                    inside, scale = shape(x, y)
+                    if inside:
                         disc += 1
                         # The handset, flipped so the mouthpiece is lower left.
-                        if handset(x * 1.6, -y * 1.6):
+                        if handset(x * scale, -y * scale):
                             white += 1
-            n = SS * SS
+            n = ss * ss
             alpha = disc / n
             w = white / disc if disc else 0
             rgb = [round(c * (1 - w) + 255 * w) for c in colour]
@@ -86,7 +104,8 @@ def ico(images):
 
 
 def main():
-    here = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "assets", "tray")
+    app = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..")
+    here = os.path.join(app, "assets", "tray")
     os.makedirs(here, exist_ok=True)
     for name, colour in STATES.items():
         big = render(64, colour)
@@ -94,6 +113,21 @@ def main():
             f.write(big)
         with open(os.path.join(here, f"{name}.ico"), "wb") as f:
             f.write(ico([(16, render(16, colour)), (32, render(32, colour)), (64, big)]))
+
+    def app_icon(size):
+        return render(size, ACCENT, tile, ss=4 if size <= 256 else 2)
+
+    icons = {size: app_icon(size) for size in (16, 32, 48, 64, 128, 256, 512, 1024)}
+    mac = os.path.join(app, "macos", "Runner", "Assets.xcassets", "AppIcon.appiconset")
+    for size in (16, 32, 64, 128, 256, 512, 1024):
+        with open(os.path.join(mac, f"app_icon_{size}.png"), "wb") as f:
+            f.write(icons[size])
+    with open(os.path.join(app, "windows", "runner", "resources", "app_icon.ico"), "wb") as f:
+        f.write(ico([(s, icons[s]) for s in (16, 32, 48, 64, 128, 256)]))
+    linux = os.path.join(app, "linux", "packaging")
+    os.makedirs(linux, exist_ok=True)
+    with open(os.path.join(linux, "anvil.png"), "wb") as f:
+        f.write(icons[512])
 
 
 if __name__ == "__main__":

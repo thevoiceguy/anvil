@@ -123,6 +123,13 @@ live in FCP: `docs/SOFTPHONE.md` in `thevoiceguy/fcp`. Anvil's phases:
         Inter declared at last, the macOS entitlements for network and
         microphone
 - [ ] **U3** Desktop distribution
+  - [x] **U3a** Installers on a tag (`release.yml`): a per-user Windows
+        setup (Inno Setup, the C++ runtime beside the app), a macOS disk
+        image (universal), a Linux AppImage and .deb, each installed,
+        started and removed in CI before publishing, `SHA256SUMS`; Anvil's
+        own name and icon (`tool/icons.py`)
+  - [ ] **U3b** The app updating itself from signed release manifests
+  - [ ] **U3c** Code signing and notarization, once the certificates exist
 - [ ] **U4** The app on mobile
 - [ ] **U5** Ringing a sleeping phone (with FCP's push)
 - [ ] **U6** Accessibility, localisation, store listings

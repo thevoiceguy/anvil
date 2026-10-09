@@ -266,6 +266,33 @@ Three PRs, the screens thin over the state as §3 has it:
 - Installers for the three desktops built on a tag, the auto-updater, signing
   as soon as the certificates exist.
 
+Three PRs:
+
+- **U3a, installers on a tag.** `release.yml` builds, on a tag `vX.Y.Z`
+  (the workspace's version, which also names the app's build):
+  - Windows: an Inno Setup installer (`app/packaging/windows.iss`) for this
+    user only, without administrator rights, in
+    `%LOCALAPPDATA%\Programs\Anvil`, with a Start menu entry and an
+    uninstaller that also removes start at login. The Visual C++ runtime
+    goes beside the exe, so nothing else needs installing.
+  - macOS: a disk image (`app/packaging/macos.sh`) with the app, universal
+    (Apple Silicon and Intel), ad hoc signed as Flutter builds it.
+  - Linux: a .deb (in `/opt/anvil`, `anvil` on the path, depending on GTK,
+    ALSA and the AppIndicator library) and an AppImage
+    (`app/packaging/linux.sh`; appimagetool 1.9.1 and the type2 runtime
+    pinned by digest).
+  - Each is installed or mounted, started (still running ten seconds on),
+    and removed again in CI before anything is published, with
+    `SHA256SUMS` over the release. A pull request touching the packaging
+    builds and checks the same without publishing.
+  - The app is called Anvil (not Flutter's `anvil` and `com.thevoiceguy`)
+    and has its own icon (`tool/icons.py`), on every platform.
+- **U3b, the app updates itself**: a manifest per release, signed, read by
+  the app, the update downloaded, checked and installed (needs a signing
+  key held as a repository secret).
+- **U3c, signing**: Windows Authenticode, macOS Developer ID and
+  notarization, once the certificates exist (§8 Q6).
+
 ### U4: the app on mobile
 - iOS and Android builds; CallKit and ConnectionService for the call screen;
   the audio session, Bluetooth and the proximity sensor.
