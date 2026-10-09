@@ -88,3 +88,28 @@ async fn a_call_over_tcp_is_answered_on_its_connection() {
     alice.shutdown().await.unwrap();
     bob.shutdown().await.unwrap();
 }
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn either_side_holds_and_resumes() {
+    let ((alice, mut alice_events), (bob, mut bob_events)) = pair("127.0.0.6", "127.0.0.7").await;
+    let bob_uri = format!("sip:bob@{}", bob.sip_address());
+    let (out, incoming) =
+        answered_call(&alice, &mut alice_events, &bob, &mut bob_events, &bob_uri).await;
+
+    // The caller holds and resumes; then the callee, whose re-INVITE the
+    // caller must find in the dialog of a call it placed.
+    let soon = std::time::Duration::from_secs(5);
+    for (who, call) in [(&alice, out), (&bob, incoming)] {
+        for on in [true, false] {
+            tokio::time::timeout(soon, who.hold(call, on))
+                .await
+                .expect("the re-INVITE is answered at once")
+                .expect("the re-INVITE is accepted");
+        }
+    }
+
+    alice.hangup(out).await.expect("BYE");
+    hung_up_by_the_other_side(&mut bob_events, incoming).await;
+    alice.shutdown().await.unwrap();
+    bob.shutdown().await.unwrap();
+}

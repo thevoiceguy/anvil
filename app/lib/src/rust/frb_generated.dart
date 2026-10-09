@@ -69,7 +69,7 @@ class RustLib extends BaseEntrypoint<RustLibApi, RustLibApiImpl, RustLibWire> {
   String get codegenVersion => '2.13.0';
 
   @override
-  int get rustContentHash => -679831017;
+  int get rustContentHash => 677097840;
 
   static const kDefaultExternalLibraryLoaderConfig =
       ExternalLibraryLoaderConfig(
@@ -83,7 +83,13 @@ class RustLib extends BaseEntrypoint<RustLibApi, RustLibApiImpl, RustLibWire> {
 abstract class RustLibApi extends BaseApi {
   Future<void> crateApiPhoneAnswer({BigInt? call});
 
+  Future<void> crateApiPhoneChooseAudio({required bool input, String? device});
+
   Future<void> crateApiPhoneDecline({BigInt? call});
+
+  Future<void> crateApiPhoneDeleteVoicemail({required String id});
+
+  Future<void> crateApiPhoneFavourite({required String who, required bool on_});
 
   Future<void> crateApiPhoneHangup({BigInt? call});
 
@@ -91,7 +97,11 @@ abstract class RustLibApi extends BaseApi {
 
   Future<void> crateApiPhoneInitApp();
 
+  Future<void> crateApiPhoneMarkHeard({required String id});
+
   Future<void> crateApiPhoneMute({BigInt? call, required bool on_});
+
+  Future<void> crateApiPhonePark({BigInt? call});
 
   Stream<PhoneChange> crateApiPhonePhoneChanges();
 
@@ -99,9 +109,17 @@ abstract class RustLibApi extends BaseApi {
 
   Future<BigInt> crateApiPhonePlaceCall({required String target});
 
+  Future<void> crateApiPhonePlayVoicemail({required String id});
+
+  Future<void> crateApiPhoneRefresh();
+
   Future<Account?> crateApiPhoneSavedAccount({required String sessionPath});
 
   Future<void> crateApiPhoneSendDigits({BigInt? call, required String digits});
+
+  Future<void> crateApiPhoneSetCalling({required CallingChange change});
+
+  Future<void> crateApiPhoneSetDnd({required bool on_});
 
   Future<Account> crateApiPhoneSignIn({
     required String place,
@@ -116,6 +134,15 @@ abstract class RustLibApi extends BaseApi {
   Future<void> crateApiPhoneStartPhone({required String sessionPath});
 
   Future<void> crateApiPhoneStopPhone();
+
+  Future<void> crateApiPhoneStopPlaying();
+
+  Future<void> crateApiPhoneTransfer({BigInt? call, required String target});
+
+  Future<void> crateApiPhoneTransferAttended({
+    required BigInt call,
+    required BigInt to,
+  });
 }
 
 class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
@@ -155,6 +182,37 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       const TaskConstMeta(debugName: "answer", argNames: ["call"]);
 
   @override
+  Future<void> crateApiPhoneChooseAudio({required bool input, String? device}) {
+    return handler.executeNormal(
+      NormalTask(
+        callFfi: (port_) {
+          final serializer = SseSerializer(generalizedFrbRustBinding);
+          sse_encode_bool(input, serializer);
+          sse_encode_opt_String(device, serializer);
+          pdeCallFfi(
+            generalizedFrbRustBinding,
+            serializer,
+            funcId: 2,
+            port: port_,
+          );
+        },
+        codec: SseCodec(
+          decodeSuccessData: sse_decode_unit,
+          decodeErrorData: sse_decode_AnyhowException,
+        ),
+        constMeta: kCrateApiPhoneChooseAudioConstMeta,
+        argValues: [input, device],
+        apiImpl: this,
+      ),
+    );
+  }
+
+  TaskConstMeta get kCrateApiPhoneChooseAudioConstMeta => const TaskConstMeta(
+    debugName: "choose_audio",
+    argNames: ["input", "device"],
+  );
+
+  @override
   Future<void> crateApiPhoneDecline({BigInt? call}) {
     return handler.executeNormal(
       NormalTask(
@@ -164,7 +222,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 2,
+            funcId: 3,
             port: port_,
           );
         },
@@ -183,6 +241,66 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       const TaskConstMeta(debugName: "decline", argNames: ["call"]);
 
   @override
+  Future<void> crateApiPhoneDeleteVoicemail({required String id}) {
+    return handler.executeNormal(
+      NormalTask(
+        callFfi: (port_) {
+          final serializer = SseSerializer(generalizedFrbRustBinding);
+          sse_encode_String(id, serializer);
+          pdeCallFfi(
+            generalizedFrbRustBinding,
+            serializer,
+            funcId: 4,
+            port: port_,
+          );
+        },
+        codec: SseCodec(
+          decodeSuccessData: sse_decode_unit,
+          decodeErrorData: sse_decode_AnyhowException,
+        ),
+        constMeta: kCrateApiPhoneDeleteVoicemailConstMeta,
+        argValues: [id],
+        apiImpl: this,
+      ),
+    );
+  }
+
+  TaskConstMeta get kCrateApiPhoneDeleteVoicemailConstMeta =>
+      const TaskConstMeta(debugName: "delete_voicemail", argNames: ["id"]);
+
+  @override
+  Future<void> crateApiPhoneFavourite({
+    required String who,
+    required bool on_,
+  }) {
+    return handler.executeNormal(
+      NormalTask(
+        callFfi: (port_) {
+          final serializer = SseSerializer(generalizedFrbRustBinding);
+          sse_encode_String(who, serializer);
+          sse_encode_bool(on_, serializer);
+          pdeCallFfi(
+            generalizedFrbRustBinding,
+            serializer,
+            funcId: 5,
+            port: port_,
+          );
+        },
+        codec: SseCodec(
+          decodeSuccessData: sse_decode_unit,
+          decodeErrorData: sse_decode_AnyhowException,
+        ),
+        constMeta: kCrateApiPhoneFavouriteConstMeta,
+        argValues: [who, on_],
+        apiImpl: this,
+      ),
+    );
+  }
+
+  TaskConstMeta get kCrateApiPhoneFavouriteConstMeta =>
+      const TaskConstMeta(debugName: "favourite", argNames: ["who", "on_"]);
+
+  @override
   Future<void> crateApiPhoneHangup({BigInt? call}) {
     return handler.executeNormal(
       NormalTask(
@@ -192,7 +310,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 3,
+            funcId: 6,
             port: port_,
           );
         },
@@ -221,7 +339,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 4,
+            funcId: 7,
             port: port_,
           );
         },
@@ -248,7 +366,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 5,
+            funcId: 8,
             port: port_,
           );
         },
@@ -267,6 +385,34 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       const TaskConstMeta(debugName: "init_app", argNames: []);
 
   @override
+  Future<void> crateApiPhoneMarkHeard({required String id}) {
+    return handler.executeNormal(
+      NormalTask(
+        callFfi: (port_) {
+          final serializer = SseSerializer(generalizedFrbRustBinding);
+          sse_encode_String(id, serializer);
+          pdeCallFfi(
+            generalizedFrbRustBinding,
+            serializer,
+            funcId: 9,
+            port: port_,
+          );
+        },
+        codec: SseCodec(
+          decodeSuccessData: sse_decode_unit,
+          decodeErrorData: sse_decode_AnyhowException,
+        ),
+        constMeta: kCrateApiPhoneMarkHeardConstMeta,
+        argValues: [id],
+        apiImpl: this,
+      ),
+    );
+  }
+
+  TaskConstMeta get kCrateApiPhoneMarkHeardConstMeta =>
+      const TaskConstMeta(debugName: "mark_heard", argNames: ["id"]);
+
+  @override
   Future<void> crateApiPhoneMute({BigInt? call, required bool on_}) {
     return handler.executeNormal(
       NormalTask(
@@ -277,7 +423,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 6,
+            funcId: 10,
             port: port_,
           );
         },
@@ -296,6 +442,34 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       const TaskConstMeta(debugName: "mute", argNames: ["call", "on_"]);
 
   @override
+  Future<void> crateApiPhonePark({BigInt? call}) {
+    return handler.executeNormal(
+      NormalTask(
+        callFfi: (port_) {
+          final serializer = SseSerializer(generalizedFrbRustBinding);
+          sse_encode_opt_box_autoadd_u_64(call, serializer);
+          pdeCallFfi(
+            generalizedFrbRustBinding,
+            serializer,
+            funcId: 11,
+            port: port_,
+          );
+        },
+        codec: SseCodec(
+          decodeSuccessData: sse_decode_unit,
+          decodeErrorData: sse_decode_AnyhowException,
+        ),
+        constMeta: kCrateApiPhoneParkConstMeta,
+        argValues: [call],
+        apiImpl: this,
+      ),
+    );
+  }
+
+  TaskConstMeta get kCrateApiPhoneParkConstMeta =>
+      const TaskConstMeta(debugName: "park", argNames: ["call"]);
+
+  @override
   Stream<PhoneChange> crateApiPhonePhoneChanges() {
     final sink = RustStreamSink<PhoneChange>();
     unawaited(
@@ -307,7 +481,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
             pdeCallFfi(
               generalizedFrbRustBinding,
               serializer,
-              funcId: 7,
+              funcId: 12,
               port: port_,
             );
           },
@@ -333,7 +507,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       SyncTask(
         callFfi: () {
           final serializer = SseSerializer(generalizedFrbRustBinding);
-          return pdeCallFfi(generalizedFrbRustBinding, serializer, funcId: 8)!;
+          return pdeCallFfi(generalizedFrbRustBinding, serializer, funcId: 13)!;
         },
         codec: SseCodec(
           decodeSuccessData: sse_decode_phone_state,
@@ -359,7 +533,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 9,
+            funcId: 14,
             port: port_,
           );
         },
@@ -378,6 +552,61 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       const TaskConstMeta(debugName: "place_call", argNames: ["target"]);
 
   @override
+  Future<void> crateApiPhonePlayVoicemail({required String id}) {
+    return handler.executeNormal(
+      NormalTask(
+        callFfi: (port_) {
+          final serializer = SseSerializer(generalizedFrbRustBinding);
+          sse_encode_String(id, serializer);
+          pdeCallFfi(
+            generalizedFrbRustBinding,
+            serializer,
+            funcId: 15,
+            port: port_,
+          );
+        },
+        codec: SseCodec(
+          decodeSuccessData: sse_decode_unit,
+          decodeErrorData: sse_decode_AnyhowException,
+        ),
+        constMeta: kCrateApiPhonePlayVoicemailConstMeta,
+        argValues: [id],
+        apiImpl: this,
+      ),
+    );
+  }
+
+  TaskConstMeta get kCrateApiPhonePlayVoicemailConstMeta =>
+      const TaskConstMeta(debugName: "play_voicemail", argNames: ["id"]);
+
+  @override
+  Future<void> crateApiPhoneRefresh() {
+    return handler.executeNormal(
+      NormalTask(
+        callFfi: (port_) {
+          final serializer = SseSerializer(generalizedFrbRustBinding);
+          pdeCallFfi(
+            generalizedFrbRustBinding,
+            serializer,
+            funcId: 16,
+            port: port_,
+          );
+        },
+        codec: SseCodec(
+          decodeSuccessData: sse_decode_unit,
+          decodeErrorData: sse_decode_AnyhowException,
+        ),
+        constMeta: kCrateApiPhoneRefreshConstMeta,
+        argValues: [],
+        apiImpl: this,
+      ),
+    );
+  }
+
+  TaskConstMeta get kCrateApiPhoneRefreshConstMeta =>
+      const TaskConstMeta(debugName: "refresh", argNames: []);
+
+  @override
   Future<Account?> crateApiPhoneSavedAccount({required String sessionPath}) {
     return handler.executeNormal(
       NormalTask(
@@ -387,7 +616,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 10,
+            funcId: 17,
             port: port_,
           );
         },
@@ -418,7 +647,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 11,
+            funcId: 18,
             port: port_,
           );
         },
@@ -437,6 +666,62 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     debugName: "send_digits",
     argNames: ["call", "digits"],
   );
+
+  @override
+  Future<void> crateApiPhoneSetCalling({required CallingChange change}) {
+    return handler.executeNormal(
+      NormalTask(
+        callFfi: (port_) {
+          final serializer = SseSerializer(generalizedFrbRustBinding);
+          sse_encode_box_autoadd_calling_change(change, serializer);
+          pdeCallFfi(
+            generalizedFrbRustBinding,
+            serializer,
+            funcId: 19,
+            port: port_,
+          );
+        },
+        codec: SseCodec(
+          decodeSuccessData: sse_decode_unit,
+          decodeErrorData: sse_decode_AnyhowException,
+        ),
+        constMeta: kCrateApiPhoneSetCallingConstMeta,
+        argValues: [change],
+        apiImpl: this,
+      ),
+    );
+  }
+
+  TaskConstMeta get kCrateApiPhoneSetCallingConstMeta =>
+      const TaskConstMeta(debugName: "set_calling", argNames: ["change"]);
+
+  @override
+  Future<void> crateApiPhoneSetDnd({required bool on_}) {
+    return handler.executeNormal(
+      NormalTask(
+        callFfi: (port_) {
+          final serializer = SseSerializer(generalizedFrbRustBinding);
+          sse_encode_bool(on_, serializer);
+          pdeCallFfi(
+            generalizedFrbRustBinding,
+            serializer,
+            funcId: 20,
+            port: port_,
+          );
+        },
+        codec: SseCodec(
+          decodeSuccessData: sse_decode_unit,
+          decodeErrorData: sse_decode_AnyhowException,
+        ),
+        constMeta: kCrateApiPhoneSetDndConstMeta,
+        argValues: [on_],
+        apiImpl: this,
+      ),
+    );
+  }
+
+  TaskConstMeta get kCrateApiPhoneSetDndConstMeta =>
+      const TaskConstMeta(debugName: "set_dnd", argNames: ["on_"]);
 
   @override
   Future<Account> crateApiPhoneSignIn({
@@ -458,7 +743,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 12,
+            funcId: 21,
             port: port_,
           );
         },
@@ -488,7 +773,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 13,
+            funcId: 22,
             port: port_,
           );
         },
@@ -516,7 +801,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 14,
+            funcId: 23,
             port: port_,
           );
         },
@@ -543,7 +828,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 15,
+            funcId: 24,
             port: port_,
           );
         },
@@ -560,6 +845,97 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
 
   TaskConstMeta get kCrateApiPhoneStopPhoneConstMeta =>
       const TaskConstMeta(debugName: "stop_phone", argNames: []);
+
+  @override
+  Future<void> crateApiPhoneStopPlaying() {
+    return handler.executeNormal(
+      NormalTask(
+        callFfi: (port_) {
+          final serializer = SseSerializer(generalizedFrbRustBinding);
+          pdeCallFfi(
+            generalizedFrbRustBinding,
+            serializer,
+            funcId: 25,
+            port: port_,
+          );
+        },
+        codec: SseCodec(
+          decodeSuccessData: sse_decode_unit,
+          decodeErrorData: sse_decode_AnyhowException,
+        ),
+        constMeta: kCrateApiPhoneStopPlayingConstMeta,
+        argValues: [],
+        apiImpl: this,
+      ),
+    );
+  }
+
+  TaskConstMeta get kCrateApiPhoneStopPlayingConstMeta =>
+      const TaskConstMeta(debugName: "stop_playing", argNames: []);
+
+  @override
+  Future<void> crateApiPhoneTransfer({BigInt? call, required String target}) {
+    return handler.executeNormal(
+      NormalTask(
+        callFfi: (port_) {
+          final serializer = SseSerializer(generalizedFrbRustBinding);
+          sse_encode_opt_box_autoadd_u_64(call, serializer);
+          sse_encode_String(target, serializer);
+          pdeCallFfi(
+            generalizedFrbRustBinding,
+            serializer,
+            funcId: 26,
+            port: port_,
+          );
+        },
+        codec: SseCodec(
+          decodeSuccessData: sse_decode_unit,
+          decodeErrorData: sse_decode_AnyhowException,
+        ),
+        constMeta: kCrateApiPhoneTransferConstMeta,
+        argValues: [call, target],
+        apiImpl: this,
+      ),
+    );
+  }
+
+  TaskConstMeta get kCrateApiPhoneTransferConstMeta =>
+      const TaskConstMeta(debugName: "transfer", argNames: ["call", "target"]);
+
+  @override
+  Future<void> crateApiPhoneTransferAttended({
+    required BigInt call,
+    required BigInt to,
+  }) {
+    return handler.executeNormal(
+      NormalTask(
+        callFfi: (port_) {
+          final serializer = SseSerializer(generalizedFrbRustBinding);
+          sse_encode_u_64(call, serializer);
+          sse_encode_u_64(to, serializer);
+          pdeCallFfi(
+            generalizedFrbRustBinding,
+            serializer,
+            funcId: 27,
+            port: port_,
+          );
+        },
+        codec: SseCodec(
+          decodeSuccessData: sse_decode_unit,
+          decodeErrorData: sse_decode_AnyhowException,
+        ),
+        constMeta: kCrateApiPhoneTransferAttendedConstMeta,
+        argValues: [call, to],
+        apiImpl: this,
+      ),
+    );
+  }
+
+  TaskConstMeta get kCrateApiPhoneTransferAttendedConstMeta =>
+      const TaskConstMeta(
+        debugName: "transfer_attended",
+        argNames: ["call", "to"],
+      );
 
   @protected
   AnyhowException dco_decode_AnyhowException(dynamic raw) {
@@ -594,6 +970,19 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   }
 
   @protected
+  AudioDevice dco_decode_audio_device(dynamic raw) {
+    // Codec=Dco (DartCObject based), see doc to use other codecs
+    final arr = raw as List<dynamic>;
+    if (arr.length != 3)
+      throw Exception('unexpected arr length: expect 3 but see ${arr.length}');
+    return AudioDevice(
+      id: dco_decode_String(arr[0]),
+      name: dco_decode_String(arr[1]),
+      default_: dco_decode_bool(arr[2]),
+    );
+  }
+
+  @protected
   bool dco_decode_bool(dynamic raw) {
     // Codec=Dco (DartCObject based), see doc to use other codecs
     return raw as bool;
@@ -612,6 +1001,30 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   }
 
   @protected
+  CallingChange dco_decode_box_autoadd_calling_change(dynamic raw) {
+    // Codec=Dco (DartCObject based), see doc to use other codecs
+    return dco_decode_calling_change(raw);
+  }
+
+  @protected
+  CallingSettings dco_decode_box_autoadd_calling_settings(dynamic raw) {
+    // Codec=Dco (DartCObject based), see doc to use other codecs
+    return dco_decode_calling_settings(raw);
+  }
+
+  @protected
+  Quality dco_decode_box_autoadd_quality(dynamic raw) {
+    // Codec=Dco (DartCObject based), see doc to use other codecs
+    return dco_decode_quality(raw);
+  }
+
+  @protected
+  int dco_decode_box_autoadd_u_32(dynamic raw) {
+    // Codec=Dco (DartCObject based), see doc to use other codecs
+    return raw as int;
+  }
+
+  @protected
   BigInt dco_decode_box_autoadd_u_64(dynamic raw) {
     // Codec=Dco (DartCObject based), see doc to use other codecs
     return dco_decode_u_64(raw);
@@ -621,8 +1034,8 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   Call dco_decode_call(dynamic raw) {
     // Codec=Dco (DartCObject based), see doc to use other codecs
     final arr = raw as List<dynamic>;
-    if (arr.length != 8)
-      throw Exception('unexpected arr length: expect 8 but see ${arr.length}');
+    if (arr.length != 11)
+      throw Exception('unexpected arr length: expect 11 but see ${arr.length}');
     return Call(
       id: dco_decode_u_64(arr[0]),
       direction: dco_decode_direction(arr[1]),
@@ -632,6 +1045,9 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       held: dco_decode_bool(arr[5]),
       muted: dco_decode_bool(arr[6]),
       codec: dco_decode_opt_String(arr[7]),
+      encrypted: dco_decode_bool(arr[8]),
+      quality: dco_decode_opt_box_autoadd_quality(arr[9]),
+      connectedAt: dco_decode_opt_box_autoadd_u_64(arr[10]),
     );
   }
 
@@ -639,6 +1055,39 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   CallState dco_decode_call_state(dynamic raw) {
     // Codec=Dco (DartCObject based), see doc to use other codecs
     return CallState.values[raw as int];
+  }
+
+  @protected
+  CallingChange dco_decode_calling_change(dynamic raw) {
+    // Codec=Dco (DartCObject based), see doc to use other codecs
+    final arr = raw as List<dynamic>;
+    if (arr.length != 6)
+      throw Exception('unexpected arr length: expect 6 but see ${arr.length}');
+    return CallingChange(
+      callWaiting: dco_decode_opt_box_autoadd_bool(arr[0]),
+      forwardAll: dco_decode_opt_String(arr[1]),
+      forwardBusy: dco_decode_opt_String(arr[2]),
+      forwardNoAnswer: dco_decode_opt_String(arr[3]),
+      forwardUnreachable: dco_decode_opt_String(arr[4]),
+      noAnswerSecs: dco_decode_opt_box_autoadd_u_32(arr[5]),
+    );
+  }
+
+  @protected
+  CallingSettings dco_decode_calling_settings(dynamic raw) {
+    // Codec=Dco (DartCObject based), see doc to use other codecs
+    final arr = raw as List<dynamic>;
+    if (arr.length != 7)
+      throw Exception('unexpected arr length: expect 7 but see ${arr.length}');
+    return CallingSettings(
+      dnd: dco_decode_bool(arr[0]),
+      callWaiting: dco_decode_bool(arr[1]),
+      forwardAll: dco_decode_opt_String(arr[2]),
+      forwardBusy: dco_decode_opt_String(arr[3]),
+      forwardNoAnswer: dco_decode_opt_String(arr[4]),
+      forwardUnreachable: dco_decode_opt_String(arr[5]),
+      noAnswerSecs: dco_decode_opt_box_autoadd_u_32(arr[6]),
+    );
   }
 
   @protected
@@ -654,15 +1103,39 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   }
 
   @protected
+  List<AudioDevice> dco_decode_list_audio_device(dynamic raw) {
+    // Codec=Dco (DartCObject based), see doc to use other codecs
+    return (raw as List<dynamic>).map(dco_decode_audio_device).toList();
+  }
+
+  @protected
   List<Call> dco_decode_list_call(dynamic raw) {
     // Codec=Dco (DartCObject based), see doc to use other codecs
     return (raw as List<dynamic>).map(dco_decode_call).toList();
   }
 
   @protected
+  List<Person> dco_decode_list_person(dynamic raw) {
+    // Codec=Dco (DartCObject based), see doc to use other codecs
+    return (raw as List<dynamic>).map(dco_decode_person).toList();
+  }
+
+  @protected
   Uint8List dco_decode_list_prim_u_8_strict(dynamic raw) {
     // Codec=Dco (DartCObject based), see doc to use other codecs
     return raw as Uint8List;
+  }
+
+  @protected
+  List<Recent> dco_decode_list_recent(dynamic raw) {
+    // Codec=Dco (DartCObject based), see doc to use other codecs
+    return (raw as List<dynamic>).map(dco_decode_recent).toList();
+  }
+
+  @protected
+  List<Voicemail> dco_decode_list_voicemail(dynamic raw) {
+    // Codec=Dco (DartCObject based), see doc to use other codecs
+    return (raw as List<dynamic>).map(dco_decode_voicemail).toList();
   }
 
   @protected
@@ -684,6 +1157,24 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   }
 
   @protected
+  CallingSettings? dco_decode_opt_box_autoadd_calling_settings(dynamic raw) {
+    // Codec=Dco (DartCObject based), see doc to use other codecs
+    return raw == null ? null : dco_decode_box_autoadd_calling_settings(raw);
+  }
+
+  @protected
+  Quality? dco_decode_opt_box_autoadd_quality(dynamic raw) {
+    // Codec=Dco (DartCObject based), see doc to use other codecs
+    return raw == null ? null : dco_decode_box_autoadd_quality(raw);
+  }
+
+  @protected
+  int? dco_decode_opt_box_autoadd_u_32(dynamic raw) {
+    // Codec=Dco (DartCObject based), see doc to use other codecs
+    return raw == null ? null : dco_decode_box_autoadd_u_32(raw);
+  }
+
+  @protected
   BigInt? dco_decode_opt_box_autoadd_u_64(dynamic raw) {
     // Codec=Dco (DartCObject based), see doc to use other codecs
     return raw == null ? null : dco_decode_box_autoadd_u_64(raw);
@@ -693,6 +1184,25 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   Uint8List? dco_decode_opt_list_prim_u_8_strict(dynamic raw) {
     // Codec=Dco (DartCObject based), see doc to use other codecs
     return raw == null ? null : dco_decode_list_prim_u_8_strict(raw);
+  }
+
+  @protected
+  Person dco_decode_person(dynamic raw) {
+    // Codec=Dco (DartCObject based), see doc to use other codecs
+    final arr = raw as List<dynamic>;
+    if (arr.length != 9)
+      throw Exception('unexpected arr length: expect 9 but see ${arr.length}');
+    return Person(
+      key: dco_decode_String(arr[0]),
+      name: dco_decode_String(arr[1]),
+      extension_: dco_decode_opt_String(arr[2]),
+      department: dco_decode_opt_String(arr[3]),
+      jobTitle: dco_decode_opt_String(arr[4]),
+      presence: dco_decode_opt_String(arr[5]),
+      onCall: dco_decode_bool(arr[6]),
+      favourite: dco_decode_bool(arr[7]),
+      dial: dco_decode_String(arr[8]),
+    );
   }
 
   @protected
@@ -712,8 +1222,8 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   PhoneState dco_decode_phone_state(dynamic raw) {
     // Codec=Dco (DartCObject based), see doc to use other codecs
     final arr = raw as List<dynamic>;
-    if (arr.length != 8)
-      throw Exception('unexpected arr length: expect 8 but see ${arr.length}');
+    if (arr.length != 17)
+      throw Exception('unexpected arr length: expect 17 but see ${arr.length}');
     return PhoneState(
       aor: dco_decode_String(arr[0]),
       registration: dco_decode_registration(arr[1]),
@@ -723,6 +1233,45 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       brandName: dco_decode_opt_String(arr[5]),
       brandPrimary: dco_decode_opt_String(arr[6]),
       brandLogo: dco_decode_opt_list_prim_u_8_strict(arr[7]),
+      calling: dco_decode_opt_box_autoadd_calling_settings(arr[8]),
+      recents: dco_decode_list_recent(arr[9]),
+      people: dco_decode_list_person(arr[10]),
+      voicemail: dco_decode_list_voicemail(arr[11]),
+      inputs: dco_decode_list_audio_device(arr[12]),
+      outputs: dco_decode_list_audio_device(arr[13]),
+      input: dco_decode_opt_String(arr[14]),
+      output: dco_decode_opt_String(arr[15]),
+      playing: dco_decode_opt_String(arr[16]),
+    );
+  }
+
+  @protected
+  Quality dco_decode_quality(dynamic raw) {
+    // Codec=Dco (DartCObject based), see doc to use other codecs
+    final arr = raw as List<dynamic>;
+    if (arr.length != 3)
+      throw Exception('unexpected arr length: expect 3 but see ${arr.length}');
+    return Quality(
+      jitterMs: dco_decode_u_32(arr[0]),
+      packetLossPermille: dco_decode_u_32(arr[1]),
+      rttMs: dco_decode_opt_box_autoadd_u_32(arr[2]),
+    );
+  }
+
+  @protected
+  Recent dco_decode_recent(dynamic raw) {
+    // Codec=Dco (DartCObject based), see doc to use other codecs
+    final arr = raw as List<dynamic>;
+    if (arr.length != 7)
+      throw Exception('unexpected arr length: expect 7 but see ${arr.length}');
+    return Recent(
+      id: dco_decode_String(arr[0]),
+      direction: dco_decode_direction(arr[1]),
+      remote: dco_decode_String(arr[2]),
+      displayName: dco_decode_opt_String(arr[3]),
+      missed: dco_decode_bool(arr[4]),
+      startedAt: dco_decode_String(arr[5]),
+      durationSecs: dco_decode_opt_box_autoadd_u_64(arr[6]),
     );
   }
 
@@ -757,6 +1306,24 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   }
 
   @protected
+  Voicemail dco_decode_voicemail(dynamic raw) {
+    // Codec=Dco (DartCObject based), see doc to use other codecs
+    final arr = raw as List<dynamic>;
+    if (arr.length != 8)
+      throw Exception('unexpected arr length: expect 8 but see ${arr.length}');
+    return Voicemail(
+      id: dco_decode_String(arr[0]),
+      caller: dco_decode_String(arr[1]),
+      callerName: dco_decode_opt_String(arr[2]),
+      new_: dco_decode_bool(arr[3]),
+      urgent: dco_decode_bool(arr[4]),
+      durationSecs: dco_decode_u_64(arr[5]),
+      transcription: dco_decode_opt_String(arr[6]),
+      receivedAt: dco_decode_String(arr[7]),
+    );
+  }
+
+  @protected
   AnyhowException sse_decode_AnyhowException(SseDeserializer deserializer) {
     // Codec=Sse (Serialization based), see doc to use other codecs
     var inner = sse_decode_String(deserializer);
@@ -787,6 +1354,15 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   }
 
   @protected
+  AudioDevice sse_decode_audio_device(SseDeserializer deserializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    var var_id = sse_decode_String(deserializer);
+    var var_name = sse_decode_String(deserializer);
+    var var_default_ = sse_decode_bool(deserializer);
+    return AudioDevice(id: var_id, name: var_name, default_: var_default_);
+  }
+
+  @protected
   bool sse_decode_bool(SseDeserializer deserializer) {
     // Codec=Sse (Serialization based), see doc to use other codecs
     return deserializer.buffer.getUint8() != 0;
@@ -802,6 +1378,34 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   bool sse_decode_box_autoadd_bool(SseDeserializer deserializer) {
     // Codec=Sse (Serialization based), see doc to use other codecs
     return (sse_decode_bool(deserializer));
+  }
+
+  @protected
+  CallingChange sse_decode_box_autoadd_calling_change(
+    SseDeserializer deserializer,
+  ) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    return (sse_decode_calling_change(deserializer));
+  }
+
+  @protected
+  CallingSettings sse_decode_box_autoadd_calling_settings(
+    SseDeserializer deserializer,
+  ) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    return (sse_decode_calling_settings(deserializer));
+  }
+
+  @protected
+  Quality sse_decode_box_autoadd_quality(SseDeserializer deserializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    return (sse_decode_quality(deserializer));
+  }
+
+  @protected
+  int sse_decode_box_autoadd_u_32(SseDeserializer deserializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    return (sse_decode_u_32(deserializer));
   }
 
   @protected
@@ -821,6 +1425,9 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     var var_held = sse_decode_bool(deserializer);
     var var_muted = sse_decode_bool(deserializer);
     var var_codec = sse_decode_opt_String(deserializer);
+    var var_encrypted = sse_decode_bool(deserializer);
+    var var_quality = sse_decode_opt_box_autoadd_quality(deserializer);
+    var var_connectedAt = sse_decode_opt_box_autoadd_u_64(deserializer);
     return Call(
       id: var_id,
       direction: var_direction,
@@ -830,6 +1437,9 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       held: var_held,
       muted: var_muted,
       codec: var_codec,
+      encrypted: var_encrypted,
+      quality: var_quality,
+      connectedAt: var_connectedAt,
     );
   }
 
@@ -838,6 +1448,46 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     // Codec=Sse (Serialization based), see doc to use other codecs
     var inner = sse_decode_i_32(deserializer);
     return CallState.values[inner];
+  }
+
+  @protected
+  CallingChange sse_decode_calling_change(SseDeserializer deserializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    var var_callWaiting = sse_decode_opt_box_autoadd_bool(deserializer);
+    var var_forwardAll = sse_decode_opt_String(deserializer);
+    var var_forwardBusy = sse_decode_opt_String(deserializer);
+    var var_forwardNoAnswer = sse_decode_opt_String(deserializer);
+    var var_forwardUnreachable = sse_decode_opt_String(deserializer);
+    var var_noAnswerSecs = sse_decode_opt_box_autoadd_u_32(deserializer);
+    return CallingChange(
+      callWaiting: var_callWaiting,
+      forwardAll: var_forwardAll,
+      forwardBusy: var_forwardBusy,
+      forwardNoAnswer: var_forwardNoAnswer,
+      forwardUnreachable: var_forwardUnreachable,
+      noAnswerSecs: var_noAnswerSecs,
+    );
+  }
+
+  @protected
+  CallingSettings sse_decode_calling_settings(SseDeserializer deserializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    var var_dnd = sse_decode_bool(deserializer);
+    var var_callWaiting = sse_decode_bool(deserializer);
+    var var_forwardAll = sse_decode_opt_String(deserializer);
+    var var_forwardBusy = sse_decode_opt_String(deserializer);
+    var var_forwardNoAnswer = sse_decode_opt_String(deserializer);
+    var var_forwardUnreachable = sse_decode_opt_String(deserializer);
+    var var_noAnswerSecs = sse_decode_opt_box_autoadd_u_32(deserializer);
+    return CallingSettings(
+      dnd: var_dnd,
+      callWaiting: var_callWaiting,
+      forwardAll: var_forwardAll,
+      forwardBusy: var_forwardBusy,
+      forwardNoAnswer: var_forwardNoAnswer,
+      forwardUnreachable: var_forwardUnreachable,
+      noAnswerSecs: var_noAnswerSecs,
+    );
   }
 
   @protected
@@ -854,6 +1504,18 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   }
 
   @protected
+  List<AudioDevice> sse_decode_list_audio_device(SseDeserializer deserializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+
+    var len_ = sse_decode_i_32(deserializer);
+    var ans_ = <AudioDevice>[];
+    for (var idx_ = 0; idx_ < len_; ++idx_) {
+      ans_.add(sse_decode_audio_device(deserializer));
+    }
+    return ans_;
+  }
+
+  @protected
   List<Call> sse_decode_list_call(SseDeserializer deserializer) {
     // Codec=Sse (Serialization based), see doc to use other codecs
 
@@ -866,10 +1528,46 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   }
 
   @protected
+  List<Person> sse_decode_list_person(SseDeserializer deserializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+
+    var len_ = sse_decode_i_32(deserializer);
+    var ans_ = <Person>[];
+    for (var idx_ = 0; idx_ < len_; ++idx_) {
+      ans_.add(sse_decode_person(deserializer));
+    }
+    return ans_;
+  }
+
+  @protected
   Uint8List sse_decode_list_prim_u_8_strict(SseDeserializer deserializer) {
     // Codec=Sse (Serialization based), see doc to use other codecs
     var len_ = sse_decode_i_32(deserializer);
     return deserializer.buffer.getUint8List(len_);
+  }
+
+  @protected
+  List<Recent> sse_decode_list_recent(SseDeserializer deserializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+
+    var len_ = sse_decode_i_32(deserializer);
+    var ans_ = <Recent>[];
+    for (var idx_ = 0; idx_ < len_; ++idx_) {
+      ans_.add(sse_decode_recent(deserializer));
+    }
+    return ans_;
+  }
+
+  @protected
+  List<Voicemail> sse_decode_list_voicemail(SseDeserializer deserializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+
+    var len_ = sse_decode_i_32(deserializer);
+    var ans_ = <Voicemail>[];
+    for (var idx_ = 0; idx_ < len_; ++idx_) {
+      ans_.add(sse_decode_voicemail(deserializer));
+    }
+    return ans_;
   }
 
   @protected
@@ -906,6 +1604,41 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   }
 
   @protected
+  CallingSettings? sse_decode_opt_box_autoadd_calling_settings(
+    SseDeserializer deserializer,
+  ) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+
+    if (sse_decode_bool(deserializer)) {
+      return (sse_decode_box_autoadd_calling_settings(deserializer));
+    } else {
+      return null;
+    }
+  }
+
+  @protected
+  Quality? sse_decode_opt_box_autoadd_quality(SseDeserializer deserializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+
+    if (sse_decode_bool(deserializer)) {
+      return (sse_decode_box_autoadd_quality(deserializer));
+    } else {
+      return null;
+    }
+  }
+
+  @protected
+  int? sse_decode_opt_box_autoadd_u_32(SseDeserializer deserializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+
+    if (sse_decode_bool(deserializer)) {
+      return (sse_decode_box_autoadd_u_32(deserializer));
+    } else {
+      return null;
+    }
+  }
+
+  @protected
   BigInt? sse_decode_opt_box_autoadd_u_64(SseDeserializer deserializer) {
     // Codec=Sse (Serialization based), see doc to use other codecs
 
@@ -928,6 +1661,31 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   }
 
   @protected
+  Person sse_decode_person(SseDeserializer deserializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    var var_key = sse_decode_String(deserializer);
+    var var_name = sse_decode_String(deserializer);
+    var var_extension_ = sse_decode_opt_String(deserializer);
+    var var_department = sse_decode_opt_String(deserializer);
+    var var_jobTitle = sse_decode_opt_String(deserializer);
+    var var_presence = sse_decode_opt_String(deserializer);
+    var var_onCall = sse_decode_bool(deserializer);
+    var var_favourite = sse_decode_bool(deserializer);
+    var var_dial = sse_decode_String(deserializer);
+    return Person(
+      key: var_key,
+      name: var_name,
+      extension_: var_extension_,
+      department: var_department,
+      jobTitle: var_jobTitle,
+      presence: var_presence,
+      onCall: var_onCall,
+      favourite: var_favourite,
+      dial: var_dial,
+    );
+  }
+
+  @protected
   PhoneChange sse_decode_phone_change(SseDeserializer deserializer) {
     // Codec=Sse (Serialization based), see doc to use other codecs
     var var_kind = sse_decode_String(deserializer);
@@ -947,6 +1705,15 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     var var_brandName = sse_decode_opt_String(deserializer);
     var var_brandPrimary = sse_decode_opt_String(deserializer);
     var var_brandLogo = sse_decode_opt_list_prim_u_8_strict(deserializer);
+    var var_calling = sse_decode_opt_box_autoadd_calling_settings(deserializer);
+    var var_recents = sse_decode_list_recent(deserializer);
+    var var_people = sse_decode_list_person(deserializer);
+    var var_voicemail = sse_decode_list_voicemail(deserializer);
+    var var_inputs = sse_decode_list_audio_device(deserializer);
+    var var_outputs = sse_decode_list_audio_device(deserializer);
+    var var_input = sse_decode_opt_String(deserializer);
+    var var_output = sse_decode_opt_String(deserializer);
+    var var_playing = sse_decode_opt_String(deserializer);
     return PhoneState(
       aor: var_aor,
       registration: var_registration,
@@ -956,6 +1723,49 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       brandName: var_brandName,
       brandPrimary: var_brandPrimary,
       brandLogo: var_brandLogo,
+      calling: var_calling,
+      recents: var_recents,
+      people: var_people,
+      voicemail: var_voicemail,
+      inputs: var_inputs,
+      outputs: var_outputs,
+      input: var_input,
+      output: var_output,
+      playing: var_playing,
+    );
+  }
+
+  @protected
+  Quality sse_decode_quality(SseDeserializer deserializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    var var_jitterMs = sse_decode_u_32(deserializer);
+    var var_packetLossPermille = sse_decode_u_32(deserializer);
+    var var_rttMs = sse_decode_opt_box_autoadd_u_32(deserializer);
+    return Quality(
+      jitterMs: var_jitterMs,
+      packetLossPermille: var_packetLossPermille,
+      rttMs: var_rttMs,
+    );
+  }
+
+  @protected
+  Recent sse_decode_recent(SseDeserializer deserializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    var var_id = sse_decode_String(deserializer);
+    var var_direction = sse_decode_direction(deserializer);
+    var var_remote = sse_decode_String(deserializer);
+    var var_displayName = sse_decode_opt_String(deserializer);
+    var var_missed = sse_decode_bool(deserializer);
+    var var_startedAt = sse_decode_String(deserializer);
+    var var_durationSecs = sse_decode_opt_box_autoadd_u_64(deserializer);
+    return Recent(
+      id: var_id,
+      direction: var_direction,
+      remote: var_remote,
+      displayName: var_displayName,
+      missed: var_missed,
+      startedAt: var_startedAt,
+      durationSecs: var_durationSecs,
     );
   }
 
@@ -987,6 +1797,29 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   @protected
   void sse_decode_unit(SseDeserializer deserializer) {
     // Codec=Sse (Serialization based), see doc to use other codecs
+  }
+
+  @protected
+  Voicemail sse_decode_voicemail(SseDeserializer deserializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    var var_id = sse_decode_String(deserializer);
+    var var_caller = sse_decode_String(deserializer);
+    var var_callerName = sse_decode_opt_String(deserializer);
+    var var_new_ = sse_decode_bool(deserializer);
+    var var_urgent = sse_decode_bool(deserializer);
+    var var_durationSecs = sse_decode_u_64(deserializer);
+    var var_transcription = sse_decode_opt_String(deserializer);
+    var var_receivedAt = sse_decode_String(deserializer);
+    return Voicemail(
+      id: var_id,
+      caller: var_caller,
+      callerName: var_callerName,
+      new_: var_new_,
+      urgent: var_urgent,
+      durationSecs: var_durationSecs,
+      transcription: var_transcription,
+      receivedAt: var_receivedAt,
+    );
   }
 
   @protected
@@ -1029,6 +1862,14 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   }
 
   @protected
+  void sse_encode_audio_device(AudioDevice self, SseSerializer serializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    sse_encode_String(self.id, serializer);
+    sse_encode_String(self.name, serializer);
+    sse_encode_bool(self.default_, serializer);
+  }
+
+  @protected
   void sse_encode_bool(bool self, SseSerializer serializer) {
     // Codec=Sse (Serialization based), see doc to use other codecs
     serializer.buffer.putUint8(self ? 1 : 0);
@@ -1044,6 +1885,36 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   void sse_encode_box_autoadd_bool(bool self, SseSerializer serializer) {
     // Codec=Sse (Serialization based), see doc to use other codecs
     sse_encode_bool(self, serializer);
+  }
+
+  @protected
+  void sse_encode_box_autoadd_calling_change(
+    CallingChange self,
+    SseSerializer serializer,
+  ) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    sse_encode_calling_change(self, serializer);
+  }
+
+  @protected
+  void sse_encode_box_autoadd_calling_settings(
+    CallingSettings self,
+    SseSerializer serializer,
+  ) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    sse_encode_calling_settings(self, serializer);
+  }
+
+  @protected
+  void sse_encode_box_autoadd_quality(Quality self, SseSerializer serializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    sse_encode_quality(self, serializer);
+  }
+
+  @protected
+  void sse_encode_box_autoadd_u_32(int self, SseSerializer serializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    sse_encode_u_32(self, serializer);
   }
 
   @protected
@@ -1063,12 +1934,41 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     sse_encode_bool(self.held, serializer);
     sse_encode_bool(self.muted, serializer);
     sse_encode_opt_String(self.codec, serializer);
+    sse_encode_bool(self.encrypted, serializer);
+    sse_encode_opt_box_autoadd_quality(self.quality, serializer);
+    sse_encode_opt_box_autoadd_u_64(self.connectedAt, serializer);
   }
 
   @protected
   void sse_encode_call_state(CallState self, SseSerializer serializer) {
     // Codec=Sse (Serialization based), see doc to use other codecs
     sse_encode_i_32(self.index, serializer);
+  }
+
+  @protected
+  void sse_encode_calling_change(CallingChange self, SseSerializer serializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    sse_encode_opt_box_autoadd_bool(self.callWaiting, serializer);
+    sse_encode_opt_String(self.forwardAll, serializer);
+    sse_encode_opt_String(self.forwardBusy, serializer);
+    sse_encode_opt_String(self.forwardNoAnswer, serializer);
+    sse_encode_opt_String(self.forwardUnreachable, serializer);
+    sse_encode_opt_box_autoadd_u_32(self.noAnswerSecs, serializer);
+  }
+
+  @protected
+  void sse_encode_calling_settings(
+    CallingSettings self,
+    SseSerializer serializer,
+  ) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    sse_encode_bool(self.dnd, serializer);
+    sse_encode_bool(self.callWaiting, serializer);
+    sse_encode_opt_String(self.forwardAll, serializer);
+    sse_encode_opt_String(self.forwardBusy, serializer);
+    sse_encode_opt_String(self.forwardNoAnswer, serializer);
+    sse_encode_opt_String(self.forwardUnreachable, serializer);
+    sse_encode_opt_box_autoadd_u_32(self.noAnswerSecs, serializer);
   }
 
   @protected
@@ -1084,11 +1984,32 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   }
 
   @protected
+  void sse_encode_list_audio_device(
+    List<AudioDevice> self,
+    SseSerializer serializer,
+  ) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    sse_encode_i_32(self.length, serializer);
+    for (final item in self) {
+      sse_encode_audio_device(item, serializer);
+    }
+  }
+
+  @protected
   void sse_encode_list_call(List<Call> self, SseSerializer serializer) {
     // Codec=Sse (Serialization based), see doc to use other codecs
     sse_encode_i_32(self.length, serializer);
     for (final item in self) {
       sse_encode_call(item, serializer);
+    }
+  }
+
+  @protected
+  void sse_encode_list_person(List<Person> self, SseSerializer serializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    sse_encode_i_32(self.length, serializer);
+    for (final item in self) {
+      sse_encode_person(item, serializer);
     }
   }
 
@@ -1100,6 +2021,27 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     // Codec=Sse (Serialization based), see doc to use other codecs
     sse_encode_i_32(self.length, serializer);
     serializer.buffer.putUint8List(self);
+  }
+
+  @protected
+  void sse_encode_list_recent(List<Recent> self, SseSerializer serializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    sse_encode_i_32(self.length, serializer);
+    for (final item in self) {
+      sse_encode_recent(item, serializer);
+    }
+  }
+
+  @protected
+  void sse_encode_list_voicemail(
+    List<Voicemail> self,
+    SseSerializer serializer,
+  ) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    sse_encode_i_32(self.length, serializer);
+    for (final item in self) {
+      sse_encode_voicemail(item, serializer);
+    }
   }
 
   @protected
@@ -1136,6 +2078,42 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   }
 
   @protected
+  void sse_encode_opt_box_autoadd_calling_settings(
+    CallingSettings? self,
+    SseSerializer serializer,
+  ) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+
+    sse_encode_bool(self != null, serializer);
+    if (self != null) {
+      sse_encode_box_autoadd_calling_settings(self, serializer);
+    }
+  }
+
+  @protected
+  void sse_encode_opt_box_autoadd_quality(
+    Quality? self,
+    SseSerializer serializer,
+  ) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+
+    sse_encode_bool(self != null, serializer);
+    if (self != null) {
+      sse_encode_box_autoadd_quality(self, serializer);
+    }
+  }
+
+  @protected
+  void sse_encode_opt_box_autoadd_u_32(int? self, SseSerializer serializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+
+    sse_encode_bool(self != null, serializer);
+    if (self != null) {
+      sse_encode_box_autoadd_u_32(self, serializer);
+    }
+  }
+
+  @protected
   void sse_encode_opt_box_autoadd_u_64(BigInt? self, SseSerializer serializer) {
     // Codec=Sse (Serialization based), see doc to use other codecs
 
@@ -1159,6 +2137,20 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   }
 
   @protected
+  void sse_encode_person(Person self, SseSerializer serializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    sse_encode_String(self.key, serializer);
+    sse_encode_String(self.name, serializer);
+    sse_encode_opt_String(self.extension_, serializer);
+    sse_encode_opt_String(self.department, serializer);
+    sse_encode_opt_String(self.jobTitle, serializer);
+    sse_encode_opt_String(self.presence, serializer);
+    sse_encode_bool(self.onCall, serializer);
+    sse_encode_bool(self.favourite, serializer);
+    sse_encode_String(self.dial, serializer);
+  }
+
+  @protected
   void sse_encode_phone_change(PhoneChange self, SseSerializer serializer) {
     // Codec=Sse (Serialization based), see doc to use other codecs
     sse_encode_String(self.kind, serializer);
@@ -1177,6 +2169,35 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     sse_encode_opt_String(self.brandName, serializer);
     sse_encode_opt_String(self.brandPrimary, serializer);
     sse_encode_opt_list_prim_u_8_strict(self.brandLogo, serializer);
+    sse_encode_opt_box_autoadd_calling_settings(self.calling, serializer);
+    sse_encode_list_recent(self.recents, serializer);
+    sse_encode_list_person(self.people, serializer);
+    sse_encode_list_voicemail(self.voicemail, serializer);
+    sse_encode_list_audio_device(self.inputs, serializer);
+    sse_encode_list_audio_device(self.outputs, serializer);
+    sse_encode_opt_String(self.input, serializer);
+    sse_encode_opt_String(self.output, serializer);
+    sse_encode_opt_String(self.playing, serializer);
+  }
+
+  @protected
+  void sse_encode_quality(Quality self, SseSerializer serializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    sse_encode_u_32(self.jitterMs, serializer);
+    sse_encode_u_32(self.packetLossPermille, serializer);
+    sse_encode_opt_box_autoadd_u_32(self.rttMs, serializer);
+  }
+
+  @protected
+  void sse_encode_recent(Recent self, SseSerializer serializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    sse_encode_String(self.id, serializer);
+    sse_encode_direction(self.direction, serializer);
+    sse_encode_String(self.remote, serializer);
+    sse_encode_opt_String(self.displayName, serializer);
+    sse_encode_bool(self.missed, serializer);
+    sse_encode_String(self.startedAt, serializer);
+    sse_encode_opt_box_autoadd_u_64(self.durationSecs, serializer);
   }
 
   @protected
@@ -1206,5 +2227,18 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   @protected
   void sse_encode_unit(void self, SseSerializer serializer) {
     // Codec=Sse (Serialization based), see doc to use other codecs
+  }
+
+  @protected
+  void sse_encode_voicemail(Voicemail self, SseSerializer serializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    sse_encode_String(self.id, serializer);
+    sse_encode_String(self.caller, serializer);
+    sse_encode_opt_String(self.callerName, serializer);
+    sse_encode_bool(self.new_, serializer);
+    sse_encode_bool(self.urgent, serializer);
+    sse_encode_u_64(self.durationSecs, serializer);
+    sse_encode_opt_String(self.transcription, serializer);
+    sse_encode_String(self.receivedAt, serializer);
   }
 }

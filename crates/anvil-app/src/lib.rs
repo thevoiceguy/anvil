@@ -9,6 +9,7 @@
 
 #![forbid(unsafe_code)]
 
+mod clip;
 mod command;
 pub mod control;
 mod data;
@@ -25,6 +26,7 @@ use parking_lot::Mutex;
 use tokio::sync::{broadcast, RwLock};
 
 pub use anvil_fcp::{CallingSettings, CallingUpdate};
+pub use clip::{decode_wav, Clip};
 pub use command::{AudioKind, Command, Response};
 pub use state::{
     AudioDevice, AudioDevices, Brand, CallState, CallView, Change, Direction, MessageWaiting,
@@ -77,6 +79,8 @@ struct Inner {
     local: Mutex<LocalSettings>,
     /// FCP's feature codes by name (`park`, `retrieve`, …).
     features: Mutex<BTreeMap<String, String>>,
+    /// The voicemail message playing: stopped by aborting it.
+    playback: Mutex<Option<tokio::task::AbortHandle>>,
 }
 
 impl Phone {
@@ -113,6 +117,7 @@ impl Phone {
             settings_path: cfg.settings_path,
             local: Mutex::new(local),
             features: Mutex::new(BTreeMap::new()),
+            playback: Mutex::new(None),
         });
         let follower = tokio::spawn(follow(Arc::downgrade(&inner), events));
         *inner.events.lock() = Some(follower);
@@ -214,6 +219,10 @@ impl Phone {
                     },
                     |c| c.state == CallState::Connected && c.held != on,
                 )?;
+                if !on {
+                    // Back to a held call puts the one up on hold: a swap.
+                    self.hold_the_others(Some(id)).await?;
+                }
                 self.anvil().await?.hold(CallId(id), on).await?;
                 self.update_call(id, |c| c.held = on, || unreachable_view(id));
                 Ok(Response::ok())
@@ -282,20 +291,55 @@ impl Phone {
                 Ok(Response::ok())
             }
             Command::Heard { id } => {
-                self.fcp("voicemail")?
-                    .set_voicemail_status(&id, "heard")
-                    .await?;
-                self.inner.update_voicemail(|list| {
-                    if let Some(m) = list.iter_mut().find(|m| m.id == id) {
-                        m.new = false;
-                    }
-                });
+                self.mark_heard(&id).await?;
                 Ok(Response::ok())
             }
             Command::DeleteVoicemail { id } => {
+                if self.inner.state.lock().playing.as_deref() == Some(&id) {
+                    self.stop_playing();
+                }
                 self.fcp("voicemail")?.delete_voicemail(&id).await?;
                 self.inner
                     .update_voicemail(|list| list.retain(|m| m.id != id));
+                Ok(Response::ok())
+            }
+            Command::Play { id } => {
+                let message = self
+                    .inner
+                    .state
+                    .lock()
+                    .voicemail
+                    .iter()
+                    .find(|m| m.id == id)
+                    .cloned()
+                    .ok_or_else(|| PhoneError::Refused(format!("no message {id}")))?;
+                let wav = self.voicemail_audio(&id).await?;
+                let clip = clip::decode_wav(&wav).map_err(PhoneError::Refused)?;
+                self.stop_playing();
+                let task = self.anvil().await?.play(clip.samples, clip.sample_rate)?;
+                *self.inner.playback.lock() = Some(task.abort_handle());
+                self.inner.set_playing(Some(id.clone()));
+                let inner = Arc::downgrade(&self.inner);
+                let playing = id.clone();
+                tokio::spawn(async move {
+                    // Played out (not stopped): nothing is playing now.
+                    if task.await.is_ok() {
+                        if let Some(inner) = inner.upgrade() {
+                            if inner.state.lock().playing.as_deref() == Some(&playing) {
+                                *inner.playback.lock() = None;
+                                inner.set_playing(None);
+                            }
+                        }
+                    }
+                });
+                if message.new {
+                    // Heard once it plays, as a desk phone marks it.
+                    self.mark_heard(&id).await?;
+                }
+                Ok(Response::ok())
+            }
+            Command::Stop => {
+                self.stop_playing();
                 Ok(Response::ok())
             }
             Command::Favourite { who, on } => {
@@ -351,8 +395,29 @@ impl Phone {
         Ok(self.fcp("voicemail")?.voicemail_audio(id).await?)
     }
 
+    async fn mark_heard(&self, id: &str) -> Result<(), PhoneError> {
+        self.fcp("voicemail")?
+            .set_voicemail_status(id, "heard")
+            .await?;
+        self.inner.update_voicemail(|list| {
+            if let Some(m) = list.iter_mut().find(|m| m.id == id) {
+                m.new = false;
+            }
+        });
+        Ok(())
+    }
+
+    /// Stop the message playing, if one is.
+    fn stop_playing(&self) {
+        if let Some(task) = self.inner.playback.lock().take() {
+            task.abort();
+        }
+        self.inner.set_playing(None);
+    }
+
     /// Stop the phone: its calls end, it unregisters.
     pub async fn shutdown(&self) {
+        self.stop_playing();
         if let Some(task) = self.inner.events.lock().take() {
             task.abort();
         }
@@ -513,6 +578,18 @@ impl Inner {
         }
     }
 
+    fn set_playing(&self, id: Option<String>) {
+        let changed = {
+            let mut state = self.state.lock();
+            let changed = state.playing != id;
+            state.playing = id.clone();
+            changed
+        };
+        if changed {
+            let _ = self.changes.send(Change::Playing { id });
+        }
+    }
+
     fn set_calling(&self, settings: CallingSettings) {
         self.set_dnd(settings.dnd);
         let changed = {
@@ -645,6 +722,7 @@ async fn follow(inner: std::sync::Weak<Inner>, mut events: EventStream) {
                     call.0,
                     |c| {
                         c.state = CallState::Connected;
+                        c.connected_at.get_or_insert_with(unix_now);
                         c.codec = Some(format!("{codec:?}").to_ascii_lowercase());
                         c.encrypted = encrypted;
                     },
@@ -722,6 +800,13 @@ async fn follow(inner: std::sync::Weak<Inner>, mut events: EventStream) {
             _ => {}
         }
     }
+}
+
+fn unix_now() -> u64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or(0)
 }
 
 fn outgoing(id: u64) -> CallView {

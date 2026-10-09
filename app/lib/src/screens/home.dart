@@ -1,74 +1,225 @@
+// The signed-in app: the keypad and calls, recents, people, voicemail and
+// settings, with a call ringing in and the call up shown over every page.
+
 import 'package:flutter/material.dart';
 
 import '../../l10n/app_localizations.dart';
 import '../design/theme.dart';
 import '../phone/phone_api.dart';
 import '../phone/phone_model.dart';
+import 'calls.dart';
+import 'people.dart';
+import 'recents.dart';
+import 'settings.dart';
+import 'voicemail.dart';
 
-class HomeScreen extends StatelessWidget {
+/// The pages, in the order the navigation shows them.
+enum Section { phone, recents, people, voicemail, settings }
+
+class HomeScreen extends StatefulWidget {
   const HomeScreen({super.key, required this.model});
   final PhoneModel model;
+
+  @override
+  State<HomeScreen> createState() => _HomeScreenState();
+}
+
+class _HomeScreenState extends State<HomeScreen> {
+  Section _page = Section.phone;
+
+  /// The keypad over a call up, to place a second one.
+  bool _adding = false;
+
+  PhoneModel get model => widget.model;
+
+  /// Call someone from any page: the phone page then shows the call.
+  void _dial(String target) {
+    setState(() {
+      _page = Section.phone;
+      _adding = false;
+    });
+    model.run(() => model.api.call(target));
+  }
 
   @override
   Widget build(BuildContext context) {
     final s = Strings.of(context);
     final snap = model.snapshot;
     final ringing = snap.calls.where((c) => c.isRingingIn).toList();
-    final active = snap.calls
-        .where(
-          (c) =>
-              c.state != CallState.ringing || c.direction == Direction.outgoing,
-        )
-        .toList();
-    return Scaffold(
-      appBar: AppBar(
-        leading: snap.brandLogo == null
-            ? null
-            : Padding(
-                padding: const EdgeInsets.all(8),
-                child: Image.memory(
-                  snap.brandLogo!,
-                  key: const Key('brandLogo'),
-                  errorBuilder: (_, _, _) => const SizedBox.shrink(),
-                ),
-              ),
-        title: Text(
-          snap.brandName ?? model.account?.username ?? s.appName,
-          key: const Key('title'),
-        ),
-        actions: [
-          _RegistrationChip(registration: snap.registration),
-          if (snap.dnd == true)
-            Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 8),
-              child: Chip(label: Text(s.dndOn)),
-            ),
-          IconButton(
-            key: const Key('signOut'),
-            tooltip: s.signOut,
-            icon: const Icon(Icons.logout),
-            onPressed: model.signOut,
-          ),
-        ],
+    final up = snap.calls.where((c) => !c.isRingingIn).toList();
+    if (up.isEmpty) _adding = false;
+
+    final pages = <(Section, IconData, IconData, String, int)>[
+      (Section.phone, Icons.dialpad_outlined, Icons.dialpad, s.navKeypad, 0),
+      (
+        Section.recents,
+        Icons.history_outlined,
+        Icons.history,
+        s.navRecents,
+        snap.missedCalls,
       ),
-      body: SafeArea(
-        child: Column(
+      (Section.people, Icons.people_outline, Icons.people, s.navPeople, 0),
+      (
+        Section.voicemail,
+        Icons.voicemail_outlined,
+        Icons.voicemail,
+        s.navVoicemail,
+        snap.newVoicemail,
+      ),
+      (
+        Section.settings,
+        Icons.settings_outlined,
+        Icons.settings,
+        s.navSettings,
+        0,
+      ),
+    ];
+    Widget badged(IconData icon, int count, Section page) => Badge(
+      key: Key('badge-${page.name}'),
+      isLabelVisible: count > 0,
+      label: Text('$count'),
+      child: Icon(icon),
+    );
+
+    final body = Column(
+      children: [
+        for (final call in ringing) IncomingCallCard(model: model, call: call),
+        if (up.isNotEmpty && _page != Section.phone)
+          CallBar(
+            model: model,
+            onOpen: () => setState(() => _page = Section.phone),
+          ),
+        if (model.notice != null) _NoticeBanner(model: model),
+        Expanded(child: _pageBody(up)),
+      ],
+    );
+
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final wide = constraints.maxWidth >= 640;
+        return Scaffold(
+          appBar: _appBar(context),
+          body: SafeArea(
+            child: wide
+                ? Row(
+                    children: [
+                      NavigationRail(
+                        selectedIndex: _page.index,
+                        labelType: NavigationRailLabelType.all,
+                        onDestinationSelected: (i) =>
+                            setState(() => _page = Section.values[i]),
+                        destinations: [
+                          for (final (page, icon, selected, label, count)
+                              in pages)
+                            NavigationRailDestination(
+                              icon: badged(icon, count, page),
+                              selectedIcon: Icon(selected),
+                              label: Text(label),
+                            ),
+                        ],
+                      ),
+                      const VerticalDivider(width: 1),
+                      Expanded(child: body),
+                    ],
+                  )
+                : body,
+          ),
+          bottomNavigationBar: wide
+              ? null
+              : NavigationBar(
+                  selectedIndex: _page.index,
+                  onDestinationSelected: (i) =>
+                      setState(() => _page = Section.values[i]),
+                  destinations: [
+                    for (final (page, icon, selected, label, count) in pages)
+                      NavigationDestination(
+                        icon: badged(icon, count, page),
+                        selectedIcon: Icon(selected),
+                        label: label,
+                      ),
+                  ],
+                ),
+        );
+      },
+    );
+  }
+
+  Widget _pageBody(List<PhoneCall> up) => switch (_page) {
+    Section.phone =>
+      up.isNotEmpty && !_adding
+          ? InCallPanel(
+              model: model,
+              onAddCall: () => setState(() => _adding = true),
+            )
+          : Keypad(
+              onCall: _dial,
+              onBack: up.isEmpty ? null : () => setState(() => _adding = false),
+            ),
+    Section.recents => RecentsPage(model: model, onDial: _dial),
+    Section.people => PeoplePage(model: model, onDial: _dial),
+    Section.voicemail => VoicemailPage(model: model, onDial: _dial),
+    Section.settings => SettingsPage(model: model),
+  };
+
+  PreferredSizeWidget _appBar(BuildContext context) {
+    final s = Strings.of(context);
+    final snap = model.snapshot;
+    return AppBar(
+      leading: snap.brandLogo == null
+          ? null
+          : Padding(
+              padding: const EdgeInsets.all(8),
+              child: Image.memory(
+                snap.brandLogo!,
+                key: const Key('brandLogo'),
+                errorBuilder: (_, _, _) => const SizedBox.shrink(),
+              ),
+            ),
+      title: Text(
+        snap.brandName ?? model.account?.username ?? s.appName,
+        key: const Key('title'),
+      ),
+      actions: [
+        if (snap.dnd == true)
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 4),
+            child: Chip(
+              key: const Key('dndChip'),
+              avatar: const Icon(Icons.do_not_disturb_on, size: 16),
+              label: Text(s.dndOn),
+            ),
+          ),
+        _RegistrationChip(registration: snap.registration),
+        const SizedBox(width: 8),
+      ],
+    );
+  }
+}
+
+class _NoticeBanner extends StatelessWidget {
+  const _NoticeBanner({required this.model});
+  final PhoneModel model;
+
+  @override
+  Widget build(BuildContext context) {
+    final s = Strings.of(context);
+    final notice = model.notice!;
+    final text = switch (notice.kind) {
+      'call_ended' => s.callEnded(notice.text),
+      'transfer' => s.transferProgress(notice.text),
+      _ => s.commandFailed(notice.text),
+    };
+    return Material(
+      color: Theme.of(context).colorScheme.surfaceContainerHighest,
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(16, 4, 4, 4),
+        child: Row(
           children: [
-            if (snap.voicemailNew > 0)
-              ListTile(
-                leading: const Icon(Icons.voicemail),
-                title: Text(s.voicemailCount(snap.voicemailNew)),
-              ),
-            for (final call in ringing)
-              IncomingCallCard(model: model, call: call),
-            for (final call in active) CallCard(model: model, call: call),
-            if (model.notice != null)
-              Padding(
-                padding: const EdgeInsets.all(12),
-                child: Text(model.notice!, key: const Key('notice')),
-              ),
-            const Spacer(),
-            if (active.isEmpty && ringing.isEmpty) Keypad(model: model),
+            Expanded(child: Text(text, key: const Key('notice'))),
+            IconButton(
+              icon: const Icon(Icons.close, size: 18),
+              onPressed: model.clearNotice,
+            ),
           ],
         ),
       ),
@@ -89,213 +240,10 @@ class _RegistrationChip extends StatelessWidget {
       Registration.unregistered => (s.registrationUnregistered, Colors.grey),
       Registration.failed => (s.registrationFailed, AnvilColors.hangup),
     };
-    return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 8),
-      child: Chip(
-        key: const Key('registration'),
-        avatar: CircleAvatar(backgroundColor: color, radius: 5),
-        label: Text(label),
-      ),
-    );
-  }
-}
-
-class IncomingCallCard extends StatelessWidget {
-  const IncomingCallCard({super.key, required this.model, required this.call});
-  final PhoneModel model;
-  final PhoneCall call;
-
-  @override
-  Widget build(BuildContext context) {
-    final s = Strings.of(context);
-    return Card(
-      margin: const EdgeInsets.all(12),
-      child: Padding(
-        padding: const EdgeInsets.all(16),
-        child: Column(
-          children: [
-            Text(s.incomingCall, style: Theme.of(context).textTheme.labelLarge),
-            const SizedBox(height: 4),
-            Text(call.who, style: Theme.of(context).textTheme.headlineSmall),
-            const SizedBox(height: 16),
-            Row(
-              mainAxisAlignment: MainAxisAlignment.spaceEvenly,
-              children: [
-                FilledButton.icon(
-                  key: const Key('decline'),
-                  style: FilledButton.styleFrom(
-                    backgroundColor: AnvilColors.hangup,
-                  ),
-                  onPressed: () => model.run(() => model.api.decline(call.id)),
-                  icon: const Icon(Icons.call_end),
-                  label: Text(s.declineButton),
-                ),
-                FilledButton.icon(
-                  key: const Key('answer'),
-                  style: FilledButton.styleFrom(
-                    backgroundColor: AnvilColors.answer,
-                  ),
-                  onPressed: () => model.run(() => model.api.answer(call.id)),
-                  icon: const Icon(Icons.call),
-                  label: Text(s.answerButton),
-                ),
-              ],
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-}
-
-class CallCard extends StatelessWidget {
-  const CallCard({super.key, required this.model, required this.call});
-  final PhoneModel model;
-  final PhoneCall call;
-
-  @override
-  Widget build(BuildContext context) {
-    final s = Strings.of(context);
-    final status = call.held
-        ? s.callHeld
-        : switch (call.state) {
-            CallState.dialing => s.callDialing,
-            CallState.ringing => s.callRinging,
-            CallState.connected => s.callConnected,
-          };
-    final connected = call.state == CallState.connected;
-    return Card(
-      margin: const EdgeInsets.all(12),
-      child: Padding(
-        padding: const EdgeInsets.all(16),
-        child: Column(
-          children: [
-            Text(call.who, style: Theme.of(context).textTheme.headlineSmall),
-            Text(status, key: const Key('callStatus')),
-            const SizedBox(height: 16),
-            Wrap(
-              spacing: 12,
-              alignment: WrapAlignment.center,
-              children: [
-                if (connected)
-                  OutlinedButton.icon(
-                    key: const Key('mute'),
-                    onPressed: () =>
-                        model.run(() => model.api.mute(call.id, !call.muted)),
-                    icon: Icon(call.muted ? Icons.mic_off : Icons.mic),
-                    label: Text(call.muted ? s.unmuteButton : s.muteButton),
-                  ),
-                if (connected)
-                  OutlinedButton.icon(
-                    key: const Key('hold'),
-                    onPressed: () =>
-                        model.run(() => model.api.hold(call.id, !call.held)),
-                    icon: Icon(call.held ? Icons.play_arrow : Icons.pause),
-                    label: Text(call.held ? s.resumeButton : s.holdButton),
-                  ),
-                FilledButton.icon(
-                  key: const Key('hangup'),
-                  style: FilledButton.styleFrom(
-                    backgroundColor: AnvilColors.hangup,
-                  ),
-                  onPressed: () => model.run(() => model.api.hangup(call.id)),
-                  icon: const Icon(Icons.call_end),
-                  label: Text(s.hangupButton),
-                ),
-              ],
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-}
-
-class Keypad extends StatefulWidget {
-  const Keypad({super.key, required this.model});
-  final PhoneModel model;
-
-  @override
-  State<Keypad> createState() => _KeypadState();
-}
-
-class _KeypadState extends State<Keypad> {
-  final _target = TextEditingController();
-  static const _keys = [
-    '1',
-    '2',
-    '3',
-    '4',
-    '5',
-    '6',
-    '7',
-    '8',
-    '9',
-    '*',
-    '0',
-    '#',
-  ];
-
-  void _press(String key) => setState(() => _target.text += key);
-
-  void _call() {
-    final target = _target.text.trim();
-    if (target.isEmpty) return;
-    widget.model.run(() => widget.model.api.call(target));
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    final s = Strings.of(context);
-    return ConstrainedBox(
-      constraints: const BoxConstraints(maxWidth: 320),
-      child: Padding(
-        padding: const EdgeInsets.all(16),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            TextField(
-              key: const Key('target'),
-              controller: _target,
-              textAlign: TextAlign.center,
-              style: Theme.of(context).textTheme.headlineSmall,
-              decoration: InputDecoration(hintText: s.keypadHint),
-              onSubmitted: (_) => _call(),
-            ),
-            const SizedBox(height: 12),
-            GridView.count(
-              crossAxisCount: 3,
-              shrinkWrap: true,
-              mainAxisSpacing: 8,
-              crossAxisSpacing: 8,
-              childAspectRatio: 1.6,
-              physics: const NeverScrollableScrollPhysics(),
-              children: [
-                for (final k in _keys)
-                  OutlinedButton(
-                    key: Key('key$k'),
-                    onPressed: () => _press(k),
-                    child: Text(
-                      k,
-                      style: Theme.of(context).textTheme.titleLarge,
-                    ),
-                  ),
-              ],
-            ),
-            const SizedBox(height: 12),
-            FilledButton.icon(
-              key: const Key('call'),
-              style: FilledButton.styleFrom(
-                backgroundColor: AnvilColors.answer,
-                minimumSize: const Size.fromHeight(52),
-              ),
-              onPressed: _call,
-              icon: const Icon(Icons.call),
-              label: Text(s.callButton),
-            ),
-          ],
-        ),
-      ),
+    return Chip(
+      key: const Key('registration'),
+      avatar: CircleAvatar(backgroundColor: color, radius: 5),
+      label: Text(label),
     );
   }
 }

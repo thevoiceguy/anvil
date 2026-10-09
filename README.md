@@ -70,7 +70,7 @@ cargo run -p anvil-cli -- call 1002               # from another terminal or a s
 cargo run -p anvil-cli -- answer | hangup | hold | resume | mute | transfer 1003 | park | status
 cargo run -p anvil-cli -- forward busy 1003       # or `forward all off`, `waiting off`
 cargo run -p anvil-cli -- favourite Ann Lee       # a busy lamp in `status`
-cargo run -p anvil-cli -- heard <id> | delete <id> | refresh
+cargo run -p anvil-cli -- play <id> | stop | heard <id> | delete <id> | refresh
 cargo run -p anvil-cli -- audio in "USB Headset"  # or `audio out default`
 cargo run -p anvil-cli -- watch                   # its changes as they happen
 

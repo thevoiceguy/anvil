@@ -38,6 +38,7 @@ dependencies:
     path: rust_builder
   flutter_rust_bridge: 2.13.0
   path_provider: ^2.1.6
+  clock: ^1.1.2
   intl: any
   flutter_localizations:
     sdk: flutter

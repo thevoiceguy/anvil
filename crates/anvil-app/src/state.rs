@@ -27,6 +27,9 @@ pub struct State {
     /// The mailbox's messages, newest first.
     pub voicemail: Vec<Voicemail>,
     pub audio: AudioDevices,
+    /// The voicemail message playing, by id.
+    #[serde(default)]
+    pub playing: Option<String>,
 }
 
 /// The tenant's brand, as a screen applies it (`docs/BRANDING.md`).
@@ -56,6 +59,7 @@ impl State {
             people: Vec::new(),
             voicemail: Vec::new(),
             audio: AudioDevices::default(),
+            playing: None,
         }
     }
 
@@ -113,6 +117,9 @@ pub struct CallView {
     /// How the media is doing, once measured.
     #[serde(default)]
     pub quality: Option<Quality>,
+    /// When it connected, in Unix seconds: what a call timer counts from.
+    #[serde(default)]
+    pub connected_at: Option<u64>,
 }
 
 impl CallView {
@@ -129,6 +136,7 @@ impl CallView {
             codec: None,
             encrypted: false,
             quality: None,
+            connected_at: None,
         }
     }
 }
@@ -299,5 +307,9 @@ pub enum Change {
     /// The devices, or the choice of them, changed.
     Audio {
         audio: AudioDevices,
+    },
+    /// A voicemail message started playing, or (`None`) the playing stopped.
+    Playing {
+        id: Option<String>,
     },
 }

@@ -1,5 +1,5 @@
 // Anvil's design (`docs/APP.md` §4): one set of colours, type and shapes on
-// every platform. A tenant's brand replaces the colours at run time (U2).
+// every platform. A tenant's brand replaces the colours at run time.
 
 import 'package:flutter/material.dart';
 
@@ -10,6 +10,18 @@ class AnvilColors {
   static const hangup = Color(0xFFD64545);
   static const surface = Color(0xFFF6F8FA);
   static const surfaceDark = Color(0xFF0F161D);
+  static const held = Color(0xFFD99A1E);
+
+  /// A person's presence as a dot: available, away, busy, offline.
+  static Color presence(String? presence, {bool onCall = false}) {
+    if (onCall) return hangup;
+    return switch (presence) {
+      'available' || 'online' || 'open' => answer,
+      'away' || 'idle' || 'brb' => held,
+      'busy' || 'dnd' || 'on-the-phone' => hangup,
+      _ => const Color(0xFF9AA5B1),
+    };
+  }
 }
 
 class AnvilTheme {

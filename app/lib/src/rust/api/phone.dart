@@ -7,7 +7,7 @@ import '../frb_generated.dart';
 
 import 'package:flutter_rust_bridge/flutter_rust_bridge_for_generated.dart';
 
-// These functions are ignored because they are not marked as `pub`: `execute`, `kind_only`, `on_runtime`, `phone`, `runtime`
+// These functions are ignored because they are not marked as `pub`: `devices`, `direction`, `execute`, `kind_only`, `on_runtime`, `phone`, `runtime`
 
 /// The session kept at `session_path`, if there is one.
 Future<Account?> savedAccount({required String sessionPath}) =>
@@ -70,6 +70,49 @@ Future<void> mute({BigInt? call, required bool on_}) =>
 Future<void> sendDigits({BigInt? call, required String digits}) =>
     RustLib.instance.api.crateApiPhoneSendDigits(call: call, digits: digits);
 
+/// Blind-transfer a call to a number, an extension or an address.
+Future<void> transfer({BigInt? call, required String target}) =>
+    RustLib.instance.api.crateApiPhoneTransfer(call: call, target: target);
+
+/// Join `call`'s party to `to`'s (attended transfer), ending both of ours.
+Future<void> transferAttended({required BigInt call, required BigInt to}) =>
+    RustLib.instance.api.crateApiPhoneTransferAttended(call: call, to: to);
+
+/// Park a call with FCP's park code.
+Future<void> park({BigInt? call}) =>
+    RustLib.instance.api.crateApiPhonePark(call: call);
+
+Future<void> setDnd({required bool on_}) =>
+    RustLib.instance.api.crateApiPhoneSetDnd(on_: on_);
+
+/// Change the calling settings: forwards, call waiting.
+Future<void> setCalling({required CallingChange change}) =>
+    RustLib.instance.api.crateApiPhoneSetCalling(change: change);
+
+Future<void> markHeard({required String id}) =>
+    RustLib.instance.api.crateApiPhoneMarkHeard(id: id);
+
+Future<void> deleteVoicemail({required String id}) =>
+    RustLib.instance.api.crateApiPhoneDeleteVoicemail(id: id);
+
+/// Play a voicemail message through the speaker calls use.
+Future<void> playVoicemail({required String id}) =>
+    RustLib.instance.api.crateApiPhonePlayVoicemail(id: id);
+
+Future<void> stopPlaying() => RustLib.instance.api.crateApiPhoneStopPlaying();
+
+/// Make someone (by key, extension or name) a favourite, or not.
+Future<void> favourite({required String who, required bool on_}) =>
+    RustLib.instance.api.crateApiPhoneFavourite(who: who, on_: on_);
+
+/// Use this microphone (`input`) or speaker by id, `None` for the system's
+/// default, for the calls set up from now on.
+Future<void> chooseAudio({required bool input, String? device}) =>
+    RustLib.instance.api.crateApiPhoneChooseAudio(input: input, device: device);
+
+/// Read the user's data from FCP again.
+Future<void> refresh() => RustLib.instance.api.crateApiPhoneRefresh();
+
 /// Who is signed in.
 class Account {
   final String username;
@@ -91,6 +134,31 @@ class Account {
           server == other.server;
 }
 
+/// A microphone or a speaker.
+class AudioDevice {
+  final String id;
+  final String name;
+  final bool default_;
+
+  const AudioDevice({
+    required this.id,
+    required this.name,
+    required this.default_,
+  });
+
+  @override
+  int get hashCode => id.hashCode ^ name.hashCode ^ default_.hashCode;
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is AudioDevice &&
+          runtimeType == other.runtimeType &&
+          id == other.id &&
+          name == other.name &&
+          default_ == other.default_;
+}
+
 /// One call, as a screen shows it.
 class Call {
   final BigInt id;
@@ -102,6 +170,15 @@ class Call {
   final bool muted;
   final String? codec;
 
+  /// The media is encrypted (SRTP).
+  final bool encrypted;
+
+  /// How the media is doing, once measured.
+  final Quality? quality;
+
+  /// When it connected, in Unix seconds.
+  final BigInt? connectedAt;
+
   const Call({
     required this.id,
     required this.direction,
@@ -111,6 +188,9 @@ class Call {
     required this.held,
     required this.muted,
     this.codec,
+    required this.encrypted,
+    this.quality,
+    this.connectedAt,
   });
 
   @override
@@ -122,7 +202,10 @@ class Call {
       state.hashCode ^
       held.hashCode ^
       muted.hashCode ^
-      codec.hashCode;
+      codec.hashCode ^
+      encrypted.hashCode ^
+      quality.hashCode ^
+      connectedAt.hashCode;
 
   @override
   bool operator ==(Object other) =>
@@ -136,19 +219,164 @@ class Call {
           state == other.state &&
           held == other.held &&
           muted == other.muted &&
-          codec == other.codec;
+          codec == other.codec &&
+          encrypted == other.encrypted &&
+          quality == other.quality &&
+          connectedAt == other.connectedAt;
 }
 
 /// Where a call is.
 enum CallState { dialing, ringing, connected }
 
+/// A change to the calling settings: each field left out is kept, and an
+/// empty forward clears it.
+class CallingChange {
+  final bool? callWaiting;
+  final String? forwardAll;
+  final String? forwardBusy;
+  final String? forwardNoAnswer;
+  final String? forwardUnreachable;
+  final int? noAnswerSecs;
+
+  const CallingChange({
+    this.callWaiting,
+    this.forwardAll,
+    this.forwardBusy,
+    this.forwardNoAnswer,
+    this.forwardUnreachable,
+    this.noAnswerSecs,
+  });
+
+  @override
+  int get hashCode =>
+      callWaiting.hashCode ^
+      forwardAll.hashCode ^
+      forwardBusy.hashCode ^
+      forwardNoAnswer.hashCode ^
+      forwardUnreachable.hashCode ^
+      noAnswerSecs.hashCode;
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is CallingChange &&
+          runtimeType == other.runtimeType &&
+          callWaiting == other.callWaiting &&
+          forwardAll == other.forwardAll &&
+          forwardBusy == other.forwardBusy &&
+          forwardNoAnswer == other.forwardNoAnswer &&
+          forwardUnreachable == other.forwardUnreachable &&
+          noAnswerSecs == other.noAnswerSecs;
+}
+
+/// The user's calling settings, as FCP has them.
+class CallingSettings {
+  final bool dnd;
+  final bool callWaiting;
+  final String? forwardAll;
+  final String? forwardBusy;
+  final String? forwardNoAnswer;
+  final String? forwardUnreachable;
+  final int? noAnswerSecs;
+
+  const CallingSettings({
+    required this.dnd,
+    required this.callWaiting,
+    this.forwardAll,
+    this.forwardBusy,
+    this.forwardNoAnswer,
+    this.forwardUnreachable,
+    this.noAnswerSecs,
+  });
+
+  @override
+  int get hashCode =>
+      dnd.hashCode ^
+      callWaiting.hashCode ^
+      forwardAll.hashCode ^
+      forwardBusy.hashCode ^
+      forwardNoAnswer.hashCode ^
+      forwardUnreachable.hashCode ^
+      noAnswerSecs.hashCode;
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is CallingSettings &&
+          runtimeType == other.runtimeType &&
+          dnd == other.dnd &&
+          callWaiting == other.callWaiting &&
+          forwardAll == other.forwardAll &&
+          forwardBusy == other.forwardBusy &&
+          forwardNoAnswer == other.forwardNoAnswer &&
+          forwardUnreachable == other.forwardUnreachable &&
+          noAnswerSecs == other.noAnswerSecs;
+}
+
 /// Which way a call goes.
 enum Direction { incoming, outgoing }
+
+/// Someone in the tenant's directory.
+class Person {
+  final String key;
+  final String name;
+  final String? extension_;
+  final String? department;
+  final String? jobTitle;
+
+  /// `available`, `busy`, `away`, `dnd`, `offline`, … when shown.
+  final String? presence;
+  final bool onCall;
+  final bool favourite;
+
+  /// What to dial.
+  final String dial;
+
+  const Person({
+    required this.key,
+    required this.name,
+    this.extension_,
+    this.department,
+    this.jobTitle,
+    this.presence,
+    required this.onCall,
+    required this.favourite,
+    required this.dial,
+  });
+
+  @override
+  int get hashCode =>
+      key.hashCode ^
+      name.hashCode ^
+      extension_.hashCode ^
+      department.hashCode ^
+      jobTitle.hashCode ^
+      presence.hashCode ^
+      onCall.hashCode ^
+      favourite.hashCode ^
+      dial.hashCode;
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is Person &&
+          runtimeType == other.runtimeType &&
+          key == other.key &&
+          name == other.name &&
+          extension_ == other.extension_ &&
+          department == other.department &&
+          jobTitle == other.jobTitle &&
+          presence == other.presence &&
+          onCall == other.onCall &&
+          favourite == other.favourite &&
+          dial == other.dial;
+}
 
 /// What changed: the screen redraws from [`phone_state`] and may say why.
 class PhoneChange {
   /// `registration`, `call`, `call_ended`, `message_waiting`, `dnd`,
-  /// `transfer_progress`.
+  /// `brand`, `transfer_progress`, `calling`, `recents`, `people`,
+  /// `person`, `voicemail`, `audio`, `playing`.
   final String kind;
 
   /// The call it is about, if any.
@@ -185,6 +413,25 @@ class PhoneState {
   final String? brandPrimary;
   final Uint8List? brandLogo;
 
+  /// Signed in to FCP: the calling settings, once read.
+  final CallingSettings? calling;
+
+  /// The latest calls, newest first.
+  final List<Recent> recents;
+  final List<Person> people;
+
+  /// The mailbox's messages, newest first.
+  final List<Voicemail> voicemail;
+  final List<AudioDevice> inputs;
+  final List<AudioDevice> outputs;
+
+  /// The devices chosen; `None` is the system's default.
+  final String? input;
+  final String? output;
+
+  /// The voicemail message playing.
+  final String? playing;
+
   const PhoneState({
     required this.aor,
     required this.registration,
@@ -194,6 +441,15 @@ class PhoneState {
     this.brandName,
     this.brandPrimary,
     this.brandLogo,
+    this.calling,
+    required this.recents,
+    required this.people,
+    required this.voicemail,
+    required this.inputs,
+    required this.outputs,
+    this.input,
+    this.output,
+    this.playing,
   });
 
   @override
@@ -205,7 +461,16 @@ class PhoneState {
       dnd.hashCode ^
       brandName.hashCode ^
       brandPrimary.hashCode ^
-      brandLogo.hashCode;
+      brandLogo.hashCode ^
+      calling.hashCode ^
+      recents.hashCode ^
+      people.hashCode ^
+      voicemail.hashCode ^
+      inputs.hashCode ^
+      outputs.hashCode ^
+      input.hashCode ^
+      output.hashCode ^
+      playing.hashCode;
 
   @override
   bool operator ==(Object other) =>
@@ -219,8 +484,139 @@ class PhoneState {
           dnd == other.dnd &&
           brandName == other.brandName &&
           brandPrimary == other.brandPrimary &&
-          brandLogo == other.brandLogo;
+          brandLogo == other.brandLogo &&
+          calling == other.calling &&
+          recents == other.recents &&
+          people == other.people &&
+          voicemail == other.voicemail &&
+          inputs == other.inputs &&
+          outputs == other.outputs &&
+          input == other.input &&
+          output == other.output &&
+          playing == other.playing;
+}
+
+/// A connected call's media, as last measured.
+class Quality {
+  final int jitterMs;
+  final int packetLossPermille;
+  final int? rttMs;
+
+  const Quality({
+    required this.jitterMs,
+    required this.packetLossPermille,
+    this.rttMs,
+  });
+
+  @override
+  int get hashCode =>
+      jitterMs.hashCode ^ packetLossPermille.hashCode ^ rttMs.hashCode;
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is Quality &&
+          runtimeType == other.runtimeType &&
+          jitterMs == other.jitterMs &&
+          packetLossPermille == other.packetLossPermille &&
+          rttMs == other.rttMs;
+}
+
+/// One call in the user's history.
+class Recent {
+  final String id;
+  final Direction direction;
+  final String remote;
+  final String? displayName;
+  final bool missed;
+
+  /// RFC 3339.
+  final String startedAt;
+  final BigInt? durationSecs;
+
+  const Recent({
+    required this.id,
+    required this.direction,
+    required this.remote,
+    this.displayName,
+    required this.missed,
+    required this.startedAt,
+    this.durationSecs,
+  });
+
+  @override
+  int get hashCode =>
+      id.hashCode ^
+      direction.hashCode ^
+      remote.hashCode ^
+      displayName.hashCode ^
+      missed.hashCode ^
+      startedAt.hashCode ^
+      durationSecs.hashCode;
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is Recent &&
+          runtimeType == other.runtimeType &&
+          id == other.id &&
+          direction == other.direction &&
+          remote == other.remote &&
+          displayName == other.displayName &&
+          missed == other.missed &&
+          startedAt == other.startedAt &&
+          durationSecs == other.durationSecs;
 }
 
 /// Whether the account is registered.
 enum Registration { unregistered, registering, registered, failed }
+
+/// One voicemail message.
+class Voicemail {
+  final String id;
+  final String caller;
+  final String? callerName;
+  final bool new_;
+  final bool urgent;
+  final BigInt durationSecs;
+  final String? transcription;
+
+  /// RFC 3339.
+  final String receivedAt;
+
+  const Voicemail({
+    required this.id,
+    required this.caller,
+    this.callerName,
+    required this.new_,
+    required this.urgent,
+    required this.durationSecs,
+    this.transcription,
+    required this.receivedAt,
+  });
+
+  @override
+  int get hashCode =>
+      id.hashCode ^
+      caller.hashCode ^
+      callerName.hashCode ^
+      new_.hashCode ^
+      urgent.hashCode ^
+      durationSecs.hashCode ^
+      transcription.hashCode ^
+      receivedAt.hashCode;
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is Voicemail &&
+          runtimeType == other.runtimeType &&
+          id == other.id &&
+          caller == other.caller &&
+          callerName == other.callerName &&
+          new_ == other.new_ &&
+          urgent == other.urgent &&
+          durationSecs == other.durationSecs &&
+          transcription == other.transcription &&
+          receivedAt == other.receivedAt;
+}

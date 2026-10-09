@@ -107,6 +107,16 @@ live in FCP: `docs/SOFTPHONE.md` in `thevoiceguy/fcp`. Anvil's phases:
       checks the bindings, and builds and starts the app on Linux, Windows
       and macOS
 - [ ] **U2** The desktop app
+  - [x] **U2a** The user's data in `anvil-app`: calling settings, recents,
+        people with presence and busy lamps, voicemail, audio devices, each
+        call's encryption and quality; `calling`, `park`, `heard`,
+        `delete`, `favourite`, `audio`, `refresh`
+  - [x] **U2b** The screens: in a call (mute, hold, keypad, transfer blind
+        or after talking first, park, a second call and swap, the timer,
+        encryption and quality), recents, people, voicemail (played through
+        the call speaker: `play`/`stop` in `anvil-app` and the CLI),
+        settings; navigation as a rail or, narrow, a bar
+  - [ ] **U2c** Tray, notifications, start at login, golden screenshots
 - [ ] **U3** Desktop distribution
 - [ ] **U4** The app on mobile
 - [ ] **U5** Ringing a sleeping phone (with FCP's push)

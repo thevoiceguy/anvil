@@ -38,6 +38,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   Account dco_decode_account(dynamic raw);
 
   @protected
+  AudioDevice dco_decode_audio_device(dynamic raw);
+
+  @protected
   bool dco_decode_bool(dynamic raw);
 
   @protected
@@ -45,6 +48,18 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   bool dco_decode_box_autoadd_bool(dynamic raw);
+
+  @protected
+  CallingChange dco_decode_box_autoadd_calling_change(dynamic raw);
+
+  @protected
+  CallingSettings dco_decode_box_autoadd_calling_settings(dynamic raw);
+
+  @protected
+  Quality dco_decode_box_autoadd_quality(dynamic raw);
+
+  @protected
+  int dco_decode_box_autoadd_u_32(dynamic raw);
 
   @protected
   BigInt dco_decode_box_autoadd_u_64(dynamic raw);
@@ -56,16 +71,34 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   CallState dco_decode_call_state(dynamic raw);
 
   @protected
+  CallingChange dco_decode_calling_change(dynamic raw);
+
+  @protected
+  CallingSettings dco_decode_calling_settings(dynamic raw);
+
+  @protected
   Direction dco_decode_direction(dynamic raw);
 
   @protected
   int dco_decode_i_32(dynamic raw);
 
   @protected
+  List<AudioDevice> dco_decode_list_audio_device(dynamic raw);
+
+  @protected
   List<Call> dco_decode_list_call(dynamic raw);
 
   @protected
+  List<Person> dco_decode_list_person(dynamic raw);
+
+  @protected
   Uint8List dco_decode_list_prim_u_8_strict(dynamic raw);
+
+  @protected
+  List<Recent> dco_decode_list_recent(dynamic raw);
+
+  @protected
+  List<Voicemail> dco_decode_list_voicemail(dynamic raw);
 
   @protected
   String? dco_decode_opt_String(dynamic raw);
@@ -77,16 +110,34 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   bool? dco_decode_opt_box_autoadd_bool(dynamic raw);
 
   @protected
+  CallingSettings? dco_decode_opt_box_autoadd_calling_settings(dynamic raw);
+
+  @protected
+  Quality? dco_decode_opt_box_autoadd_quality(dynamic raw);
+
+  @protected
+  int? dco_decode_opt_box_autoadd_u_32(dynamic raw);
+
+  @protected
   BigInt? dco_decode_opt_box_autoadd_u_64(dynamic raw);
 
   @protected
   Uint8List? dco_decode_opt_list_prim_u_8_strict(dynamic raw);
 
   @protected
+  Person dco_decode_person(dynamic raw);
+
+  @protected
   PhoneChange dco_decode_phone_change(dynamic raw);
 
   @protected
   PhoneState dco_decode_phone_state(dynamic raw);
+
+  @protected
+  Quality dco_decode_quality(dynamic raw);
+
+  @protected
+  Recent dco_decode_recent(dynamic raw);
 
   @protected
   Registration dco_decode_registration(dynamic raw);
@@ -104,6 +155,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   void dco_decode_unit(dynamic raw);
 
   @protected
+  Voicemail dco_decode_voicemail(dynamic raw);
+
+  @protected
   AnyhowException sse_decode_AnyhowException(SseDeserializer deserializer);
 
   @protected
@@ -118,6 +172,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   Account sse_decode_account(SseDeserializer deserializer);
 
   @protected
+  AudioDevice sse_decode_audio_device(SseDeserializer deserializer);
+
+  @protected
   bool sse_decode_bool(SseDeserializer deserializer);
 
   @protected
@@ -125,6 +182,22 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   bool sse_decode_box_autoadd_bool(SseDeserializer deserializer);
+
+  @protected
+  CallingChange sse_decode_box_autoadd_calling_change(
+    SseDeserializer deserializer,
+  );
+
+  @protected
+  CallingSettings sse_decode_box_autoadd_calling_settings(
+    SseDeserializer deserializer,
+  );
+
+  @protected
+  Quality sse_decode_box_autoadd_quality(SseDeserializer deserializer);
+
+  @protected
+  int sse_decode_box_autoadd_u_32(SseDeserializer deserializer);
 
   @protected
   BigInt sse_decode_box_autoadd_u_64(SseDeserializer deserializer);
@@ -136,16 +209,34 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   CallState sse_decode_call_state(SseDeserializer deserializer);
 
   @protected
+  CallingChange sse_decode_calling_change(SseDeserializer deserializer);
+
+  @protected
+  CallingSettings sse_decode_calling_settings(SseDeserializer deserializer);
+
+  @protected
   Direction sse_decode_direction(SseDeserializer deserializer);
 
   @protected
   int sse_decode_i_32(SseDeserializer deserializer);
 
   @protected
+  List<AudioDevice> sse_decode_list_audio_device(SseDeserializer deserializer);
+
+  @protected
   List<Call> sse_decode_list_call(SseDeserializer deserializer);
 
   @protected
+  List<Person> sse_decode_list_person(SseDeserializer deserializer);
+
+  @protected
   Uint8List sse_decode_list_prim_u_8_strict(SseDeserializer deserializer);
+
+  @protected
+  List<Recent> sse_decode_list_recent(SseDeserializer deserializer);
+
+  @protected
+  List<Voicemail> sse_decode_list_voicemail(SseDeserializer deserializer);
 
   @protected
   String? sse_decode_opt_String(SseDeserializer deserializer);
@@ -157,16 +248,36 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   bool? sse_decode_opt_box_autoadd_bool(SseDeserializer deserializer);
 
   @protected
+  CallingSettings? sse_decode_opt_box_autoadd_calling_settings(
+    SseDeserializer deserializer,
+  );
+
+  @protected
+  Quality? sse_decode_opt_box_autoadd_quality(SseDeserializer deserializer);
+
+  @protected
+  int? sse_decode_opt_box_autoadd_u_32(SseDeserializer deserializer);
+
+  @protected
   BigInt? sse_decode_opt_box_autoadd_u_64(SseDeserializer deserializer);
 
   @protected
   Uint8List? sse_decode_opt_list_prim_u_8_strict(SseDeserializer deserializer);
 
   @protected
+  Person sse_decode_person(SseDeserializer deserializer);
+
+  @protected
   PhoneChange sse_decode_phone_change(SseDeserializer deserializer);
 
   @protected
   PhoneState sse_decode_phone_state(SseDeserializer deserializer);
+
+  @protected
+  Quality sse_decode_quality(SseDeserializer deserializer);
+
+  @protected
+  Recent sse_decode_recent(SseDeserializer deserializer);
 
   @protected
   Registration sse_decode_registration(SseDeserializer deserializer);
@@ -182,6 +293,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   void sse_decode_unit(SseDeserializer deserializer);
+
+  @protected
+  Voicemail sse_decode_voicemail(SseDeserializer deserializer);
 
   @protected
   void sse_encode_AnyhowException(
@@ -202,6 +316,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   void sse_encode_account(Account self, SseSerializer serializer);
 
   @protected
+  void sse_encode_audio_device(AudioDevice self, SseSerializer serializer);
+
+  @protected
   void sse_encode_bool(bool self, SseSerializer serializer);
 
   @protected
@@ -209,6 +326,24 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   void sse_encode_box_autoadd_bool(bool self, SseSerializer serializer);
+
+  @protected
+  void sse_encode_box_autoadd_calling_change(
+    CallingChange self,
+    SseSerializer serializer,
+  );
+
+  @protected
+  void sse_encode_box_autoadd_calling_settings(
+    CallingSettings self,
+    SseSerializer serializer,
+  );
+
+  @protected
+  void sse_encode_box_autoadd_quality(Quality self, SseSerializer serializer);
+
+  @protected
+  void sse_encode_box_autoadd_u_32(int self, SseSerializer serializer);
 
   @protected
   void sse_encode_box_autoadd_u_64(BigInt self, SseSerializer serializer);
@@ -220,17 +355,44 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   void sse_encode_call_state(CallState self, SseSerializer serializer);
 
   @protected
+  void sse_encode_calling_change(CallingChange self, SseSerializer serializer);
+
+  @protected
+  void sse_encode_calling_settings(
+    CallingSettings self,
+    SseSerializer serializer,
+  );
+
+  @protected
   void sse_encode_direction(Direction self, SseSerializer serializer);
 
   @protected
   void sse_encode_i_32(int self, SseSerializer serializer);
 
   @protected
+  void sse_encode_list_audio_device(
+    List<AudioDevice> self,
+    SseSerializer serializer,
+  );
+
+  @protected
   void sse_encode_list_call(List<Call> self, SseSerializer serializer);
+
+  @protected
+  void sse_encode_list_person(List<Person> self, SseSerializer serializer);
 
   @protected
   void sse_encode_list_prim_u_8_strict(
     Uint8List self,
+    SseSerializer serializer,
+  );
+
+  @protected
+  void sse_encode_list_recent(List<Recent> self, SseSerializer serializer);
+
+  @protected
+  void sse_encode_list_voicemail(
+    List<Voicemail> self,
     SseSerializer serializer,
   );
 
@@ -247,6 +409,21 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   void sse_encode_opt_box_autoadd_bool(bool? self, SseSerializer serializer);
 
   @protected
+  void sse_encode_opt_box_autoadd_calling_settings(
+    CallingSettings? self,
+    SseSerializer serializer,
+  );
+
+  @protected
+  void sse_encode_opt_box_autoadd_quality(
+    Quality? self,
+    SseSerializer serializer,
+  );
+
+  @protected
+  void sse_encode_opt_box_autoadd_u_32(int? self, SseSerializer serializer);
+
+  @protected
   void sse_encode_opt_box_autoadd_u_64(BigInt? self, SseSerializer serializer);
 
   @protected
@@ -256,10 +433,19 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   );
 
   @protected
+  void sse_encode_person(Person self, SseSerializer serializer);
+
+  @protected
   void sse_encode_phone_change(PhoneChange self, SseSerializer serializer);
 
   @protected
   void sse_encode_phone_state(PhoneState self, SseSerializer serializer);
+
+  @protected
+  void sse_encode_quality(Quality self, SseSerializer serializer);
+
+  @protected
+  void sse_encode_recent(Recent self, SseSerializer serializer);
 
   @protected
   void sse_encode_registration(Registration self, SseSerializer serializer);
@@ -275,6 +461,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   void sse_encode_unit(void self, SseSerializer serializer);
+
+  @protected
+  void sse_encode_voicemail(Voicemail self, SseSerializer serializer);
 }
 
 // Section: wire_class

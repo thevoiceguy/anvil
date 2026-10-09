@@ -9,7 +9,13 @@
   "signInCode": "One-time code",
   "signInButton": "Sign in",
   "signInFailed": "Could not sign in: {reason}",
-  "@signInFailed": {"placeholders": {"reason": {"type": "String"}}},
+  "@signInFailed": {
+    "placeholders": {
+      "reason": {
+        "type": "String"
+      }
+    }
+  },
   "registrationRegistered": "Ready",
   "registrationRegistering": "Connecting…",
   "registrationUnregistered": "Offline",
@@ -31,11 +37,136 @@
   "callHeld": "On hold",
   "noCalls": "No calls",
   "voicemailCount": "{count, plural, =0{No new voicemail} =1{1 new voicemail} other{{count} new voicemails}}",
-  "@voicemailCount": {"placeholders": {"count": {"type": "int"}}},
+  "@voicemailCount": {
+    "placeholders": {
+      "count": {
+        "type": "int"
+      }
+    }
+  },
   "dndOn": "Do not disturb",
   "signOut": "Sign out",
   "callEnded": "Call ended: {reason}",
-  "@callEnded": {"placeholders": {"reason": {"type": "String"}}},
+  "@callEnded": {
+    "placeholders": {
+      "reason": {
+        "type": "String"
+      }
+    }
+  },
   "commandFailed": "{reason}",
-  "@commandFailed": {"placeholders": {"reason": {"type": "String"}}}
+  "@commandFailed": {
+    "placeholders": {
+      "reason": {
+        "type": "String"
+      }
+    }
+  },
+  "navKeypad": "Keypad",
+  "navRecents": "Recents",
+  "navPeople": "People",
+  "navVoicemail": "Voicemail",
+  "navSettings": "Settings",
+  "transferButton": "Transfer",
+  "parkButton": "Park",
+  "addCallButton": "Add call",
+  "hideKeypadButton": "Hide keypad",
+  "backToCallButton": "Back to the call",
+  "completeTransferButton": "Complete transfer",
+  "encrypted": "Encrypted",
+  "notEncrypted": "Not encrypted",
+  "qualityGood": "Good connection",
+  "qualityFair": "Fair connection",
+  "qualityPoor": "Poor connection",
+  "transferTitle": "Transfer {name}",
+  "@transferTitle": {
+    "placeholders": {
+      "name": {
+        "type": "String"
+      }
+    }
+  },
+  "transferNow": "Transfer now",
+  "transferConsult": "Talk first",
+  "cancelButton": "Cancel",
+  "transferProgress": "Transfer: {reason}",
+  "@transferProgress": {
+    "placeholders": {
+      "reason": {
+        "type": "String"
+      }
+    }
+  },
+  "otherCalls": "Other calls",
+  "recentsEmpty": "No recent calls",
+  "recentMissed": "Missed",
+  "callBackButton": "Call back",
+  "refreshButton": "Refresh",
+  "yesterday": "Yesterday",
+  "peopleSearch": "Search people",
+  "peopleEmpty": "Nobody to show",
+  "favourites": "Favourites",
+  "everyone": "Everyone",
+  "onACall": "On a call",
+  "presenceAvailable": "Available",
+  "presenceAway": "Away",
+  "presenceBusy": "Busy",
+  "presenceDnd": "Do not disturb",
+  "presenceOffline": "Offline",
+  "favouriteAdd": "Add to favourites",
+  "favouriteRemove": "Remove from favourites",
+  "callPerson": "Call {name}",
+  "@callPerson": {
+    "placeholders": {
+      "name": {
+        "type": "String"
+      }
+    }
+  },
+  "voicemailEmpty": "No messages",
+  "urgent": "Urgent",
+  "playButton": "Play",
+  "stopButton": "Stop",
+  "markHeardButton": "Mark heard",
+  "deleteButton": "Delete",
+  "deleteMessageConfirm": "Delete the message from {name}?",
+  "@deleteMessageConfirm": {
+    "placeholders": {
+      "name": {
+        "type": "String"
+      }
+    }
+  },
+  "settingsCalls": "Calls",
+  "dndSubtitle": "Calls go to voicemail, or are refused",
+  "callWaiting": "Call waiting",
+  "callWaitingSubtitle": "Ring with a second call while one is up",
+  "settingsForwarding": "Forwarding",
+  "forwardAll": "Always",
+  "forwardBusy": "When busy",
+  "forwardNoAnswer": "When not answered",
+  "forwardUnreachable": "When unreachable",
+  "forwardOff": "Off",
+  "forwardTo": "Forward to",
+  "forwardRingSeconds": "Ring for (seconds)",
+  "saveButton": "Save",
+  "clearButton": "Clear",
+  "settingsAudio": "Audio",
+  "microphone": "Microphone",
+  "speaker": "Speaker",
+  "systemDefault": "System default",
+  "audioNote": "Applies from the next call",
+  "settingsAccount": "Account",
+  "signedInAs": "{user} on {server}",
+  "@signedInAs": {
+    "placeholders": {
+      "user": {
+        "type": "String"
+      },
+      "server": {
+        "type": "String"
+      }
+    }
+  },
+  "needsFcp": "Needs a phone signed in to FCP"
 }
