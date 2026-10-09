@@ -1,7 +1,8 @@
 name: App
 
 # The Flutter app (`app/`, docs/APP.md): analysed and its widget tests run;
-# its generated bindings checked against the Rust API; built for Windows,
+# its generated bindings checked against the Rust API; its golden
+# screenshots compared on all three desktops; built for Windows,
 # macOS and Linux, its integration test run on each, and each build kept as
 # the run's artifact.
 
@@ -33,6 +34,13 @@ jobs:
       - run: flutter pub get
       - run: flutter analyze
       - run: flutter test
+      - name: What differed
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: golden-failures-linux
+          path: app/test/goldens/failures
+          if-no-files-found: ignore
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
       - name: The generator
@@ -75,8 +83,20 @@ jobs:
         if: matrix.target == 'linux'
         run: |
           sudo apt-get update
-          sudo apt-get install -y clang cmake ninja-build pkg-config libgtk-3-dev liblzma-dev libasound2-dev xvfb
+          sudo apt-get install -y clang cmake ninja-build pkg-config libgtk-3-dev liblzma-dev libasound2-dev libayatana-appindicator3-dev xvfb
       - run: flutter pub get
+      # One set of goldens, made on Linux, holds here too (the checks job
+      # runs them on Linux).
+      - name: The screens look the same as on Linux
+        if: matrix.target != 'linux'
+        run: flutter test test/goldens
+      - name: What differed
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: golden-failures-${{ matrix.target }}
+          path: app/test/goldens/failures
+          if-no-files-found: ignore
       - run: flutter build ${{ matrix.target }} --release
       - name: The app starts with its Rust core
         shell: bash

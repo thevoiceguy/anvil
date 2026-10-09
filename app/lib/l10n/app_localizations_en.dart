@@ -342,4 +342,22 @@ class StringsEn extends Strings {
 
   @override
   String get needsFcp => 'Needs a phone signed in to FCP';
+
+  @override
+  String trayShow(String app) {
+    return 'Show $app';
+  }
+
+  @override
+  String get trayQuit => 'Quit';
+
+  @override
+  String get settingsDesktop => 'This computer';
+
+  @override
+  String get startAtLogin => 'Start at login';
+
+  @override
+  String get startAtLoginSubtitle =>
+      'Ready for calls when you sign in to the computer';
 }

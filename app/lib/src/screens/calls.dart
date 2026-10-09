@@ -66,6 +66,7 @@ class IncomingCallCard extends StatelessWidget {
                   key: const Key('decline'),
                   style: FilledButton.styleFrom(
                     backgroundColor: AnvilColors.hangup,
+                    foregroundColor: Colors.white,
                   ),
                   onPressed: () => model.run(() => model.api.decline(call.id)),
                   icon: const Icon(Icons.call_end),
@@ -75,6 +76,7 @@ class IncomingCallCard extends StatelessWidget {
                   key: const Key('answer'),
                   style: FilledButton.styleFrom(
                     backgroundColor: AnvilColors.answer,
+                    foregroundColor: Colors.white,
                   ),
                   onPressed: () => model.run(() => model.api.answer(call.id)),
                   icon: const Icon(Icons.call),
@@ -259,6 +261,7 @@ class _InCallPanelState extends State<InCallPanel> {
                 key: const Key('hangup'),
                 style: FilledButton.styleFrom(
                   backgroundColor: AnvilColors.hangup,
+                  foregroundColor: Colors.white,
                   minimumSize: const Size.fromHeight(52),
                 ),
                 onPressed: () => model.run(() => model.api.hangup(call.id)),
@@ -684,7 +687,10 @@ class _KeypadState extends State<Keypad> {
                 controller: _target,
                 textAlign: TextAlign.center,
                 style: Theme.of(context).textTheme.headlineSmall,
-                decoration: InputDecoration(hintText: s.keypadHint),
+                decoration: InputDecoration(
+                  hintText: s.keypadHint,
+                  hintStyle: Theme.of(context).textTheme.titleMedium,
+                ),
                 onSubmitted: (_) => _call(),
               ),
               const SizedBox(height: 12),
@@ -694,6 +700,7 @@ class _KeypadState extends State<Keypad> {
                 key: const Key('call'),
                 style: FilledButton.styleFrom(
                   backgroundColor: AnvilColors.answer,
+                  foregroundColor: Colors.white,
                   minimumSize: const Size.fromHeight(52),
                 ),
                 onPressed: _call,

@@ -73,6 +73,16 @@ class PhoneModel extends ChangeNotifier {
     notifyListeners();
   }
 
+  /// Stop the phone before the app goes: it unregisters, its calls end.
+  Future<void> stop() async {
+    _stopEvents();
+    try {
+      await api.stop();
+    } catch (_) {
+      // Going anyway.
+    }
+  }
+
   Future<void> _start() async {
     await api.start();
     snapshot = api.snapshot();

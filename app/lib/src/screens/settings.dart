@@ -5,6 +5,7 @@
 import 'package:flutter/material.dart';
 
 import '../../l10n/app_localizations.dart';
+import '../desktop/shell.dart';
 import '../phone/phone_api.dart';
 import '../phone/phone_model.dart';
 
@@ -106,6 +107,11 @@ class SettingsPage extends StatelessWidget {
           padding: const EdgeInsets.symmetric(horizontal: 16),
           child: Text(s.audioNote, style: theme.textTheme.bodySmall),
         ),
+        if (DesktopScope.maybeOf(context) case final shell?
+            when shell.canStartAtLogin) ...[
+          header(s.settingsDesktop),
+          _StartAtLogin(shell: shell),
+        ],
         header(s.settingsAccount),
         ListTile(
           leading: const Icon(Icons.person),
@@ -257,6 +263,49 @@ class _ForwardDialogState extends State<_ForwardDialog> {
           child: Text(s.saveButton),
         ),
       ],
+    );
+  }
+}
+
+/// Start at login: read from the system, changed there.
+class _StartAtLogin extends StatefulWidget {
+  const _StartAtLogin({required this.shell});
+  final DesktopShell shell;
+
+  @override
+  State<_StartAtLogin> createState() => _StartAtLoginState();
+}
+
+class _StartAtLoginState extends State<_StartAtLogin> {
+  bool? _on;
+
+  @override
+  void initState() {
+    super.initState();
+    widget.shell.startsAtLogin().then((on) {
+      if (mounted) setState(() => _on = on);
+    });
+  }
+
+  Future<void> _set(bool on) async {
+    setState(() => _on = on);
+    try {
+      await widget.shell.setStartsAtLogin(on);
+    } finally {
+      final now = await widget.shell.startsAtLogin();
+      if (mounted) setState(() => _on = now);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final s = Strings.of(context);
+    return SwitchListTile(
+      key: const Key('startAtLogin'),
+      title: Text(s.startAtLogin),
+      subtitle: Text(s.startAtLoginSubtitle),
+      value: _on ?? false,
+      onChanged: _on == null ? null : _set,
     );
   }
 }

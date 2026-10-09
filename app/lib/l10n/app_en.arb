@@ -168,5 +168,17 @@
       }
     }
   },
-  "needsFcp": "Needs a phone signed in to FCP"
+  "needsFcp": "Needs a phone signed in to FCP",
+  "trayShow": "Show {app}",
+  "@trayShow": {
+    "placeholders": {
+      "app": {
+        "type": "String"
+      }
+    }
+  },
+  "trayQuit": "Quit",
+  "settingsDesktop": "This computer",
+  "startAtLogin": "Start at login",
+  "startAtLoginSubtitle": "Ready for calls when you sign in to the computer"
 }

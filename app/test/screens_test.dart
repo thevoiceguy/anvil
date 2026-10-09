@@ -173,9 +173,7 @@ void main() {
           phone
               .callOf(1)
               .copyWith(
-                connectedAt: clock.now().subtract(
-                  const Duration(seconds: 65),
-                ),
+                connectedAt: clock.now().subtract(const Duration(seconds: 65)),
               ),
         ],
       ),

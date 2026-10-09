@@ -42,6 +42,10 @@ dependencies:
   intl: any
   flutter_localizations:
     sdk: flutter
+  tray_manager: 0.5.3
+  window_manager: 0.5.2
+  flutter_local_notifications: 22.3.1
+  launch_at_startup: 0.5.1
 
 dev_dependencies:
   flutter_test:
@@ -67,6 +71,15 @@ flutter:
   # included with your application, so that you can use the icons in
   # the material Icons class.
   uses-material-design: true
+
+  # Anvil's typeface on every platform (docs/APP.md §4), not each one's own.
+  fonts:
+    - family: Inter
+      fonts:
+        - asset: assets/fonts/Inter.ttf
+
+  assets:
+    - assets/tray/
 
   # To add assets to your application, add an assets section, like this:
   # assets:

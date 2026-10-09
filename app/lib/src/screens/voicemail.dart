@@ -27,7 +27,10 @@ class VoicemailPage extends StatelessWidget {
           ),
           FilledButton(
             key: const Key('confirmDelete'),
-            style: FilledButton.styleFrom(backgroundColor: AnvilColors.hangup),
+            style: FilledButton.styleFrom(
+              backgroundColor: AnvilColors.hangup,
+              foregroundColor: Colors.white,
+            ),
             onPressed: () => Navigator.of(context).pop(true),
             child: Text(s.deleteButton),
           ),
