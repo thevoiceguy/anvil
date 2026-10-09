@@ -1,7 +1,7 @@
 // The app as built for a phone, its Rust core loaded: it starts and asks to
-// sign in, the system's audio is reachable from Rust (on Android through
-// the JVM `MainActivity` hands over), and the audio session is set up for
-// calls. Run on an emulator or simulator:
+// sign in, and the audio session is set up for calls with the system's
+// audio reachable from Rust (on Android through the JVM `MainActivity`
+// hands over). Run on an emulator or simulator:
 // `flutter test integration_test/mobile_test.dart -d <device>`.
 
 import 'package:anvil/src/app.dart';
@@ -27,14 +27,15 @@ void main() {
     expect(find.byKey(const Key('signIn')), findsOneWidget);
   });
 
-  testWidgets('Rust reaches the system audio', (tester) async {
+  // As the app does before the phone starts: on iOS the microphone is an
+  // input only once the session plays and records.
+  testWidgets('the audio is set up for calls and Rust reaches it', (
+    tester,
+  ) async {
+    expect(NativeMobile.supported, isTrue);
+    await NativeMobile().startAudio();
     final audio = await rust.systemAudio();
     expect(audio.inputs, isNotEmpty, reason: 'a microphone');
     expect(audio.outputs, isNotEmpty, reason: 'a speaker');
-  });
-
-  testWidgets('the audio is set up for calls', (tester) async {
-    expect(NativeMobile.supported, isTrue);
-    await NativeMobile().startAudio();
   });
 }

@@ -165,8 +165,18 @@ class PhoneModel extends ChangeNotifier {
     return m?.group(1) ?? s;
   }
 
+  bool _disposed = false;
+
+  /// A boot, a sign-in or a command may finish after the app is gone (its
+  /// window closed, a test over); what it would have told nobody is dropped.
+  @override
+  void notifyListeners() {
+    if (!_disposed) super.notifyListeners();
+  }
+
   @override
   void dispose() {
+    _disposed = true;
     _stopEvents();
     super.dispose();
   }

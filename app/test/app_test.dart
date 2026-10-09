@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:anvil/src/app.dart';
 import 'package:anvil/src/phone/phone_api.dart';
 import 'package:flutter/material.dart';
@@ -5,7 +7,26 @@ import 'package:flutter_test/flutter_test.dart';
 
 import 'fake_phone.dart';
 
+/// A phone whose saved session is still being read when it is asked.
+class SlowPhone extends FakePhone {
+  final reading = Completer<SignedInAccount?>();
+
+  @override
+  Future<SignedInAccount?> savedAccount() => reading.future;
+}
+
 void main() {
+  testWidgets('a boot that finishes after the app has gone tells nobody', (
+    tester,
+  ) async {
+    final phone = SlowPhone();
+    await tester.pumpWidget(AnvilApp(phone: phone));
+    await tester.pumpWidget(const SizedBox());
+    phone.reading.complete(null);
+    await tester.pump();
+    expect(tester.takeException(), isNull);
+  });
+
   testWidgets('signing in starts the phone and shows it ready', (tester) async {
     final phone = FakePhone();
     await tester.pumpWidget(AnvilApp(phone: phone));
