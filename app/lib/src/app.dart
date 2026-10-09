@@ -7,6 +7,7 @@ import '../l10n/app_localizations.dart';
 import 'design/theme.dart';
 import 'desktop/bridge.dart';
 import 'desktop/shell.dart';
+import 'mobile/bridge.dart';
 import 'mobile/platform.dart';
 import 'phone/phone_api.dart';
 import 'phone/phone_model.dart';
@@ -104,6 +105,9 @@ class _AnvilAppState extends State<AnvilApp> {
         }
         if (widget.shell != null) {
           app = DesktopBridge(model: model, shell: widget.shell!, child: app);
+        }
+        if (widget.mobile != null) {
+          app = MobileBridge(model: model, mobile: widget.mobile!, child: app);
         }
         return app;
       },
