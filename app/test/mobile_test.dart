@@ -126,7 +126,7 @@ void main() {
       const SystemCallEvent(SystemCallAction.failed, 1, reason: 'filtered'),
     );
     mobile.act(
-      const SystemCallEvent(SystemCallAction.failed, 2, reason: 'unavailable'),
+      const SystemCallEvent(SystemCallAction.failed, 2, reason: 'reset'),
     );
     await tester.pumpAndSettle();
     expect(phone.log, contains('decline 1'));

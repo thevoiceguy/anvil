@@ -203,10 +203,13 @@ final class CallSystem: NSObject, CXProviderDelegate {
 
   // MARK: CXProviderDelegate
 
+  /// The system dropped every call it had (its call service restarted; a
+  /// simulator has none and resets at the first call ringing in). The user
+  /// ended nothing: the calls go on in the app, without the system's screen.
   func providerDidReset(_ provider: CXProvider) {
     for id in Array(uuids.keys) {
       forget(id)
-      emit("end", id, ["reason": "reset"])
+      emit("failed", id, ["reason": "reset"])
     }
   }
 
@@ -239,7 +242,7 @@ final class CallSystem: NSObject, CXProviderDelegate {
     }
     forget(id)
     action.fulfill()
-    emit("end", id, ["reason": "system"])
+    emit("end", id)
   }
 
   func provider(_ provider: CXProvider, perform action: CXSetHeldCallAction) {

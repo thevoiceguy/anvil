@@ -63,7 +63,8 @@ class SystemCallEvent {
   final String? digits;
 
   /// For `failed`: `filtered` (Do Not Disturb, a blocked caller: the call
-  /// should not ring) or what the system said.
+  /// should not ring), `reset` (the system dropped its calls; they go on in
+  /// the app), or another reason the system could not show it.
   final String? reason;
 }
 
