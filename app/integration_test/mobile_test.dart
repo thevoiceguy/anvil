@@ -103,4 +103,58 @@ void main() {
     await mobile.reportConnected(902);
     await mobile.reportEnded(902);
   });
+
+  /// The routes once `ok` holds, asked now and at each change; none within
+  /// ten seconds is null.
+  Future<AudioRoutes?> routesWhen(bool Function(AudioRoutes) ok) async {
+    final mobile = NativeMobile();
+    final now = await mobile.audioRoutes();
+    if (now != null && ok(now)) return now;
+    try {
+      return await mobile.audioRouteChanges
+          .firstWhere(ok)
+          .timeout(const Duration(seconds: 10));
+    } catch (_) {
+      final last = await mobile.audioRoutes();
+      return last != null && ok(last) ? last : null;
+    }
+  }
+
+  // Android's routes come with a Telecom call; iOS's from the audio session.
+  testWidgets("a call's audio goes to the speaker and back", (tester) async {
+    final mobile = NativeMobile();
+    if (Platform.isAndroid) {
+      final shown = next(903);
+      await mobile.reportIncoming(
+        const SystemCall(id: 903, name: 'Ann Lee', number: '1002'),
+      );
+      expect((await shown)?.action, SystemCallAction.shown);
+      await mobile.reportConnected(903);
+    }
+    final routes = await routesWhen((r) => r.available.isNotEmpty);
+    debugPrint(
+      'routes: ${routes?.current.name} of '
+      '${routes?.available.map((r) => r.name).join(',')}',
+    );
+    expect(routes, isNotNull);
+    expect(routes!.available, contains(AudioRoute.speaker));
+
+    await mobile.setAudioRoute(AudioRoute.speaker);
+    if (Platform.isAndroid) {
+      final speaker = await routesWhen((r) => r.current == AudioRoute.speaker);
+      expect(
+        speaker,
+        isNotNull,
+        reason: 'Telecom moved the call to the speaker',
+      );
+      if (routes.available.contains(AudioRoute.earpiece)) {
+        await mobile.setAudioRoute(AudioRoute.earpiece);
+        final back = await routesWhen((r) => r.current == AudioRoute.earpiece);
+        expect(back, isNotNull, reason: 'and back to the earpiece');
+      }
+    }
+    await mobile.setProximity(true);
+    await mobile.setProximity(false);
+    if (Platform.isAndroid) await mobile.reportEnded(903);
+  });
 }

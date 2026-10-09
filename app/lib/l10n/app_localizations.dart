@@ -687,6 +687,30 @@ abstract class Strings {
   /// **'Speaker'**
   String get speaker;
 
+  /// No description provided for @routeEarpiece.
+  ///
+  /// In en, this message translates to:
+  /// **'Phone'**
+  String get routeEarpiece;
+
+  /// No description provided for @routeSpeaker.
+  ///
+  /// In en, this message translates to:
+  /// **'Speaker'**
+  String get routeSpeaker;
+
+  /// No description provided for @routeBluetooth.
+  ///
+  /// In en, this message translates to:
+  /// **'Bluetooth'**
+  String get routeBluetooth;
+
+  /// No description provided for @routeWired.
+  ///
+  /// In en, this message translates to:
+  /// **'Headset'**
+  String get routeWired;
+
   /// No description provided for @systemDefault.
   ///
   /// In en, this message translates to:

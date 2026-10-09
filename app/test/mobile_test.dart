@@ -133,4 +133,106 @@ void main() {
     expect(phone.log, isNot(contains('decline 2')));
     expect(phone.callOf(2).isRingingIn, isTrue);
   });
+
+  testWidgets('the screen goes off at the ear: a call up on the earpiece', (
+    tester,
+  ) async {
+    final (phone, mobile) = await signedIn(tester);
+    expect(mobile.proximity.lastOrNull, isNot(true));
+    phone.ring('1002');
+    await tester.pumpAndSettle();
+    // Ringing: the phone is in the hand, not at the ear.
+    expect(mobile.proximity.lastOrNull, isNot(true));
+    await phone.answer(1);
+    await tester.pumpAndSettle();
+    expect(mobile.proximity.last, isTrue);
+
+    mobile.route(
+      const AudioRoutes(
+        current: AudioRoute.speaker,
+        available: [AudioRoute.earpiece, AudioRoute.speaker],
+      ),
+    );
+    await tester.pumpAndSettle();
+    expect(mobile.proximity.last, isFalse, reason: 'on the speaker');
+
+    mobile.route(
+      const AudioRoutes(
+        current: AudioRoute.earpiece,
+        available: [AudioRoute.earpiece, AudioRoute.speaker],
+      ),
+    );
+    await tester.pumpAndSettle();
+    expect(mobile.proximity.last, isTrue);
+
+    phone.hungUp(1);
+    await tester.pumpAndSettle();
+    expect(mobile.proximity.last, isFalse);
+  });
+
+  testWidgets('with the earpiece and the speaker, the call has a speaker '
+      'switch', (tester) async {
+    final (phone, mobile) = await signedIn(tester);
+    mobile.routes = const AudioRoutes(
+      current: AudioRoute.earpiece,
+      available: [AudioRoute.earpiece, AudioRoute.speaker],
+    );
+    await phone.call('1003');
+    phone.answerOutgoing(1);
+    await tester.pumpAndSettle();
+    expect(find.byKey(const Key('audioRoute')), findsNothing);
+
+    await tester.tap(find.byKey(const Key('speakerRoute')));
+    await tester.pumpAndSettle();
+    expect(mobile.log.last, 'route speaker');
+    await tester.tap(find.byKey(const Key('speakerRoute')));
+    await tester.pumpAndSettle();
+    expect(mobile.log.last, 'route earpiece');
+  });
+
+  testWidgets('with Bluetooth too, the call offers each way by name', (
+    tester,
+  ) async {
+    final (phone, mobile) = await signedIn(tester);
+    mobile.routes = const AudioRoutes(
+      current: AudioRoute.bluetooth,
+      available: [
+        AudioRoute.earpiece,
+        AudioRoute.speaker,
+        AudioRoute.bluetooth,
+      ],
+      bluetoothName: 'Car',
+    );
+    await phone.call('1003');
+    phone.answerOutgoing(1);
+    await tester.pumpAndSettle();
+    expect(find.byKey(const Key('speakerRoute')), findsNothing);
+    expect(
+      find.descendant(
+        of: find.byKey(const Key('audioRoute')),
+        matching: find.text('Car'),
+      ),
+      findsOneWidget,
+    );
+
+    await tester.tap(find.byKey(const Key('audioRoute')));
+    await tester.pumpAndSettle();
+    expect(find.byKey(const Key('route-earpiece')), findsOneWidget);
+    expect(find.byKey(const Key('route-wired')), findsNothing);
+    await tester.tap(find.byKey(const Key('route-speaker')));
+    await tester.pumpAndSettle();
+    expect(mobile.log.last, 'route speaker');
+    expect(find.text('Speaker'), findsWidgets);
+  });
+
+  testWidgets('a phone keeps no microphone and speaker list in settings', (
+    tester,
+  ) async {
+    await signedIn(tester);
+    await tester.tap(find.text('Settings').last);
+    await tester.pumpAndSettle();
+    expect(find.byKey(const Key('signOut')), findsOneWidget);
+    expect(find.byKey(const Key('microphone')), findsNothing);
+    expect(find.byKey(const Key('speaker')), findsNothing);
+  });
 }

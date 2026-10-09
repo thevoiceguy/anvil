@@ -9,6 +9,8 @@ import 'package:flutter/material.dart';
 import '../../l10n/app_localizations.dart';
 import '../design/format.dart';
 import '../design/theme.dart';
+import '../mobile/bridge.dart';
+import '../mobile/platform.dart';
 import '../phone/phone_api.dart';
 import '../phone/phone_model.dart';
 
@@ -193,6 +195,8 @@ class _InCallPanelState extends State<InCallPanel> {
                             )
                           : null,
                     ),
+                    if (MobileScope.maybeOf(context) case final mobile?)
+                      _AudioRouteButton(mobile: mobile),
                     _RoundButton(
                       key: const Key('hold'),
                       icon: call.held ? Icons.play_arrow : Icons.pause,
@@ -420,6 +424,82 @@ class _MediaLine extends StatelessWidget {
           ),
         if (call.codec != null) Text(call.codec!.toUpperCase(), style: small),
       ],
+    );
+  }
+}
+
+/// Where the call's audio goes, on a phone: a speaker switch when the
+/// earpiece and the speaker are all there is; with a headset or Bluetooth
+/// too, a list to choose from.
+class _AudioRouteButton extends StatelessWidget {
+  const _AudioRouteButton({required this.mobile});
+  final MobileScope mobile;
+
+  static IconData icon(AudioRoute route) => switch (route) {
+    AudioRoute.earpiece => Icons.phone_in_talk,
+    AudioRoute.speaker => Icons.volume_up,
+    AudioRoute.bluetooth => Icons.bluetooth_audio,
+    AudioRoute.wired => Icons.headset,
+  };
+
+  static String label(Strings s, AudioRoutes routes, AudioRoute route) =>
+      switch (route) {
+        AudioRoute.earpiece => s.routeEarpiece,
+        AudioRoute.speaker => s.routeSpeaker,
+        AudioRoute.bluetooth => routes.bluetoothName ?? s.routeBluetooth,
+        AudioRoute.wired => s.routeWired,
+      };
+
+  @override
+  Widget build(BuildContext context) {
+    final s = Strings.of(context);
+    return ValueListenableBuilder<AudioRoutes?>(
+      valueListenable: mobile.routes,
+      builder: (context, routes, _) {
+        if (routes == null || routes.available.length < 2) {
+          return const SizedBox.shrink();
+        }
+        if (routes.justSpeaker) {
+          final on = routes.current == AudioRoute.speaker;
+          return _RoundButton(
+            key: const Key('speakerRoute'),
+            icon: Icons.volume_up,
+            label: s.routeSpeaker,
+            on: on,
+            onPressed: () =>
+                mobile.setRoute(on ? AudioRoute.earpiece : AudioRoute.speaker),
+          );
+        }
+        return _RoundButton(
+          key: const Key('audioRoute'),
+          icon: icon(routes.current),
+          label: label(s, routes, routes.current),
+          on: routes.current != AudioRoute.earpiece,
+          onPressed: () => showModalBottomSheet<void>(
+            context: context,
+            builder: (context) => SafeArea(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  for (final route in routes.available)
+                    ListTile(
+                      key: Key('route-${route.name}'),
+                      leading: Icon(icon(route)),
+                      title: Text(label(s, routes, route)),
+                      trailing: route == routes.current
+                          ? const Icon(Icons.check)
+                          : null,
+                      onTap: () {
+                        Navigator.of(context).pop();
+                        mobile.setRoute(route);
+                      },
+                    ),
+                ],
+              ),
+            ),
+          ),
+        );
+      },
     );
   }
 }

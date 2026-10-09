@@ -6,6 +6,7 @@ import 'package:flutter/material.dart';
 
 import '../../l10n/app_localizations.dart';
 import '../desktop/shell.dart';
+import '../mobile/bridge.dart';
 import '../update/update_banner.dart';
 import '../update/updates.dart';
 import '../phone/phone_api.dart';
@@ -86,29 +87,33 @@ class SettingsPage extends StatelessWidget {
               onTap: () => _editForward(context, when, calling),
             ),
         ],
-        header(s.settingsAudio),
-        _DevicePicker(
-          key: const Key('microphone'),
-          label: s.microphone,
-          icon: Icons.mic,
-          devices: snap.inputs,
-          chosen: snap.input,
-          onChosen: (id) =>
-              model.run(() => model.api.chooseAudio(input: true, device: id)),
-        ),
-        _DevicePicker(
-          key: const Key('speaker'),
-          label: s.speaker,
-          icon: Icons.volume_up,
-          devices: snap.outputs,
-          chosen: snap.output,
-          onChosen: (id) =>
-              model.run(() => model.api.chooseAudio(input: false, device: id)),
-        ),
-        Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 16),
-          child: Text(s.audioNote, style: theme.textTheme.bodySmall),
-        ),
+        // A phone chooses where a call's audio goes in the call itself.
+        if (MobileScope.maybeOf(context) == null) ...[
+          header(s.settingsAudio),
+          _DevicePicker(
+            key: const Key('microphone'),
+            label: s.microphone,
+            icon: Icons.mic,
+            devices: snap.inputs,
+            chosen: snap.input,
+            onChosen: (id) =>
+                model.run(() => model.api.chooseAudio(input: true, device: id)),
+          ),
+          _DevicePicker(
+            key: const Key('speaker'),
+            label: s.speaker,
+            icon: Icons.volume_up,
+            devices: snap.outputs,
+            chosen: snap.output,
+            onChosen: (id) => model.run(
+              () => model.api.chooseAudio(input: false, device: id),
+            ),
+          ),
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 16),
+            child: Text(s.audioNote, style: theme.textTheme.bodySmall),
+          ),
+        ],
         if (DesktopScope.maybeOf(context) case final shell?
             when shell.canStartAtLogin) ...[
           header(s.settingsDesktop),

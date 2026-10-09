@@ -5,10 +5,11 @@ through `flutter_rust_bridge`. The screens are in `lib/src/screens`, the phone
 they drive is `lib/src/phone` (the real one is `anvil-app`, in `rust/`), the
 desktop around the app (tray, notifications, the window, start at login) is
 `lib/src/desktop`, the phone around it on Android and iOS (the microphone,
-the audio session, the system's call screen) is `lib/src/mobile` with its
+the audio session, the system's call screen, where a call's audio goes,
+the proximity sensor) is `lib/src/mobile` with its
 native side in `android/app/src/main/kotlin` (`CallSystem`, the
 `ConnectionService`, the call's foreground service) and
-`ios/Runner/AppDelegate.swift` (CallKit), the design
+`ios/Runner/AppDelegate.swift` (CallKit, the audio routes), the design
 is `lib/src/design`, and every string is in `lib/l10n`.
 
 ```bash

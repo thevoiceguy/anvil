@@ -135,7 +135,7 @@ live in FCP: `docs/SOFTPHONE.md` in `thevoiceguy/fcp`. Anvil's phases:
         macOS once the sandbox question is settled; .deb by hand); a banner
         and a Settings section
   - [ ] **U3c** Code signing and notarization, once the certificates exist
-- [ ] **U4** The app on mobile
+- [x] **U4** The app on mobile
   - [x] **U4a** Android and iOS builds: the Rust core cross-built by
         cargokit, the JVM handed to cpal on Android, the microphone asked
         for and the iOS audio session, desktop pieces off, CI building both
@@ -143,8 +143,9 @@ live in FCP: `docs/SOFTPHONE.md` in `thevoiceguy/fcp`. Anvil's phases:
   - [x] **U4b** The system's call screen: CallKit, a self-managed
         ConnectionService, the call's notification and foreground service
         on Android; answer, end, hold, mute and keys from there
-  - [ ] **U4c** Audio routing per call (earpiece, speaker, Bluetooth), the
-        proximity sensor
+  - [x] **U4c** Audio routing per call (earpiece, speaker, Bluetooth, a
+        headset) from Telecom's endpoints and the iOS audio session, the
+        speaker switch and route list in the call, the proximity sensor
 - [ ] **U5** Ringing a sleeping phone (with FCP's push)
 - [ ] **U6** Accessibility, localisation, store listings
 

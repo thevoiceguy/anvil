@@ -4,9 +4,15 @@ import android.annotation.SuppressLint
 import android.content.ComponentName
 import android.content.Context
 import android.net.Uri
+import android.os.Build
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
+import android.os.OutcomeReceiver
+import android.os.PowerManager
+import android.telecom.CallAudioState
+import android.telecom.CallEndpoint
+import android.telecom.CallEndpointException
 import android.telecom.DisconnectCause
 import android.telecom.PhoneAccount
 import android.telecom.PhoneAccountHandle
@@ -57,6 +63,126 @@ object CallSystem {
             .build()
         telecom(context).registerPhoneAccount(account)
         registered = true
+    }
+
+    // Where a call's audio goes: Telecom routes a self-managed call's audio
+    // and tells each connection the routes there are (as call endpoints
+    // from Android 14, as a CallAudioState before). Kept for Dart as
+    // `{current, available, bluetoothName}` (lib/src/mobile/platform.dart).
+
+    private var endpoints: List<CallEndpoint> = emptyList()
+    private var routes: Map<String, Any?>? = null
+
+    /** What Dart asks for: the routes now, or null with no call. */
+    fun audioRoutes(): Map<String, Any?>? = if (calls.isEmpty()) null else routes
+
+    private fun publish(routes: Map<String, Any?>) {
+        if (routes == this.routes) return
+        this.routes = routes
+        main.post { channel?.invokeMethod("audioRoutes", routes) }
+    }
+
+    private fun endpointRoute(type: Int): String? = when (type) {
+        CallEndpoint.TYPE_EARPIECE -> "earpiece"
+        CallEndpoint.TYPE_SPEAKER -> "speaker"
+        CallEndpoint.TYPE_BLUETOOTH -> "bluetooth"
+        CallEndpoint.TYPE_WIRED_HEADSET -> "wired"
+        else -> null
+    }
+
+    /** Android 14 and later: the endpoint in use, and the ones there are. */
+    fun endpointsChanged(current: CallEndpoint?, available: List<CallEndpoint>?) {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.UPSIDE_DOWN_CAKE) return
+        if (available != null) endpoints = available
+        val now = current?.let { endpointRoute(it.endpointType) }
+            ?: (routes?.get("current") as? String)
+            ?: return
+        val bluetooth = (current?.takeIf { it.endpointType == CallEndpoint.TYPE_BLUETOOTH }
+            ?: endpoints.firstOrNull { it.endpointType == CallEndpoint.TYPE_BLUETOOTH })
+        publish(
+            mapOf(
+                "current" to now,
+                "available" to endpoints.mapNotNull { endpointRoute(it.endpointType) }.distinct(),
+                "bluetoothName" to bluetooth?.endpointName?.toString(),
+            ),
+        )
+    }
+
+    /** Before Android 14: the route in use, and a mask of the ones there are. */
+    @Suppress("DEPRECATION")
+    fun audioStateChanged(state: CallAudioState) {
+        val names = listOf(
+            CallAudioState.ROUTE_EARPIECE to "earpiece",
+            CallAudioState.ROUTE_SPEAKER to "speaker",
+            CallAudioState.ROUTE_BLUETOOTH to "bluetooth",
+            CallAudioState.ROUTE_WIRED_HEADSET to "wired",
+        )
+        val current = names.firstOrNull { it.first == state.route }?.second ?: return
+        // A Bluetooth device's name needs BLUETOOTH_CONNECT, which the app
+        // does not ask for: "Bluetooth" stands in.
+        publish(
+            mapOf(
+                "current" to current,
+                "available" to names.filter { state.supportedRouteMask and it.first != 0 }.map { it.second },
+                "bluetoothName" to null,
+            ),
+        )
+    }
+
+    /** Send the call's audio this way: through any of the app's connections. */
+    @Suppress("DEPRECATION")
+    fun setAudioRoute(route: String) {
+        val connection = calls.values.firstNotNullOfOrNull { it.connection } ?: return
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
+            val endpoint = endpoints.firstOrNull { endpointRoute(it.endpointType) == route } ?: return
+            connection.requestCallEndpointChange(
+                endpoint,
+                { it.run() },
+                object : OutcomeReceiver<Void, CallEndpointException> {
+                    override fun onResult(result: Void?) {}
+
+                    override fun onError(error: CallEndpointException) {
+                        Log.w(TAG, "Telecom did not change the route", error)
+                    }
+                },
+            )
+        } else {
+            val mask = when (route) {
+                "earpiece" -> CallAudioState.ROUTE_EARPIECE
+                "speaker" -> CallAudioState.ROUTE_SPEAKER
+                "bluetooth" -> CallAudioState.ROUTE_BLUETOOTH
+                "wired" -> CallAudioState.ROUTE_WIRED_HEADSET
+                else -> return
+            }
+            connection.setAudioRoute(mask)
+        }
+    }
+
+    // The screen goes off at the ear (Dart decides when: a call up on the
+    // earpiece).
+    private var proximity: PowerManager.WakeLock? = null
+
+    // Held for the length of a call, released when Dart says it is over,
+    // not within this method (lint's Wakelock rule wants the latter).
+    @SuppressLint("Wakelock")
+    fun setProximity(context: Context, on: Boolean) {
+        val power = context.getSystemService(Context.POWER_SERVICE) as PowerManager
+        if (!power.isWakeLockLevelSupported(PowerManager.PROXIMITY_SCREEN_OFF_WAKE_LOCK)) return
+        val lock = proximity ?: power.newWakeLock(
+            PowerManager.PROXIMITY_SCREEN_OFF_WAKE_LOCK,
+            "anvil:call",
+        ).also {
+            it.setReferenceCounted(false)
+            proximity = it
+        }
+        if (on && !lock.isHeld) {
+            // A call longer than this keeps going; the sensor stops at the
+            // ear. Only so a lock lost track of cannot hold forever.
+            lock.acquire(4 * 60 * 60 * 1000L)
+        } else if (!on && lock.isHeld) {
+            // Off only once the phone has left the ear.
+            lock.release(PowerManager.RELEASE_FLAG_WAIT_FOR_NO_PROXIMITY)
+        }
     }
 
     fun emit(action: String, id: Long, extra: Map<String, Any?> = emptyMap()) {
@@ -131,6 +257,10 @@ object CallSystem {
 
     fun reportEnded(context: Context, id: Long) {
         val call = calls.remove(id) ?: return
+        if (calls.isEmpty()) {
+            routes = null
+            endpoints = emptyList()
+        }
         call.connection?.let {
             it.setDisconnected(DisconnectCause(DisconnectCause.LOCAL))
             it.destroy()

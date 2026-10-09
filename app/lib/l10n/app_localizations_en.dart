@@ -331,6 +331,18 @@ class StringsEn extends Strings {
   String get speaker => 'Speaker';
 
   @override
+  String get routeEarpiece => 'Phone';
+
+  @override
+  String get routeSpeaker => 'Speaker';
+
+  @override
+  String get routeBluetooth => 'Bluetooth';
+
+  @override
+  String get routeWired => 'Headset';
+
+  @override
   String get systemDefault => 'System default';
 
   @override
