@@ -61,6 +61,11 @@ void main() {
     tester,
   ) async {
     final mobile = NativeMobile();
+    // What the system says, for the log.
+    final said = mobile.callEvents.listen(
+      (e) => debugPrint('system: ${e.action.name} ${e.call} ${e.reason ?? ''}'),
+    );
+    addTearDown(said.cancel);
     final shown = next(901);
     await mobile.reportIncoming(
       const SystemCall(id: 901, name: 'Ann Lee', number: '1002'),

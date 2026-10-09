@@ -206,7 +206,7 @@ final class CallSystem: NSObject, CXProviderDelegate {
   func providerDidReset(_ provider: CXProvider) {
     for id in Array(uuids.keys) {
       forget(id)
-      emit("end", id)
+      emit("end", id, ["reason": "reset"])
     }
   }
 
@@ -239,7 +239,7 @@ final class CallSystem: NSObject, CXProviderDelegate {
     }
     forget(id)
     action.fulfill()
-    emit("end", id)
+    emit("end", id, ["reason": "system"])
   }
 
   func provider(_ provider: CXProvider, perform action: CXSetHeldCallAction) {
