@@ -1,6 +1,6 @@
 # The Anvil app
 
-Designed 2026-10-07; agreed the same day on every recommendation in §8 (Flutter, `app/` in this repository, the desktop app serving the control socket, desktop first, one design everywhere, self-updating desktop builds, strings externalised from U1). Certificates and store accounts (§8 Q6) are the owner's to obtain; builds stay unsigned until then. Progress: U0 done: `anvil-app` (the running phone, its state and changes, the commands; mute added to `anvil-core`), the control socket, and `anvil-cli run` with the commands that drive it. U1 done: `app/` (Flutter 3.47, `flutter_rust_bridge` 2.13 over `anvil-app` in `app/rust`), sign-in, keypad, incoming and in-call screens, Anvil's theme with Inter bundled, strings in `lib/l10n`, CI building all three desktops. U2a done: the user's data in `anvil-app`. U2b done: the screens (in a call, transfer, a second call, recents, people, voicemail, settings) and voicemail played through the call speaker.
+Designed 2026-10-07; agreed the same day on every recommendation in §8 (Flutter, `app/` in this repository, the desktop app serving the control socket, desktop first, one design everywhere, self-updating desktop builds, strings externalised from U1). Certificates and store accounts (§8 Q6) are the owner's to obtain; builds stay unsigned until then. Progress: U0 done: `anvil-app` (the running phone, its state and changes, the commands; mute added to `anvil-core`), the control socket, and `anvil-cli run` with the commands that drive it. U1 done: `app/` (Flutter 3.47, `flutter_rust_bridge` 2.13 over `anvil-app` in `app/rust`), sign-in, keypad, incoming and in-call screens, Anvil's theme with Inter bundled, strings in `lib/l10n`, CI building all three desktops. U2a done: the user's data in `anvil-app`. U2b done: the screens (in a call, transfer, a second call, recents, people, voicemail, settings) and voicemail played through the call speaker. U2c done: tray, notifications, start at login, golden screenshots on all three desktops; U2 complete.
 
 Anvil works: it signs in to FCP, registers, places and takes calls, holds,
 transfers, encrypts its media, shows message waiting, presence and busy lamps,
@@ -229,6 +229,38 @@ Three PRs, the screens thin over the state as §3 has it:
     the next call, the account and sign-out.
 - **U2c, the desktop:** tray, notifications, start at login, golden
   screenshots.
+  - `lib/src/desktop`: the app talks to a `DesktopShell` (a fake in the
+    tests); `NativeShell` is tray_manager 0.5.3 (the method-channel line;
+    0.6 onward is a new implementation still changing daily), window_manager,
+    flutter_local_notifications and launch_at_startup, each part logged and
+    left out when the desktop lacks it. `DesktopBridge` keeps it in step
+    with the phone.
+  - The tray's icon is the phone's state: offline, ready, do not disturb,
+    ringing, in a call (`tool/tray_icons.py` draws them). Its menu: show
+    the window, do not disturb, quit. A click shows the window; closing the
+    window leaves the phone running in the tray, and quit stops it (it
+    unregisters) before the app goes.
+  - A call ringing in is a notification, named from the directory, with
+    Answer and Decline (Windows' call scenario, a critical notification on
+    Linux, time-sensitive on macOS); it goes when the call stops ringing.
+    Answering from it brings the window up. macOS registers the actions'
+    titles at start, in English until U6.
+  - Start at login is a switch under Settings → This computer: the
+    registry on Windows, an autostart entry on Linux, `SMAppService` on
+    macOS 13 and later (the channel launch_at_startup calls, answered in
+    `MainFlutterWindow.swift`).
+  - Golden screenshots of every screen, light and dark, wide and narrow,
+    drawn with the app's fonts at a fixed clock: one set made on Linux,
+    compared exactly on Linux and on Windows and macOS within what text
+    rasterisation explains (under 0.3% of pixels differing by more than
+    96/255; the first runs measured 0.03–0.06% there, against 2.4–2.6% of
+    pixels differing at all). Making them
+    found Inter bundled but never declared (every platform drew its own
+    font), the keypad's hint cut off, and Call and End dark on dark.
+  - macOS: the sandboxed app had no network or microphone entitlement, and
+    no microphone usage text; both are added.
+  - The global answer/hang-up shortcut and the compact in-call window
+    (§4) are not in U2.
 
 ### U3: desktop distribution
 - Installers for the three desktops built on a tag, the auto-updater, signing

@@ -3,14 +3,20 @@ import 'package:flutter_localizations/flutter_localizations.dart';
 
 import '../l10n/app_localizations.dart';
 import 'design/theme.dart';
+import 'desktop/bridge.dart';
+import 'desktop/shell.dart';
 import 'phone/phone_api.dart';
 import 'phone/phone_model.dart';
 import 'screens/home.dart';
 import 'screens/sign_in.dart';
 
 class AnvilApp extends StatefulWidget {
-  const AnvilApp({super.key, required this.phone});
+  const AnvilApp({super.key, required this.phone, this.shell});
   final PhoneApi phone;
+
+  /// The desktop around the app (tray, notifications); none on mobile and
+  /// in the screens' tests.
+  final DesktopShell? shell;
 
   @override
   State<AnvilApp> createState() => _AnvilAppState();
@@ -45,6 +51,7 @@ class _AnvilAppState extends State<AnvilApp> {
 
   Widget _app(Color? brand) {
     return MaterialApp(
+      debugShowCheckedModeBanner: false,
       onGenerateTitle: (context) =>
           model.snapshot.brandName ?? Strings.of(context).appName,
       theme: AnvilTheme.light(brand: brand),
@@ -56,6 +63,13 @@ class _AnvilAppState extends State<AnvilApp> {
         GlobalCupertinoLocalizations.delegate,
       ],
       supportedLocales: Strings.supportedLocales,
+      builder: widget.shell == null
+          ? null
+          : (context, child) => DesktopBridge(
+              model: model,
+              shell: widget.shell!,
+              child: child ?? const SizedBox.shrink(),
+            ),
       home: ListenableBuilder(
         listenable: model,
         builder: (context, _) => model.account == null

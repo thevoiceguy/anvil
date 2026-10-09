@@ -428,6 +428,9 @@ abstract class PhoneApi {
     String? code,
   });
   Future<void> start();
+
+  /// Stop the phone (it unregisters); the session stays signed in.
+  Future<void> stop();
   Future<void> signOut();
 
   PhoneSnapshot snapshot();

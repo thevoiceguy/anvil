@@ -43,6 +43,9 @@ class RustPhone implements PhoneApi {
   Future<void> start() async => rust.startPhone(sessionPath: await _session());
 
   @override
+  Future<void> stop() => rust.stopPhone();
+
+  @override
   Future<void> signOut() async => rust.signOut(sessionPath: await _session());
 
   @override

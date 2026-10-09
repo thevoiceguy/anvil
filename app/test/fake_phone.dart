@@ -115,6 +115,9 @@ class FakePhone implements PhoneApi {
   }
 
   @override
+  Future<void> stop() async => log.add('stop phone');
+
+  @override
   Future<void> signOut() async => log.add('signOut');
 
   @override

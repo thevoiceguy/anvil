@@ -710,6 +710,36 @@ abstract class Strings {
   /// In en, this message translates to:
   /// **'Needs a phone signed in to FCP'**
   String get needsFcp;
+
+  /// No description provided for @trayShow.
+  ///
+  /// In en, this message translates to:
+  /// **'Show {app}'**
+  String trayShow(String app);
+
+  /// No description provided for @trayQuit.
+  ///
+  /// In en, this message translates to:
+  /// **'Quit'**
+  String get trayQuit;
+
+  /// No description provided for @settingsDesktop.
+  ///
+  /// In en, this message translates to:
+  /// **'This computer'**
+  String get settingsDesktop;
+
+  /// No description provided for @startAtLogin.
+  ///
+  /// In en, this message translates to:
+  /// **'Start at login'**
+  String get startAtLogin;
+
+  /// No description provided for @startAtLoginSubtitle.
+  ///
+  /// In en, this message translates to:
+  /// **'Ready for calls when you sign in to the computer'**
+  String get startAtLoginSubtitle;
 }
 
 class _StringsDelegate extends LocalizationsDelegate<Strings> {
