@@ -56,8 +56,8 @@ class MainActivity : FlutterActivity() {
         channel.setMethodCallHandler { call, result ->
             when (call.method) {
                 "requestMicrophone" -> requestMicrophone(result)
-                // Android's AAudio needs nothing set up front; the
-                // per-call audio mode comes with U4c.
+                // Android's AAudio needs nothing set up front: Telecom
+                // sets the call's audio mode and routes it.
                 "startAudio" -> result.success(null)
                 "reportIncoming" -> {
                     CallSystem.reportIncoming(this, call.id(), call.text("name"), call.text("number"))
@@ -73,6 +73,15 @@ class MainActivity : FlutterActivity() {
                 }
                 "reportHeld" -> {
                     CallSystem.reportHeld(this, call.id(), call.argument<Boolean>("on") == true)
+                    result.success(null)
+                }
+                "audioRoutes" -> result.success(CallSystem.audioRoutes())
+                "setAudioRoute" -> {
+                    CallSystem.setAudioRoute(call.text("route"))
+                    result.success(null)
+                }
+                "setProximity" -> {
+                    CallSystem.setProximity(this, call.argument<Boolean>("on") == true)
                     result.success(null)
                 }
                 "reportEnded" -> {

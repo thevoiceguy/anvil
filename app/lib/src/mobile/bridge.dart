@@ -2,9 +2,12 @@
 // Telecom on Android): a call ringing in rings there too, a call placed
 // shows as dialling, connected, held and over as the phone has it; and what
 // the user does there (answer, end, hold, mute, a key) reaches the phone.
+// Also where a call's audio goes (shared with the screens through
+// `MobileScope`), and the proximity sensor while a call is at the ear.
 
 import 'dart:async';
 
+import 'package:flutter/foundation.dart';
 import 'package:flutter/widgets.dart';
 
 import '../phone/phone_api.dart';
@@ -37,7 +40,10 @@ class _Told {
 
 class _MobileBridgeState extends State<MobileBridge> {
   StreamSubscription<SystemCallEvent>? _events;
+  StreamSubscription<AudioRoutes>? _routeChanges;
   final Map<int, _Told> _told = {};
+  final ValueNotifier<AudioRoutes?> _routes = ValueNotifier(null);
+  bool? _proximity;
 
   PhoneModel get model => widget.model;
   MobilePlatform get mobile => widget.mobile;
@@ -47,6 +53,7 @@ class _MobileBridgeState extends State<MobileBridge> {
     super.initState();
     model.addListener(_sync);
     _events = mobile.callEvents.listen(_act);
+    _routeChanges = mobile.audioRouteChanges.listen(_routed);
     _sync();
   }
 
@@ -54,12 +61,47 @@ class _MobileBridgeState extends State<MobileBridge> {
   void dispose() {
     model.removeListener(_sync);
     unawaited(_events?.cancel());
+    unawaited(_routeChanges?.cancel());
+    _routes.dispose();
     super.dispose();
+  }
+
+  Future<void> _setRoute(AudioRoute route) =>
+      model.run(() => mobile.setAudioRoute(route));
+
+  void _routed(AudioRoutes routes) {
+    if (!mounted) return;
+    _routes.value = routes;
+    _proximityFor();
+  }
+
+  /// Where the audio goes changes with the calls (Telecom's routes come
+  /// with a call): asked again whenever they change.
+  Future<void> _askRoutes() async {
+    final routes = await mobile.audioRoutes();
+    if (mounted && routes != null) _routed(routes);
+  }
+
+  /// The screen goes off at the ear: a call up or being placed, its audio
+  /// on the earpiece (the phone's default when nothing says otherwise).
+  void _proximityFor() {
+    final calls = model.snapshot.calls;
+    final atEar =
+        calls.any((c) => c.isConnected || c.direction == Direction.outgoing) &&
+        (_routes.value?.current ?? AudioRoute.earpiece) == AudioRoute.earpiece;
+    if (atEar != _proximity) {
+      _proximity = atEar;
+      unawaited(mobile.setProximity(atEar));
+    }
   }
 
   void _sync() {
     final snap = model.snapshot;
     final calls = {for (final c in snap.calls) c.id: c};
+    if (calls.length != _told.length ||
+        calls.values.any((c) => _told[c.id]?.connected != c.isConnected)) {
+      unawaited(_askRoutes());
+    }
     for (final call in calls.values) {
       final told = _told[call.id];
       if (told == null) {
@@ -92,6 +134,7 @@ class _MobileBridgeState extends State<MobileBridge> {
         unawaited(mobile.reportEnded(id));
       }
     }
+    _proximityFor();
   }
 
   PhoneCall? _call(int id) =>
@@ -139,5 +182,27 @@ class _MobileBridgeState extends State<MobileBridge> {
   }
 
   @override
-  Widget build(BuildContext context) => widget.child;
+  Widget build(BuildContext context) =>
+      MobileScope(routes: _routes, setRoute: _setRoute, child: widget.child);
+}
+
+/// The phone around the app, for a screen: where the call's audio goes and
+/// a way to change it. Absent on desktop.
+class MobileScope extends InheritedWidget {
+  const MobileScope({
+    super.key,
+    required this.routes,
+    required this.setRoute,
+    required super.child,
+  });
+
+  final ValueListenable<AudioRoutes?> routes;
+  final Future<void> Function(AudioRoute) setRoute;
+
+  static MobileScope? maybeOf(BuildContext context) =>
+      context.dependOnInheritedWidgetOfExactType<MobileScope>();
+
+  @override
+  bool updateShouldNotify(MobileScope old) =>
+      routes != old.routes || setRoute != old.setRoute;
 }

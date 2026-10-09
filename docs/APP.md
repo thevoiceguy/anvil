@@ -358,9 +358,20 @@ Works while the app is open; ringing a closed app is U5.
     later (self-managed calls need it).
   - iOS: the system's Recents leave the app's calls out (the app keeps its
     own history).
-- **U4c, a call's audio.** The audio routed per call (earpiece, speaker,
-  Bluetooth, a headset) and the proximity sensor turning the screen off at
-  the ear.
+- **U4c, a call's audio.**
+  - Where the call's audio goes, as the system has it: Telecom's call
+    endpoints (Android 14 on; the call audio state before) for the app's
+    connection, the audio session's route on iOS. Earpiece, speaker,
+    Bluetooth (by the device's name where the system gives it: always on
+    Android 14, on iOS from the port), a wired headset.
+  - In the call: a speaker switch when the earpiece and the speaker are all
+    there is; with Bluetooth or a headset too, an Audio button showing where
+    the sound is, opening the list to choose from. Settings keeps its
+    microphone and speaker lists for the desktop only.
+  - The proximity sensor turns the screen off at the ear while a call is up
+    or being placed on the earpiece (not ringing, not on the speaker or a
+    headset): a proximity wake lock on Android (released once the phone has
+    left the ear, four hours at most), proximity monitoring on iOS.
 
 ### U5: ringing a sleeping phone (with FCP)
 - FCP's push project: RFC 8599 push parameters in REGISTER, APNs and FCM

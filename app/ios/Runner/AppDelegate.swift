@@ -6,6 +6,7 @@ import UIKit
 @main
 @objc class AppDelegate: FlutterAppDelegate, FlutterImplicitEngineDelegate {
   private let calls = CallSystem()
+  private let routes = AudioRoutes()
 
   override func application(
     _ application: UIApplication,
@@ -21,7 +22,9 @@ import UIKit
       let channel = FlutterMethodChannel(
         name: "anvil/mobile", binaryMessenger: registrar.messenger())
       calls.channel = channel
+      routes.channel = channel
       let calls = self.calls
+      let routes = self.routes
       channel.setMethodCallHandler { call, result in
         let args = call.arguments as? [String: Any] ?? [:]
         let id = (args["id"] as? NSNumber)?.int64Value ?? -1
@@ -42,6 +45,17 @@ import UIKit
         case "reportHeld":
           calls.reportHeld(id: id, on: args["on"] as? Bool ?? false)
           result(nil)
+        case "audioRoutes": result(routes.current())
+        case "setAudioRoute":
+          do {
+            try routes.set(args["route"] as? String ?? "")
+            result(nil)
+          } catch {
+            result(FlutterError(code: "route", message: error.localizedDescription, details: nil))
+          }
+        case "setProximity":
+          UIDevice.current.isProximityMonitoringEnabled = args["on"] as? Bool ?? false
+          result(nil)
         case "reportEnded":
           calls.reportEnded(id: id)
           result(nil)
@@ -53,7 +67,7 @@ import UIKit
 
   /// A phone's audio: the microphone and the earpiece together, with the
   /// system's echo cancellation (cpal leaves the session as it finds it,
-  /// and the default plays only). Per-call routing comes with U4c.
+  /// and the default plays only). Where it goes: `AudioRoutes`.
   private static func startAudio(_ result: @escaping FlutterResult) {
     let session = AVAudioSession.sharedInstance()
     do {
@@ -275,4 +289,74 @@ final class CallSystem: NSObject, CXProviderDelegate {
   func provider(_ provider: CXProvider, didActivate audioSession: AVAudioSession) {}
 
   func provider(_ provider: CXProvider, didDeactivate audioSession: AVAudioSession) {}
+}
+
+/// Where a call's audio goes on iOS: the session's route (the earpiece,
+/// the speaker, a Bluetooth headset or car, a wired headset), told to Dart
+/// at every change as `{current, available, bluetoothName}`
+/// (lib/src/mobile/platform.dart), and changed by overriding the output or
+/// choosing the input whose port carries the output with it.
+final class AudioRoutes: NSObject {
+  var channel: FlutterMethodChannel?
+
+  override init() {
+    super.init()
+    NotificationCenter.default.addObserver(
+      self, selector: #selector(changed),
+      name: AVAudioSession.routeChangeNotification, object: nil)
+  }
+
+  @objc private func changed(_ note: Notification) {
+    DispatchQueue.main.async {
+      self.channel?.invokeMethod("audioRoutes", arguments: self.current())
+    }
+  }
+
+  private static let bluetooth: [AVAudioSession.Port] = [.bluetoothHFP, .bluetoothLE]
+
+  func current() -> [String: Any] {
+    let session = AVAudioSession.sharedInstance()
+    let output = session.currentRoute.outputs.first
+    let inputs = session.availableInputs ?? []
+    let current: String
+    switch output?.portType {
+    case .builtInSpeaker?: current = "speaker"
+    case .bluetoothHFP?, .bluetoothA2DP?, .bluetoothLE?, .carAudio?: current = "bluetooth"
+    case .headphones?, .usbAudio?: current = "wired"
+    default: current = "earpiece"
+    }
+    let headset = inputs.first { AudioRoutes.bluetooth.contains($0.portType) }
+    let wired = inputs.contains { $0.portType == .headsetMic } || current == "wired"
+    var available: [String] = []
+    // A wired headset takes the earpiece's place; an iPad has none.
+    if UIDevice.current.userInterfaceIdiom == .phone && !wired { available.append("earpiece") }
+    available.append("speaker")
+    if headset != nil || current == "bluetooth" { available.append("bluetooth") }
+    if wired { available.append("wired") }
+    var routes: [String: Any] = ["current": current, "available": available]
+    if let name = headset?.portName ?? (current == "bluetooth" ? output?.portName : nil) {
+      routes["bluetoothName"] = name
+    }
+    return routes
+  }
+
+  func set(_ route: String) throws {
+    let session = AVAudioSession.sharedInstance()
+    let inputs = session.availableInputs ?? []
+    switch route {
+    case "speaker":
+      try session.overrideOutputAudioPort(.speaker)
+    case "earpiece":
+      try session.overrideOutputAudioPort(.none)
+      try session.setPreferredInput(inputs.first { $0.portType == .builtInMic })
+    case "bluetooth":
+      try session.overrideOutputAudioPort(.none)
+      try session.setPreferredInput(inputs.first { AudioRoutes.bluetooth.contains($0.portType) })
+    case "wired":
+      try session.overrideOutputAudioPort(.none)
+      try session.setPreferredInput(inputs.first { $0.portType == .headsetMic })
+    default:
+      break
+    }
+  }
 }

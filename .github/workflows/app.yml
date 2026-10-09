@@ -228,5 +228,7 @@ jobs:
           xcrun simctl boot "$udid"
           echo "udid=$udid" >> "$GITHUB_OUTPUT"
       - name: The app starts with its Rust core on a phone
-        timeout-minutes: 30
+        # Xcode builds the Rust core for the simulator from scratch here (its
+        # build folder is not the cache's): 15 to 30 minutes and more.
+        timeout-minutes: 60
         run: flutter test integration_test/mobile_test.dart -d ${{ steps.sim.outputs.udid }}

@@ -1,6 +1,9 @@
 package com.thevoiceguy.anvil
 
 import android.net.Uri
+import android.os.Build
+import android.telecom.CallAudioState
+import android.telecom.CallEndpoint
 import android.telecom.Connection
 import android.telecom.ConnectionRequest
 import android.telecom.ConnectionService
@@ -32,6 +35,20 @@ class AnvilConnection(val callId: Long, name: String, number: String) : Connecti
     override fun onUnhold() = CallSystem.emit("hold", callId, mapOf("on" to false))
 
     override fun onPlayDtmfTone(c: Char) = CallSystem.emit("dtmf", callId, mapOf("digits" to c.toString()))
+
+    override fun onCallEndpointChanged(callEndpoint: CallEndpoint) =
+        CallSystem.endpointsChanged(callEndpoint, null)
+
+    override fun onAvailableCallEndpointsChanged(availableEndpoints: List<CallEndpoint>) =
+        CallSystem.endpointsChanged(null, availableEndpoints)
+
+    @Deprecated("Android 14 tells of call endpoints instead")
+    override fun onCallAudioStateChanged(state: CallAudioState) {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
+            @Suppress("DEPRECATION")
+            CallSystem.audioStateChanged(state)
+        }
+    }
 
     /** A self-managed call shows its own incoming screen: the notification. */
     override fun onShowIncomingCallUi() {
