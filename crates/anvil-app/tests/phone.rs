@@ -77,6 +77,8 @@ async fn phone_with(
                 bind_addr: Some(format!("{ip}:0")),
                 tls_extra_ca_pem: None,
                 provisioning_url: None,
+                instance_id: None,
+                push: None,
             },
             media: MediaConfig::default(),
             audio,

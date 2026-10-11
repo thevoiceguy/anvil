@@ -146,7 +146,16 @@ live in FCP: `docs/SOFTPHONE.md` in `thevoiceguy/fcp`. Anvil's phases:
   - [x] **U4c** Audio routing per call (earpiece, speaker, Bluetooth, a
         headset) from Telecom's endpoints and the iOS audio session, the
         speaker switch and route list in the call, the proximity sensor
-- [ ] **U5** Ringing a sleeping phone (with FCP's push)
+- [ ] **U5** Ringing a sleeping phone (with FCP's push, its `docs/PUSH.md`)
+  - [x] **A1** Registering where the app is woken: the push address in the
+        REGISTER's Contact (siphon-rs `register_contact_params`), the
+        install's RFC 5626 instance, a new token registered at once, a 555
+        registered again without it; proved against a scripted registrar
+        and FCP
+  - [ ] **A2** Android: FCM, the call push to Telecom, the phone started
+        without the UI, the cancel push
+  - [ ] **A3** iOS: PushKit, CallKit from the payload, the phone started
+        without the UI
 - [ ] **U6** Accessibility, localisation, store listings
 
 ---

@@ -44,6 +44,57 @@ pub struct AccountConfig {
     /// header; if that's also absent, branding is skipped and the UI falls
     /// back to its built-in default theme.
     pub provisioning_url: Option<String>,
+    /// This install's instance (RFC 5626 `+sip.instance`), e.g.
+    /// `<urn:uuid:…>`: the same on every start, so a registrar replaces
+    /// the install's old binding rather than adding to it. `None` registers
+    /// without outbound.
+    pub instance_id: Option<String>,
+    /// Where this install is woken when it sleeps (RFC 8599): carried by
+    /// every REGISTER's Contact. Changed later by
+    /// [`Anvil::set_push`](crate::Anvil::set_push).
+    pub push: Option<PushAddress>,
+}
+
+/// A push notification service an app is woken through (RFC 8599
+/// `pn-provider`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum PushProvider {
+    /// Apple's (PushKit VoIP pushes on iOS).
+    Apns,
+    /// Firebase Cloud Messaging (Android).
+    Fcm,
+}
+
+impl PushProvider {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Apns => "apns",
+            Self::Fcm => "fcm",
+        }
+    }
+}
+
+/// An app's push address (RFC 8599 §4.1): the provider, the app at it
+/// (`pn-param`: APNs `<team id>.<topic>`, FCM the project id) and this
+/// install's token (`pn-prid`).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct PushAddress {
+    pub provider: PushProvider,
+    pub param: String,
+    pub prid: String,
+}
+
+impl PushAddress {
+    /// The Contact URI parameters a REGISTER carries.
+    pub fn contact_params(&self) -> String {
+        format!(
+            ";pn-provider={};pn-param={};pn-prid={}",
+            self.provider.as_str(),
+            self.param,
+            self.prid
+        )
+    }
 }
 
 /// DTMF transmission mode.

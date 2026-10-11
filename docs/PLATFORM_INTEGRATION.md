@@ -167,15 +167,31 @@ Software APM = `webrtc-audio-processing` wrapped in `anvil-audio`.
 
 ---
 
-## Push notification relay (server-side, out of scope for now)
+## Push: how the server wakes the app
 
-None of APNs, FCM, or PushKit can be triggered directly by a SIP INVITE. Anvil on a
-backgrounded mobile device can't hold a persistent SIP socket open, so we need a tiny
-relay that:
+FCP pushes to the app itself (RFC 8599; FCP's `docs/PUSH.md`): it holds the
+publisher's APNs key and FCM service account, and no relay sits between it
+and the device. Anvil's part is to say where it is woken:
 
-1. Registers with the PBX on the user's behalf (or has SIP Service register to it).
-2. Receives INVITE, sends a push to APNs/FCM with enough payload to identify the caller.
-3. Device wakes, opens SIP socket, PBX retransmits INVITE.
+1. **The push address in every REGISTER.** `AccountConfig::push` (or
+   `Anvil::set_push` when the token arrives or is renewed, `Command::Push`
+   in `anvil-app`) puts `;pn-provider=…;pn-param=…;pn-prid=…` inside the
+   Contact's brackets: `apns` with `<team id>.<topic>` and the PushKit VoIP
+   token on iOS, `fcm` with the Firebase project id and the FCM token on
+   Android. A new token is registered at once.
+2. **The install's instance.** `AccountConfig::instance_id`
+   (`<urn:uuid:…>`, RFC 5626 `+sip.instance` with `reg-id`): signed in to
+   FCP it is made from the install id, the same on every start, so the
+   woken app's REGISTER replaces its sleeping binding rather than adding
+   another.
+3. **555.** A server that cannot push to the app answers 555 Push
+   Notification Service Not Supported, naming in `Feature-Caps` what it
+   pushes through. Anvil registers again without the address and says so
+   (`Event::PushChanged` → `PushState::Refused`); the app rings only while
+   it is awake. A 2xx to a REGISTER carrying the address is
+   `PushState::Accepted`.
+4. **Woken.** The push's payload names the call; the app reports it to
+   CallKit or Telecom at once, starts the phone and registers; FCP rings
+   the new binding. Later phases (A2 Android, A3 iOS) do this part.
 
-This relay is not part of the Anvil repo. It's a Phase 4 dependency and the contract
-between it and the device is documented once Phase 3 FFI stabilises.
+`anvil-cli --push fcm:<project>:<token>` registers a push address by hand.

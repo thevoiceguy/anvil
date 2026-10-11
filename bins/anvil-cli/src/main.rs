@@ -125,6 +125,13 @@ struct Cli {
     #[arg(long)]
     outbound_proxy: Option<String>,
 
+    /// Where the registrar wakes this phone by push (RFC 8599), as
+    /// `<provider>:<param>:<token>`: `fcm:<project>:<token>` or
+    /// `apns:<team id>.<topic>:<token>`. A registrar that cannot push there
+    /// answers 555 and the phone registers without it.
+    #[arg(long, value_parser = parse_push)]
+    push: Option<anvil_core::PushAddress>,
+
     /// STUN server (`host:port`) for public-IP discovery. Result populates
     /// the `c=` line of outbound SDP. Example: `stun.l.google.com:19302`.
     #[arg(long)]
@@ -549,6 +556,18 @@ fn print_change(change: &anvil_app::Change) {
             Some(id) => println!("[voicemail] playing {id}"),
             None => println!("[voicemail] stopped"),
         },
+        C::Push { push } => match push {
+            anvil_app::Push::Off => println!("[push] off"),
+            anvil_app::Push::Accepted => println!("[push] the server wakes this phone"),
+            anvil_app::Push::Refused { supported } => println!(
+                "[push] the server cannot wake this phone (it pushes through: {})",
+                if supported.is_empty() {
+                    "nothing".to_string()
+                } else {
+                    supported.join(", ")
+                }
+            ),
+        },
     }
 }
 
@@ -884,6 +903,28 @@ async fn main() -> Result<()> {
     run(cli, cfg, tone_stats).await
 }
 
+/// `--push`: `<provider>:<param>:<token>`.
+fn parse_push(value: &str) -> Result<anvil_core::PushAddress, String> {
+    let mut parts = value.splitn(3, ':');
+    let (Some(provider), Some(param), Some(prid)) = (parts.next(), parts.next(), parts.next())
+    else {
+        return Err("give <provider>:<param>:<token>".into());
+    };
+    let provider = match provider.to_ascii_lowercase().as_str() {
+        "apns" => anvil_core::PushProvider::Apns,
+        "fcm" => anvil_core::PushProvider::Fcm,
+        other => return Err(format!("unknown push provider {other:?}: apns or fcm")),
+    };
+    if param.is_empty() || prid.is_empty() {
+        return Err("the param and the token are both needed".into());
+    }
+    Ok(anvil_core::PushAddress {
+        provider,
+        param: param.to_string(),
+        prid: prid.to_string(),
+    })
+}
+
 /// The phone's configuration from the command line: an account by hand,
 /// or FCP's (and the FCP client with it); the audio host; the media.
 async fn phone_config(
@@ -919,6 +960,8 @@ async fn phone_config(
                     bind_addr: cli.bind.clone(),
                     tls_extra_ca_pem,
                     provisioning_url: None,
+                    instance_id: None,
+                    push: cli.push.clone(),
                 },
                 BrandConfig::default(),
                 MediaConfig::default(),
@@ -928,6 +971,7 @@ async fn phone_config(
                 let (mut account, brand, media, client) = fcp_account(cli).await?;
                 account.bind_addr = cli.bind.clone();
                 account.stun = cli.stun.clone();
+                account.push = cli.push.clone();
                 account.tls_extra_ca_pem = tls_extra_ca_pem;
                 (account, brand, media, Some(client))
             }

@@ -318,8 +318,28 @@ impl FcpClient {
             bind_addr: None,
             tls_extra_ca_pem: None,
             provisioning_url: Some(session.server.public_url),
+            instance_id: instance_urn(&session.client.install_id),
+            push: None,
         })
     }
+}
+
+/// The install's RFC 5626 instance, from its install id (32 hex digits, a
+/// UUID's): `<urn:uuid:…>`. The same on every start, so FCP replaces the
+/// install's binding wherever it registers from.
+pub fn instance_urn(install_id: &str) -> Option<String> {
+    let id = install_id.trim().to_ascii_lowercase();
+    if id.len() != 32 || !id.bytes().all(|b| b.is_ascii_hexdigit()) {
+        return None;
+    }
+    Some(format!(
+        "<urn:uuid:{}-{}-{}-{}-{}>",
+        &id[..8],
+        &id[8..12],
+        &id[12..16],
+        &id[16..20],
+        &id[20..]
+    ))
 }
 
 #[cfg(test)]
@@ -337,6 +357,15 @@ mod tests {
             "device_id": "d"
         }))
         .unwrap()
+    }
+
+    #[test]
+    fn an_install_is_one_instance() {
+        assert_eq!(
+            instance_urn("0123456789abcdef0123456789ABCDEF").as_deref(),
+            Some("<urn:uuid:01234567-89ab-cdef-0123-456789abcdef>")
+        );
+        assert_eq!(instance_urn("not-an-id"), None);
     }
 
     #[test]

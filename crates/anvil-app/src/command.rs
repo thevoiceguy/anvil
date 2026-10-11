@@ -54,6 +54,12 @@ pub enum Command {
     },
     /// Join `call`'s party to `to`'s, ending both of ours.
     TransferAttended { call: u64, to: u64 },
+    /// Where the server wakes this phone by push from now on (RFC 8599), or
+    /// (`null`) nowhere: the app's push token, new or renewed.
+    Push {
+        #[serde(default)]
+        address: Option<anvil_core::PushAddress>,
+    },
     /// Do not disturb on or off (needs FCP).
     Dnd { on: bool },
     /// Change the calling settings: forwards, call waiting (needs FCP).
