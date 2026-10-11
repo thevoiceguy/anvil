@@ -40,19 +40,28 @@ class CallService : Service() {
         var appContext: Context? = null
         private var running = false
 
+        // Starts asked of Android whose onStartCommand has not run yet. Each
+        // must come forward (startForeground) before the service may stop,
+        // or Android kills the app — a pushed call can end within
+        // milliseconds of ringing, before the service has started.
+        private var starting = 0
+
         /** Start, refresh or stop the service for the calls there are now. */
         fun update(context: Context) {
             appContext = context.applicationContext
             val app = context.applicationContext
             CallSystem.onCalls?.invoke(CallSystem.calls.isNotEmpty())
             if (CallSystem.calls.isEmpty()) {
-                if (running) app.stopService(Intent(app, CallService::class.java))
+                // A start still on its way stops the service itself.
+                if (running && starting == 0) app.stopService(Intent(app, CallService::class.java))
                 NotificationManagerCompat.from(app).cancel(NOTIFICATION)
                 return
             }
             try {
+                starting++
                 ContextCompat.startForegroundService(app, Intent(app, CallService::class.java))
             } catch (e: Exception) {
+                starting--
                 // Started from the background, which Android may refuse: the
                 // notification alone still rings and answers.
                 Log.w(TAG, "the call's service did not start", e)
@@ -145,6 +154,16 @@ class CallService : Service() {
             return notification
         }
 
+        /** What the service shows for the moment it is up after the calls end. */
+        private fun over(context: Context): Notification {
+            channels(context)
+            return NotificationCompat.Builder(context, ONGOING)
+                .setSmallIcon(R.mipmap.ic_launcher)
+                .setCategory(NotificationCompat.CATEGORY_CALL)
+                .setSilent(true)
+                .build()
+        }
+
         @Suppress("MissingPermission")
         private fun post(context: Context) {
             val manager = NotificationManagerCompat.from(context)
@@ -156,11 +175,10 @@ class CallService : Service() {
     override fun onBind(intent: Intent?): IBinder? = null
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
-        val notification = notification(this)
-        if (notification == null) {
-            stopSelf()
-            return START_NOT_STICKY
-        }
+        if (starting > 0) starting--
+        // The calls may be over already; the service comes forward all the
+        // same, as Android requires of every start, and goes.
+        val notification = notification(this) ?: over(this)
         var types = 0
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
             types = ServiceInfo.FOREGROUND_SERVICE_TYPE_PHONE_CALL
@@ -173,6 +191,10 @@ class CallService : Service() {
         try {
             ServiceCompat.startForeground(this, NOTIFICATION, notification, types)
             running = true
+            if (CallSystem.calls.isEmpty() && starting == 0) {
+                ServiceCompat.stopForeground(this, ServiceCompat.STOP_FOREGROUND_REMOVE)
+                stopSelf()
+            }
         } catch (e: Exception) {
             Log.w(TAG, "the call's service could not come forward", e)
             post(this)
