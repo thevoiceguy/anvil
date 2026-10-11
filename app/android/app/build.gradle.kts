@@ -4,6 +4,14 @@ plugins {
     id("dev.flutter.flutter-gradle-plugin")
 }
 
+/** A build value from `-P` or the environment. */
+fun buildValue(name: String): String? =
+    (project.findProperty(name) as String?)?.takeIf { it.isNotEmpty() }
+        ?: System.getenv(name)?.takeIf { it.isNotEmpty() }
+
+fun requiredValue(name: String): String =
+    buildValue(name) ?: throw GradleException("$name is needed with ANVIL_FCM_APP_ID")
+
 android {
     namespace = "com.thevoiceguy.anvil"
     compileSdk = flutter.compileSdkVersion
@@ -31,6 +39,22 @@ android {
         // flag during build.
         versionCode = flutter.versionCode
         versionName = flutter.versionName
+
+        // The Firebase project FCP pushes through (FCP's docs/PUSH.md), as
+        // the values google-services.json would give: from the environment
+        // or `-P` at build time, so no project is kept in the repository.
+        // Without them the app builds with push off.
+        val fcmAppId = buildValue("ANVIL_FCM_APP_ID")
+        if (fcmAppId != null) {
+            resValue("string", "google_app_id", fcmAppId)
+            resValue("string", "gcm_defaultSenderId", requiredValue("ANVIL_FCM_SENDER_ID"))
+            resValue("string", "google_api_key", requiredValue("ANVIL_FCM_API_KEY"))
+            resValue("string", "project_id", requiredValue("ANVIL_FCM_PROJECT_ID"))
+        }
+    }
+
+    buildFeatures {
+        resValues = true
     }
 
     buildTypes {
@@ -57,4 +81,7 @@ dependencies {
     // NotificationCompat.CallStyle and ServiceCompat for the call's
     // notification and service (CallService.kt).
     implementation("androidx.core:core:1.13.1")
+    // FCP's pushes (Push.kt).
+    implementation(platform("com.google.firebase:firebase-bom:34.19.0"))
+    implementation("com.google.firebase:firebase-messaging")
 }

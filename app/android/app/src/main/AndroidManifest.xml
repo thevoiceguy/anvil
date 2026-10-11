@@ -57,6 +57,14 @@
         <receiver
             android:name=".CallActionReceiver"
             android:exported="false"/>
+        <!-- FCP's pushes: a call for the app asleep (Push.kt). -->
+        <service
+            android:name=".AnvilMessagingService"
+            android:exported="false">
+            <intent-filter>
+                <action android:name="com.google.firebase.MESSAGING_EVENT"/>
+            </intent-filter>
+        </service>
         <!-- Don't delete the meta-data below.
              This is used by the Flutter tool to generate GeneratedPluginRegistrant.java -->
         <meta-data

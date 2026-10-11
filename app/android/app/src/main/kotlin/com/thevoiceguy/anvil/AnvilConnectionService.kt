@@ -11,7 +11,10 @@ import android.telecom.PhoneAccountHandle
 import android.telecom.TelecomManager
 
 /** One of the app's calls as Telecom holds it. */
-class AnvilConnection(val callId: Long, name: String, number: String) : Connection() {
+class AnvilConnection(callId: Long, name: String, number: String) : Connection() {
+    /** The phone's id for the call: a pushed call's changes when the phone's comes. */
+    var callId: Long = callId
+
     init {
         connectionProperties = PROPERTY_SELF_MANAGED
         connectionCapabilities = CAPABILITY_HOLD or CAPABILITY_SUPPORT_HOLD or CAPABILITY_MUTE

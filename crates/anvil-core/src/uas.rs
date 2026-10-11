@@ -211,6 +211,11 @@ impl UasRequestHandler for AnvilUasHandler {
         handle.send_provisional(ringing).await;
 
         let from_display = display_name_from_header(request.headers().get("From"));
+        let server_call = request
+            .headers()
+            .get(SERVER_CALL_HEADER)
+            .map(|v| v.trim().to_string())
+            .filter(|v| !v.is_empty());
         let call_id = next_call_id();
 
         let pending = PendingInbound {
@@ -241,6 +246,7 @@ impl UasRequestHandler for AnvilUasHandler {
                 call: call_id,
                 from: from_uri,
                 display_name: from_display,
+                server_call,
             })
             .await;
 
@@ -372,6 +378,10 @@ fn extract_uri_from_nameaddr(value: &str) -> Option<String> {
     }
     None
 }
+
+/// FCP names the call in every INVITE it sends a phone, as a push named
+/// it (FCP's `docs/PUSH.md` §2.5).
+const SERVER_CALL_HEADER: &str = "X-FCP-Call-Id";
 
 fn display_name_from_header(from: Option<&str>) -> Option<String> {
     let v = from?;

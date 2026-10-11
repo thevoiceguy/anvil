@@ -354,6 +354,8 @@ dependencies = [
  "libc",
  "ndk-context",
  "parking_lot",
+ "serde",
+ "serde_json",
  "tokio",
  "tracing",
 ]

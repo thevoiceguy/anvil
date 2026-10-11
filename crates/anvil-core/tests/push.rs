@@ -200,3 +200,58 @@ async fn a_555_registers_without_the_push_address() {
     );
     let _ = anvil.shutdown().await;
 }
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn an_invite_names_the_call_a_push_did() {
+    // FCP names its call in every INVITE (`X-FCP-Call-Id`), as the push
+    // that woke the app did: the app knows which INVITE is the call it
+    // already shows.
+    let (anvil, mut events) = start(account(
+        "sip:app@127.0.0.1",
+        "sip:127.0.0.1:9",
+        "app",
+        "",
+        "127.0.0.1",
+        3600,
+    ))
+    .await;
+    let server = UdpSocket::bind("127.0.0.1:0").await.unwrap();
+    let here = server.local_addr().unwrap();
+    let sdp = "v=0\r\no=- 1 1 IN IP4 127.0.0.1\r\ns=-\r\nc=IN IP4 127.0.0.1\r\nt=0 0\r\n\
+               m=audio 40000 RTP/AVP 0\r\na=rtpmap:0 PCMU/8000\r\na=sendrecv\r\n";
+    let invite = format!(
+        "INVITE sip:app@{at} SIP/2.0\r\n\
+         Via: SIP/2.0/UDP {here};branch=z9hG4bK-named-1\r\n\
+         Max-Forwards: 70\r\n\
+         From: \"Ann Lee\" <sip:1002@{here}>;tag=named\r\n\
+         To: <sip:app@{at}>\r\n\
+         Call-ID: named-1@127.0.0.1\r\n\
+         CSeq: 1 INVITE\r\n\
+         Contact: <sip:1002@{here}>\r\n\
+         X-FCP-Call-Id: 6f1c2a9e-0b7d-4c3e-9a51-2d8f40c7b1aa\r\n\
+         Content-Type: application/sdp\r\n\
+         Content-Length: {len}\r\n\r\n{sdp}",
+        at = anvil.sip_address(),
+        len = sdp.len(),
+    );
+    server
+        .send_to(invite.as_bytes(), anvil.sip_address())
+        .await
+        .unwrap();
+    let named = expect(&mut events, SOON, |e| match e {
+        Event::IncomingCall {
+            display_name,
+            server_call,
+            ..
+        } => Some((display_name.clone(), server_call.clone())),
+        _ => None,
+    })
+    .await;
+    assert_eq!(
+        named,
+        Some((
+            Some("Ann Lee".to_string()),
+            Some("6f1c2a9e-0b7d-4c3e-9a51-2d8f40c7b1aa".to_string())
+        ))
+    );
+}

@@ -42,6 +42,9 @@ enum SystemCallAction {
   hold,
   mute,
   dtmf,
+
+  /// The system no longer shows the call.
+  ended,
 }
 
 class SystemCallEvent {
@@ -123,6 +126,12 @@ class AudioRoutes {
 }
 
 abstract class MobilePlatform {
+  /// The system's call screen follows the phone itself, not the app: on
+  /// Android native code hears the calls from the Rust core, so a phone a
+  /// push woke rings with no Flutter running (FCP's `docs/PUSH.md` §2.5).
+  /// The app then neither reports its calls nor acts on [callEvents].
+  bool get systemFollowsPhone;
+
   /// Ask for the microphone (and, where the system asks separately, to show
   /// the call's notification) if the system hasn't been asked yet; whether
   /// the app may use the microphone.
@@ -180,6 +189,16 @@ class NativeMobile implements MobilePlatform {
 
   static bool get supported =>
       !kIsWeb && (Platform.isAndroid || Platform.isIOS);
+
+  @override
+  bool get systemFollowsPhone => !kIsWeb && Platform.isAndroid;
+
+  /// A push's data as the push service delivers it (`type`, `call`,
+  /// `from`, `name`): for the app's tests on a device with no push project
+  /// (Android debug builds).
+  @visibleForTesting
+  Future<void> deliverPush(Map<String, String> data) =>
+      _channel.invokeMethod<void>('deliverPush', data);
 
   @override
   Future<bool> requestMicrophone() async =>
