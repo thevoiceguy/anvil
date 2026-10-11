@@ -236,7 +236,8 @@ jobs:
       - name: The app starts with its Rust core on a phone
         # Now and then the run hangs once the app is built, before any test
         # (installing on the simulator, or attaching to the app): each try
-        # gets twenty minutes, on a simulator booted again, three tries.
+        # gets ten minutes (its build is a minute or two: the step above), on a
+        # simulator booted again, three tries.
         timeout-minutes: 60
         env:
           UDID: ${{ steps.sim.outputs.udid }}
@@ -246,7 +247,7 @@ jobs:
               --predicate 'process == "Runner"' >> simulator.log 2>&1 &
             flutter test integration_test/mobile_test.dart -d "$UDID" &
             test=$!
-            ( sleep 1200; touch hung; echo "::warning::try $attempt hung"
+            ( sleep 600; touch hung; echo "::warning::try $attempt hung"
               kill -TERM "$test"; sleep 10; kill -KILL "$test" ) 2>/dev/null &
             watchdog=$!
             wait "$test" && status=0 || status=$?
