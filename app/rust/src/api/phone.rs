@@ -155,9 +155,10 @@ pub async fn start_phone(session_path: String) -> anyhow::Result<()> {
         Ok(phone)
     })
     .await?;
-    // Android's Telecom shows the calls from here, with or without Dart: a
-    // push starts the phone with no Flutter running (`system.rs`).
-    if cfg!(target_os = "android") {
+    // Android's Telecom and iOS's CallKit show the calls from here, with or
+    // without Dart: a push starts the phone with no Flutter running
+    // (`system.rs`).
+    if cfg!(any(target_os = "android", target_os = "ios")) {
         let _guard = runtime().enter();
         *FOLLOWER.lock() = Some(crate::system::follow(phone.clone()));
     }
@@ -570,8 +571,7 @@ fn kind_only(kind: &str) -> PhoneChange {
     }
 }
 
-/// Carry out a command on the running phone; the call a `call` placed.
-/// Native code's way to the phone (`android.rs`): woken by a push, the
+/// Native code's way to the phone (`android.rs`, `ios.rs`): woken by a push, the
 /// phone starts from the saved session, or registers again at once if it
 /// runs — its connection to the registrar may be gone.
 #[frb(ignore)]
@@ -605,6 +605,7 @@ pub(crate) async fn act(json: String) -> anyhow::Result<()> {
     on_runtime(async move { crate::system::act(&phone, &json).await }).await
 }
 
+/// Carry out a command on the running phone; the call a `call` placed.
 async fn execute(command: Command) -> anyhow::Result<Option<u64>> {
     let phone = phone()?;
     on_runtime(async move {

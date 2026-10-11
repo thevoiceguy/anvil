@@ -51,20 +51,23 @@ apps that roll their own incoming-call UI.
 
 ### Flow for an incoming call
 
-1. PBX sends push notification to APNs (needs a server-side relay — the SIP stack
-   itself can't receive APNs).
-2. APNs delivers VoIP push; iOS wakes the app.
-3. App **must** report the incoming call to `CXProvider` within ~5 seconds or
-   iOS will terminate it and future pushes may be throttled.
-4. App opens the SIP socket, expects the INVITE (or has already received it via
-   a warm push payload).
-5. User taps accept in CallKit UI → Swift calls `anvil_answer(call_id)`.
-6. CallKit activates the audio session; Anvil starts RTP I/O.
+1. FCP pushes to APNs itself (its `docs/PUSH.md`; no relay), a VoIP push
+   naming the call.
+2. APNs delivers it; iOS wakes the app, in the background if it slept.
+3. The app reports the call to `CXProvider` at once, from the payload —
+   every VoIP push must report a call, or iOS kills the app and stops
+   delivering them — and starts the phone from its saved session.
+4. The phone registers; FCP sends the INVITE, naming the call in
+   `X-FCP-Call-Id`, and it takes the place of the call on the screen.
+5. Answered at CallKit → `CallSystem` → `PhoneLink.act` → the Rust core.
+6. CallKit activates the audio session (a call's, set up when the answer
+   is performed); the phone's audio runs.
 
 ### Flow for an outgoing call
 
-1. UI calls `anvil_place_call(target)` → Swift calls `CXProvider.reportNewOutgoing`.
-2. CallKit activates audio session, Anvil starts INVITE + RTP.
+1. The app places the call on the phone; the phone's event reaches
+   `CallSystem`, which asks CallKit (`CXStartCallAction`).
+2. CallKit activates the audio session; the phone's INVITE and RTP run.
 
 ### Required plist entries
 
@@ -72,11 +75,14 @@ apps that roll their own incoming-call UI.
 <key>UIBackgroundModes</key>
 <array>
     <string>voip</string>
-    <string>audio</string>
 </array>
 <key>NSMicrophoneUsageDescription</key>
-<string>Anvil needs the microphone for calls.</string>
+<string>Anvil uses the microphone so the people you call can hear you.</string>
+<key>AnvilApnsTeam</key>
+<string>$(DEVELOPMENT_TEAM)</string>
 ```
+
+and `aps-environment` in `Runner.entitlements`.
 
 ### Gotchas
 
@@ -228,5 +234,36 @@ and the device. Anvil's part is to say where it is woken:
   signed-out app rings nothing, a call push rings and stops when the phone
   cannot wake, a cancel push ends it. Real delivery needs the publisher's
   Firebase project and a device with Google Play services.
+
+### iOS (phase A3)
+
+- **The token.** `Push` (a `PKPushRegistryDelegate`, made at launch as
+  PushKit requires) hears the install's VoIP token and its renewal;
+  `PhoneLink.setPush` keeps it in `push.json` beside the session, which
+  every start of the phone reads, and registers it at once if the phone
+  runs. An invalidated token is forgotten.
+- **The topic** is the app's bundle ID with `.voip`, and `pn-param` is the
+  signing team's ID, a dot, the topic — the team from `DEVELOPMENT_TEAM`
+  through Info.plist's `AnvilApnsTeam`. An unsigned build (CI's) has no
+  team and registers without a push address. The Push Notifications
+  capability is `aps-environment` in `Runner.entitlements`.
+- **Every push reports a call** (Apple's rule): a call push rings; a
+  cancel push reports the call it ends, or one ended at once; a test push,
+  or one for an app signed out, is shown and ended at once.
+- **The phone without Flutter.** Swift reaches the Rust core through a C
+  ABI (`anvil_wake`, `anvil_set_push`, `anvil_next_call_event`,
+  `anvil_act`, `anvil_string_free`; `app/rust/src/ios.rs`, declared in
+  `Runner-Bridging-Header.h`). The phone's calls come to `CallSystem` as
+  the same events as Android's, whether Dart or a push started the phone,
+  and Dart's `MobileBridge` leaves CallKit alone.
+- **A call shown from a push** has an id below zero until the phone's
+  call arrives, matched by `X-FCP-Call-Id`; answered before then, it is
+  answered when it does; declined, its INVITE is declined when it comes;
+  the INVITE's caller replaces a minimal payload's blank one.
+- **Tested** on the simulator (`integration_test/mobile_test.dart`, the
+  same tests as Android's) with pushes handed in as PushKit would
+  (`deliverPush`, debug builds only); the C ABI by the Rust crate's own
+  tests. Real delivery needs the publisher's Apple Developer account, an
+  APNs key in FCP's `[[push.apns]]`, and a device.
 
 `anvil-cli --push fcm:<project>:<token>` registers a push address by hand.

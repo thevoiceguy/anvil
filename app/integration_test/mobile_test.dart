@@ -165,9 +165,19 @@ void main() {
 
   // FCP wakes the app with a push (FCP's docs/PUSH.md §2.5): a call push
   // rings at once while the phone wakes and registers, and the phone's
-  // call takes its place. The emulator has no Firebase project, so the
-  // pushes are handed in as FCM would hand them (Android only).
+  // call takes its place. The emulator has no Firebase project and PushKit
+  // does not reach a simulator, so the pushes are handed in as FCM or
+  // PushKit would hand them. A simulator's CallKit may drop the call it was
+  // given (`failed`), as above.
   File session() => File('$supportDir/session.json');
+
+  /// The call a push showed is gone: ended, or on a simulator dropped.
+  final over = Platform.isAndroid
+      ? contains(SystemCallAction.ended)
+      : anyOf(
+          contains(SystemCallAction.ended),
+          contains(SystemCallAction.failed),
+        );
 
   /// The events for the call a push shows (ids below zero) until it is no
   /// longer shown, or fifteen seconds. Telecom keeps an ended call a moment
@@ -207,7 +217,6 @@ void main() {
   }
 
   testWidgets('a push to an app signed out rings nothing', (tester) async {
-    if (!Platform.isAndroid) return;
     supportDir = (await getApplicationSupportDirectory()).path;
     if (session().existsSync()) session().deleteSync();
     final seen = <SystemCallAction>[];
@@ -228,7 +237,6 @@ void main() {
   testWidgets('a call push rings, and stops when the phone cannot wake', (
     tester,
   ) async {
-    if (!Platform.isAndroid) return;
     supportDir = (await getApplicationSupportDirectory()).path;
     // A session the phone cannot start from: no server to register with.
     session().writeAsStringSync('not a session');
@@ -242,11 +250,10 @@ void main() {
       }),
     );
     debugPrint('pushed call: ${seen.map((a) => a.name).join(' ')}');
-    expect(seen, contains(SystemCallAction.ended));
+    expect(seen, over);
   });
 
   testWidgets('a cancel push ends the call a push showed', (tester) async {
-    if (!Platform.isAndroid) return;
     supportDir = (await getApplicationSupportDirectory()).path;
     session().writeAsStringSync('not a session');
     addTearDown(() => session().deleteSync());
@@ -262,11 +269,10 @@ void main() {
       });
     });
     debugPrint('cancelled call: ${seen.map((a) => a.name).join(' ')}');
-    expect(seen, contains(SystemCallAction.ended));
+    expect(seen, over);
   });
 
   testWidgets('a test push is taken', (tester) async {
-    if (!Platform.isAndroid) return;
     await NativeMobile().deliverPush({'type': 'test', 'call': 'test-1'});
   });
 }

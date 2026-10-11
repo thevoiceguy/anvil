@@ -126,9 +126,10 @@ class AudioRoutes {
 }
 
 abstract class MobilePlatform {
-  /// The system's call screen follows the phone itself, not the app: on
-  /// Android native code hears the calls from the Rust core, so a phone a
-  /// push woke rings with no Flutter running (FCP's `docs/PUSH.md` §2.5).
+  /// The system's call screen follows the phone itself, not the app: native
+  /// code hears the calls from the Rust core (Telecom on Android, CallKit on
+  /// iOS), so a phone a push woke rings with no Flutter running (FCP's
+  /// `docs/PUSH.md` §2.5).
   /// The app then neither reports its calls nor acts on [callEvents].
   bool get systemFollowsPhone;
 
@@ -191,11 +192,11 @@ class NativeMobile implements MobilePlatform {
       !kIsWeb && (Platform.isAndroid || Platform.isIOS);
 
   @override
-  bool get systemFollowsPhone => !kIsWeb && Platform.isAndroid;
+  bool get systemFollowsPhone => supported;
 
   /// A push's data as the push service delivers it (`type`, `call`,
   /// `from`, `name`): for the app's tests on a device with no push project
-  /// (Android debug builds).
+  /// or a simulator PushKit does not reach (debug builds).
   @visibleForTesting
   Future<void> deliverPush(Map<String, String> data) =>
       _channel.invokeMethod<void>('deliverPush', data);

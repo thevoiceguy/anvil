@@ -1,16 +1,20 @@
 //! The phone's calls for the system's call screen, and the push address it
-//! registers, without Dart (FCP's `docs/PUSH.md` §2.5, phase A2).
+//! registers, without Dart (FCP's `docs/PUSH.md` §2.5, phases A2 and A3).
 //!
 //! A push starts the phone in a process where Flutter may never run: the
-//! calls Android's Telecom shows then come from here, as events native code
+//! calls Android's Telecom and iOS's CallKit show then come from here, as events native code
 //! reads one at a time ([`next_event`]), and what the user does there comes
 //! back as an action on the phone ([`act`]). The push address is a file
 //! beside the session, written by native code when the platform hands it a
 //! token and read whenever the phone starts, whoever starts it.
 //!
-//! Only Android's native code reads the events today; iOS (phase A3) is to
-//! follow it. Kept to plain Rust so the host's tests run it.
-#![cfg_attr(not(target_os = "android"), allow(dead_code))]
+//! Android's native code reads them through JNI (`android.rs`), iOS's
+//! through a C ABI (`ios.rs`, phase A3). Kept to plain Rust so the host's
+//! tests run it.
+#![cfg_attr(
+    not(any(target_os = "android", target_os = "ios", test)),
+    allow(dead_code)
+)]
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
@@ -44,7 +48,14 @@ pub(crate) fn load_push(session_path: &Path) -> Option<PushAddress> {
 pub(crate) fn save_push(session_path: &Path, address: Option<&PushAddress>) -> anyhow::Result<()> {
     let path = push_path(session_path);
     match address {
-        Some(address) => std::fs::write(path, serde_json::to_vec(address)?)?,
+        Some(address) => {
+            // The platform may hand over a token before anyone has signed
+            // in, when the app's directory is not there yet.
+            if let Some(dir) = path.parent() {
+                std::fs::create_dir_all(dir)?;
+            }
+            std::fs::write(path, serde_json::to_vec(address)?)?
+        }
         None => match std::fs::remove_file(path) {
             Err(e) if e.kind() != std::io::ErrorKind::NotFound => return Err(e.into()),
             _ => {}

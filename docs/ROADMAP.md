@@ -157,8 +157,13 @@ live in FCP: `docs/SOFTPHONE.md` in `thevoiceguy/fcp`. Anvil's phases:
         the UI through JNI, the INVITE matched by FCP's `X-FCP-Call-Id`,
         the cancel push; Telecom fed by the Rust core, not Dart; proved on
         the emulator with pushes handed in as FCM would
-  - [ ] **A3** iOS: PushKit, CallKit from the payload, the phone started
-        without the UI
+  - [x] **A3** iOS: PushKit (the signing team's topic), CallKit from the
+        payload for every push, the phone started without the UI through a
+        C ABI, the INVITE matched by FCP's `X-FCP-Call-Id`, the cancel
+        push; CallKit fed by the Rust core, not Dart; proved on the
+        simulator with pushes handed in as PushKit would
+  - [ ] Delivery on devices: TestFlight and a Play test track, with the
+        publisher's Apple Developer and Firebase accounts
 - [ ] **U6** Accessibility, localisation, store listings
 
 ---
