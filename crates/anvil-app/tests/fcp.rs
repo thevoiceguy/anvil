@@ -10,7 +10,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use anvil_app::control::{Client, Endpoint};
-use anvil_app::{CallState, Command, Phone, PhoneConfig, Registration};
+use anvil_app::{CallState, Command, Phone, PhoneConfig, Push, Registration};
 use anvil_core::audio::{AudioFormat, AudioFrame, AudioHost, AudioSink, AudioSource, DeviceInfo};
 use anvil_core::{AnvilConfig, AnvilError, BrandConfig};
 use anvil_fcp::{discover, password_sign_in, AppClient, FcpClient};
@@ -221,6 +221,32 @@ async fn the_running_phone_calls_through_fcp_and_sets_do_not_disturb() {
             .unwrap()
             .ok
     );
+
+    // A push token for an app FCP cannot wake: registered at once, refused
+    // with 555, and the phone stays registered without it; then push off.
+    let push = control
+        .request(&Command::Push {
+            address: Some(anvil_core::PushAddress {
+                provider: anvil_core::PushProvider::Fcm,
+                param: "anvil-no-such-project".into(),
+                prid: "anvil-app-test-token".into(),
+            }),
+        })
+        .await
+        .unwrap();
+    assert!(push.ok, "{push:?}");
+    until(&alice, "FCP refuses the push address", |s| {
+        matches!(s.push, Push::Refused { .. }) && s.registration == Registration::Registered
+    })
+    .await;
+    assert!(
+        control
+            .request(&Command::Push { address: None })
+            .await
+            .unwrap()
+            .ok
+    );
+    until(&alice, "push is off", |s| s.push == Push::Off).await;
 
     server.abort();
     alice.shutdown().await;

@@ -525,6 +525,8 @@ unsafe fn build_account(cfg: &AnvilConfigC) -> Result<AccountConfig, AnvilStatus
         bind_addr: unsafe { cstr_to_optional(cfg.bind_addr)? },
         tls_extra_ca_pem: None,
         provisioning_url: None,
+        instance_id: None,
+        push: None,
     })
 }
 

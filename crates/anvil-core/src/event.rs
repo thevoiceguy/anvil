@@ -16,6 +16,19 @@ pub enum RegState {
     Failed,
 }
 
+/// Whether the registrar can wake this install by push (RFC 8599).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum PushState {
+    /// No push address is registered.
+    Off,
+    /// The registrar took the push address: a call wakes the app.
+    Accepted,
+    /// The registrar answered 555: it cannot push to this app. It pushes
+    /// through `supported` (its `Feature-Caps`), perhaps none. The
+    /// registration goes on without the address.
+    Refused { supported: Vec<String> },
+}
+
 /// Reason a call ended.
 #[derive(Debug, Clone)]
 pub enum EndReason {
@@ -103,6 +116,11 @@ pub enum Event {
     LineStateChanged {
         aor: String,
         state: crate::watch::LineState,
+    },
+    /// What the registrar made of the push address (RFC 8599): sent when
+    /// it changes.
+    PushChanged {
+        state: PushState,
     },
     Error {
         call: Option<CallId>,

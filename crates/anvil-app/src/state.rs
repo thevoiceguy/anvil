@@ -30,6 +30,9 @@ pub struct State {
     /// The voicemail message playing, by id.
     #[serde(default)]
     pub playing: Option<String>,
+    /// Whether the server can wake this phone by push.
+    #[serde(default)]
+    pub push: Push,
 }
 
 /// The tenant's brand, as a screen applies it (`docs/BRANDING.md`).
@@ -60,6 +63,7 @@ impl State {
             voicemail: Vec::new(),
             audio: AudioDevices::default(),
             playing: None,
+            push: Push::Off,
         }
     }
 
@@ -94,6 +98,30 @@ impl From<anvil_core::RegState> for Registration {
             anvil_core::RegState::Registering => Self::Registering,
             anvil_core::RegState::Registered => Self::Registered,
             anvil_core::RegState::Failed => Self::Failed,
+        }
+    }
+}
+
+/// Whether the server can wake this phone by push (RFC 8599).
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "state", rename_all = "snake_case")]
+pub enum Push {
+    /// No push address is registered.
+    #[default]
+    Off,
+    /// The server took the push address: a call wakes the phone.
+    Accepted,
+    /// The server cannot push to this phone; it pushes through
+    /// `supported`. The phone rings only while it is awake.
+    Refused { supported: Vec<String> },
+}
+
+impl From<anvil_core::PushState> for Push {
+    fn from(s: anvil_core::PushState) -> Self {
+        match s {
+            anvil_core::PushState::Off => Self::Off,
+            anvil_core::PushState::Accepted => Self::Accepted,
+            anvil_core::PushState::Refused { supported } => Self::Refused { supported },
         }
     }
 }
@@ -311,5 +339,9 @@ pub enum Change {
     /// A voicemail message started playing, or (`None`) the playing stopped.
     Playing {
         id: Option<String>,
+    },
+    /// What the server made of the phone's push address.
+    Push {
+        push: Push,
     },
 }

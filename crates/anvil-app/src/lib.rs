@@ -30,7 +30,7 @@ pub use clip::{decode_wav, Clip};
 pub use command::{AudioKind, Command, Response};
 pub use state::{
     AudioDevice, AudioDevices, Brand, CallState, CallView, Change, Direction, MessageWaiting,
-    Person, Quality, Recent, Registration, State, Voicemail,
+    Person, Push, Quality, Recent, Registration, State, Voicemail,
 };
 
 use settings::LocalSettings;
@@ -261,6 +261,10 @@ impl Phone {
                     .await?
                     .transfer_attended(CallId(call), CallId(to))
                     .await?;
+                Ok(Response::ok())
+            }
+            Command::Push { address } => {
+                self.anvil().await?.set_push(address).await?;
                 Ok(Response::ok())
             }
             Command::Dnd { on } => {
@@ -693,6 +697,11 @@ async fn follow(inner: std::sync::Weak<Inner>, mut events: EventStream) {
                 let state = Registration::from(state);
                 inner.state.lock().registration = state;
                 let _ = inner.changes.send(Change::Registration { state, reason });
+            }
+            Event::PushChanged { state } => {
+                let push = Push::from(state);
+                inner.state.lock().push = push.clone();
+                let _ = inner.changes.send(Change::Push { push });
             }
             Event::IncomingCall {
                 call,

@@ -532,6 +532,7 @@ pub fn phone_changes(sink: StreamSink<PhoneChange>) -> anyhow::Result<()> {
                 C::Voicemail { .. } => kind_only("voicemail"),
                 C::Audio { .. } => kind_only("audio"),
                 C::Playing { .. } => kind_only("playing"),
+                C::Push { .. } => kind_only("push"),
             };
             if sink.add(out).is_err() {
                 return;

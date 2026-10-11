@@ -18,6 +18,7 @@ pub mod error;
 pub mod event;
 pub(crate) mod media;
 pub mod mwi;
+mod push;
 mod registration;
 mod srtp;
 pub(crate) mod stun;
@@ -29,9 +30,11 @@ pub use brand::{
     BrandAsset, BrandCache, BrandColors, BrandCredential, BrandFetchOutcome, BrandLinks,
     BrandProfile, BrandProvider, BrandRequest, DialPlan, Rgba, Ringtone,
 };
-pub use config::{AccountConfig, AnvilConfig, BrandConfig, MediaConfig, Transport};
+pub use config::{
+    AccountConfig, AnvilConfig, BrandConfig, MediaConfig, PushAddress, PushProvider, Transport,
+};
 pub use error::AnvilError;
-pub use event::{EndReason, Event, EventStream, MediaStats, RegState};
+pub use event::{EndReason, Event, EventStream, MediaStats, PushState, RegState};
 
 use std::net::IpAddr;
 use std::sync::Arc;
@@ -68,6 +71,8 @@ pub struct Anvil {
     advertised: std::net::SocketAddr,
     /// The registration expiry asked for; the registrar may grant less.
     register_expires: u32,
+    /// Where this install is woken, and what the registrar made of it.
+    push: Arc<push::Push>,
     /// The codecs offered and accepted, in order of preference.
     codecs: Arc<[Codec]>,
     /// Whether media is encrypted (SDES-SRTP).
@@ -195,6 +200,16 @@ impl Anvil {
         if !cfg.account.user_agent.is_empty() {
             uac_builder = uac_builder.user_agent(cfg.account.user_agent.clone());
         }
+        // RFC 5626: the install's instance, so its new binding replaces its
+        // old one wherever the phone moves; and where it is woken (RFC 8599).
+        if let Some(instance) = cfg.account.instance_id.as_deref() {
+            uac_builder = uac_builder.enable_outbound(instance);
+        }
+        if let Some(push) = &cfg.account.push {
+            uac_builder = uac_builder
+                .register_contact_params(push.contact_params())
+                .map_err(|e| AnvilError::Config(format!("push address: {e}")))?;
+        }
 
         let uac = Arc::new(
             uac_builder
@@ -210,6 +225,7 @@ impl Anvil {
         })?;
 
         let (event_tx, event_rx) = mpsc::channel::<Event>(64);
+        let push = Arc::new(push::Push::new(cfg.account.push.clone(), event_tx.clone()));
 
         let local_user = local_uri
             .user()
@@ -306,6 +322,7 @@ impl Anvil {
                 local_user,
                 advertised,
                 register_expires,
+                push,
                 codecs,
                 srtp: cfg.media.srtp,
                 refresh: parking_lot::Mutex::new(None),
@@ -352,23 +369,29 @@ impl Anvil {
                 reason: None,
             })
             .await;
-        let granted =
-            match register_once(&self.uac, &self.registrar_uri, self.register_expires).await {
-                Ok((granted, provisioning_url)) => {
-                    learn_brand_url(self.branding.as_ref(), provisioning_url.as_deref());
-                    granted
-                }
-                Err(e) => {
-                    let _ = self
-                        .events
-                        .send(Event::RegistrationChanged {
-                            state: RegState::Failed,
-                            reason: Some(e.to_string()),
-                        })
-                        .await;
-                    return Err(e);
-                }
-            };
+        let granted = match register_once(
+            &self.uac,
+            &self.registrar_uri,
+            self.register_expires,
+            &self.push,
+        )
+        .await
+        {
+            Ok((granted, provisioning_url)) => {
+                learn_brand_url(self.branding.as_ref(), provisioning_url.as_deref());
+                granted
+            }
+            Err(e) => {
+                let _ = self
+                    .events
+                    .send(Event::RegistrationChanged {
+                        state: RegState::Failed,
+                        reason: Some(e.to_string()),
+                    })
+                    .await;
+                return Err(e);
+            }
+        };
         let _ = self
             .events
             .send(Event::RegistrationChanged {
@@ -383,8 +406,21 @@ impl Anvil {
             granted,
             self.events.clone(),
             self.branding.clone(),
+            Arc::clone(&self.push),
         ));
         *self.refresh.lock() = Some(task);
+        Ok(())
+    }
+
+    /// Where this install is woken from now on (RFC 8599), or nowhere: a
+    /// renewed push token, push turned on or off. While registered, a
+    /// REGISTER says so at once; what the registrar made of it arrives as
+    /// [`Event::PushChanged`].
+    pub async fn set_push(&self, address: Option<PushAddress>) -> Result<(), AnvilError> {
+        self.push.set(&self.uac, address).await?;
+        if self.refresh.lock().is_some() {
+            self.register().await?;
+        }
         Ok(())
     }
 
@@ -1006,15 +1042,23 @@ fn learn_brand_url(branding: Option<&Arc<brand::Branding>>, url: Option<&str>) {
 /// provisioning URL its 200 OK named (`X-FCP-Provisioning-Url`). A 423
 /// Interval Too Brief is asked again with the registrar's `Min-Expires`
 /// (RFC 3261 §10.2.8).
+///
+/// A 555 to a REGISTER carrying the push address is asked again without it
+/// (RFC 8599 §5.2): the phone still rings while it is awake.
 async fn register_once(
     uac: &IntegratedUAC,
     registrar: &SipUri,
     expires: u32,
+    push: &push::Push,
 ) -> Result<(u32, Option<String>), AnvilError> {
     let mut asked = expires;
-    for _ in 0..2 {
+    for _ in 0..3 {
+        let pushing = push.sending();
         match uac.register(registrar.clone(), Some(asked)).await {
             Ok(resp) if (200..300).contains(&resp.code()) => {
+                if pushing {
+                    push.accepted().await;
+                }
                 let provisioning_url = resp
                     .headers()
                     .get("X-FCP-Provisioning-Url")
@@ -1025,6 +1069,7 @@ async fn register_once(
                     provisioning_url,
                 ));
             }
+            Ok(resp) if resp.code() == 555 && pushing => push.refused(uac, &resp).await,
             Ok(resp) if resp.code() == 423 => match registration::min_expires(&resp) {
                 Some(min) if min > asked => asked = min,
                 _ => return Err(AnvilError::AuthRejected("423 Interval Too Brief".into())),
@@ -1051,6 +1096,7 @@ async fn keep_registered(
     mut granted: u32,
     events: mpsc::Sender<Event>,
     branding: Option<Arc<brand::Branding>>,
+    push: Arc<push::Push>,
 ) {
     let mut failures: u32 = 0;
     loop {
@@ -1060,7 +1106,7 @@ async fn keep_registered(
             registration::retry_after(failures)
         };
         tokio::time::sleep(wait).await;
-        match register_once(&uac, &registrar, expires).await {
+        match register_once(&uac, &registrar, expires, &push).await {
             Ok((g, provisioning_url)) => {
                 granted = g;
                 learn_brand_url(branding.as_ref(), provisioning_url.as_deref());

@@ -10,7 +10,9 @@
 //! - `ANVIL_FCP_SIP`: the call manager's SIP address, e.g. `127.0.0.1:5060`;
 //! - `ANVIL_FCP_DOMAIN`: a SIP domain the users are made in (default
 //!   `anvil.test`); a tenant `anvil-tests` is made for it if no tenant
-//!   has it.
+//!   has it;
+//! - `ANVIL_FCP_PUSH_FCM_PROJECT`, optionally: an FCM project the call
+//!   manager's `[push]` lists, for the test of a push address it takes.
 //!
 //! CI runs it against FCP's compose stack from the nightly images.
 
@@ -18,7 +20,7 @@ mod common;
 
 use std::time::Duration;
 
-use anvil_core::{EndReason, Event, RegState};
+use anvil_core::{EndReason, Event, PushAddress, PushProvider, PushState, RegState};
 use common::*;
 use rand::Rng;
 use serde_json::{json, Value};
@@ -145,6 +147,17 @@ impl Fcp {
         ip: &str,
         expires: u64,
     ) -> (anvil_core::Anvil, anvil_core::EventStream) {
+        self.anvil_with(user, ip, expires, |_| {}).await
+    }
+
+    /// [`anvil`](Self::anvil), its account changed by `change` first.
+    async fn anvil_with(
+        &self,
+        user: &User,
+        ip: &str,
+        expires: u64,
+        change: impl FnOnce(&mut anvil_core::AccountConfig),
+    ) -> (anvil_core::Anvil, anvil_core::EventStream) {
         // Registered in the tenant's domain, through the call manager as
         // the outbound proxy, as FCP's provisioning tells a phone to.
         let mut account = account(
@@ -156,6 +169,7 @@ impl Fcp {
             expires,
         );
         account.outbound_proxy = Some(format!("sip:{}", self.sip));
+        change(&mut account);
         start(account).await
     }
 
@@ -305,6 +319,108 @@ async fn a_wrong_password_is_refused() {
     })
     .await;
     assert!(failed.is_some(), "no failure reported");
+    alice.shutdown().await.unwrap();
+    fcp.remove(&alice_user).await;
+}
+
+/// An app's push address at an FCM project, with a fresh token.
+fn fcm_address(project: &str) -> PushAddress {
+    let n: u64 = rand::thread_rng().gen();
+    PushAddress {
+        provider: PushProvider::Fcm,
+        param: project.to_string(),
+        prid: format!("anvil-token-{n:016x}"),
+    }
+}
+
+fn instance() -> String {
+    let n: u128 = rand::thread_rng().gen();
+    let h = format!("{n:032x}");
+    format!(
+        "<urn:uuid:{}-{}-{}-{}-{}>",
+        &h[..8],
+        &h[8..12],
+        &h[12..16],
+        &h[16..20],
+        &h[20..]
+    )
+}
+
+async fn push_state(events: &mut anvil_core::EventStream) -> Option<PushState> {
+    expect(events, SOON, |e| match e {
+        Event::PushChanged { state } => Some(state.clone()),
+        _ => None,
+    })
+    .await
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn an_app_fcp_cannot_wake_registers_without_push_and_still_rings() {
+    let fcp = fcp_or_skip!();
+    let (alice_user, bob_user) = (fcp.user("alice").await, fcp.user("bob").await);
+    // A project no call manager pushes for: 555, and Alice's app registers
+    // again without it.
+    let (alice, mut alice_events) = fcp
+        .anvil_with(&alice_user, "127.0.0.26", 3600, |account| {
+            account.instance_id = Some(instance());
+            account.push = Some(fcm_address("anvil-no-such-project"));
+        })
+        .await;
+    let (bob, mut bob_events) = fcp.anvil(&bob_user, "127.0.0.27", 3600).await;
+    alice.register().await.expect("registers without push");
+    let refused = push_state(&mut alice_events).await;
+    assert!(
+        matches!(refused, Some(PushState::Refused { .. })),
+        "FCP should refuse the push address: {refused:?}"
+    );
+    register(&bob, &mut bob_events).await;
+
+    // Awake, Alice's app rings as any phone does.
+    let (out, incoming) = answered_call(
+        &bob,
+        &mut bob_events,
+        &alice,
+        &mut alice_events,
+        &fcp.uri(&alice_user),
+    )
+    .await;
+    alice.hangup(incoming).await.unwrap();
+    hung_up_by_the_other_side(&mut bob_events, out).await;
+
+    alice.shutdown().await.unwrap();
+    bob.shutdown().await.unwrap();
+    fcp.remove(&alice_user).await;
+    fcp.remove(&bob_user).await;
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn fcp_takes_the_push_address_of_an_app_it_can_wake() {
+    let fcp = fcp_or_skip!();
+    let Ok(project) = std::env::var("ANVIL_FCP_PUSH_FCM_PROJECT") else {
+        eprintln!("ANVIL_FCP_PUSH_FCM_PROJECT not set; skipping");
+        return;
+    };
+    let alice_user = fcp.user("alice").await;
+    let (alice, mut alice_events) = fcp
+        .anvil_with(&alice_user, "127.0.0.28", 3600, |account| {
+            account.instance_id = Some(instance());
+            account.push = Some(fcm_address(&project));
+        })
+        .await;
+    alice.register().await.expect("registers");
+    assert_eq!(
+        push_state(&mut alice_events).await,
+        Some(PushState::Accepted)
+    );
+
+    // A renewed token, then push off: each registered at once.
+    alice
+        .set_push(Some(fcm_address(&project)))
+        .await
+        .expect("the new token");
+    alice.set_push(None).await.expect("push off");
+    assert_eq!(push_state(&mut alice_events).await, Some(PushState::Off));
+
     alice.shutdown().await.unwrap();
     fcp.remove(&alice_user).await;
 }
