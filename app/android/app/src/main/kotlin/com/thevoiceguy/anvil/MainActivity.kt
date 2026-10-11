@@ -2,6 +2,7 @@ package com.thevoiceguy.anvil
 
 import android.Manifest
 import android.content.Intent
+import android.content.pm.ApplicationInfo
 import android.content.pm.PackageManager
 import android.os.Build
 import android.os.Bundle
@@ -14,9 +15,12 @@ class MainActivity : FlutterActivity() {
     private var microphoneAnswer: MethodChannel.Result? = null
 
     override fun onCreate(savedInstanceState: Bundle?) {
-        // Before Dart opens the library: its audio needs the JVM.
-        AnvilNative.init(applicationContext)
+        // Before Dart opens the library: its audio needs the JVM. The
+        // phone's calls reach Telecom from here on, Dart or not.
+        PhoneLink.start(this)
         super.onCreate(savedInstanceState)
+        // Where FCP wakes the app: the token, when built with Firebase.
+        Push.register(this)
         // Over the lock screen only while there is a call to answer or end.
         CallSystem.onCalls = { any -> overLockScreen(any) }
         overLockScreen(CallSystem.calls.isNotEmpty())
@@ -87,6 +91,17 @@ class MainActivity : FlutterActivity() {
                 "reportEnded" -> {
                     CallSystem.reportEnded(this, call.id())
                     result.success(null)
+                }
+                // A push as FCM delivers one, for the app's tests on a
+                // device with no Firebase project; debug builds only.
+                "deliverPush" -> {
+                    if (applicationInfo.flags and ApplicationInfo.FLAG_DEBUGGABLE == 0) {
+                        result.notImplemented()
+                    } else {
+                        val data = call.arguments<Map<String, String>>() ?: emptyMap()
+                        Push.handle(this, data)
+                        result.success(null)
+                    }
                 }
                 else -> result.notImplemented()
             }

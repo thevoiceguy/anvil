@@ -424,3 +424,40 @@ async fn fcp_takes_the_push_address_of_an_app_it_can_wake() {
     alice.shutdown().await.unwrap();
     fcp.remove(&alice_user).await;
 }
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn fcp_names_its_call_in_the_invite() {
+    // As a push names it (FCP's `docs/PUSH.md` §2.5): a woken app knows
+    // which INVITE is the call it shows. FCP before v0.25.382 names
+    // nothing, and the test says so.
+    let fcp = fcp_or_skip!();
+    let (alice_user, bob_user) = (fcp.user("alice").await, fcp.user("bob").await);
+    let (alice, mut alice_events) = fcp.anvil(&alice_user, "127.0.0.29", 3600).await;
+    let (bob, mut bob_events) = fcp.anvil(&bob_user, "127.0.0.30", 3600).await;
+    register(&alice, &mut alice_events).await;
+    register(&bob, &mut bob_events).await;
+
+    let out = alice.place_call(&fcp.uri(&bob_user)).await.unwrap();
+    let (incoming, named) = expect(&mut bob_events, SOON, |e| match e {
+        Event::IncomingCall {
+            call, server_call, ..
+        } => Some((*call, server_call.clone())),
+        _ => None,
+    })
+    .await
+    .expect("Bob's phone rings");
+    match named {
+        Some(id) => assert!(
+            id.len() == 36 && id.chars().filter(|c| *c == '-').count() == 4,
+            "FCP's id for the call: {id:?}"
+        ),
+        None => eprintln!("this FCP does not name its calls (before v0.25.382)"),
+    }
+    alice.hangup(out).await.expect("CANCEL");
+    ends_once(&mut bob_events, incoming, |_| true).await;
+
+    alice.shutdown().await.unwrap();
+    bob.shutdown().await.unwrap();
+    fcp.remove(&alice_user).await;
+    fcp.remove(&bob_user).await;
+}

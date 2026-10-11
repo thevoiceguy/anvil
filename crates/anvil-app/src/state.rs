@@ -49,7 +49,8 @@ pub struct Brand {
 }
 
 impl State {
-    pub(crate) fn new(aor: String) -> Self {
+    /// A phone for `aor` as it starts: unregistered, with nothing yet.
+    pub fn new(aor: String) -> Self {
         Self {
             aor,
             registration: Registration::Unregistered,
@@ -148,6 +149,10 @@ pub struct CallView {
     /// When it connected, in Unix seconds: what a call timer counts from.
     #[serde(default)]
     pub connected_at: Option<u64>,
+    /// The server's id for a call coming in, when it gave one: what a push
+    /// that woke the app named it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub server_call: Option<String>,
 }
 
 impl CallView {
@@ -165,6 +170,7 @@ impl CallView {
             encrypted: false,
             quality: None,
             connected_at: None,
+            server_call: None,
         }
     }
 }

@@ -52,7 +52,8 @@ class _MobileBridgeState extends State<MobileBridge> {
   void initState() {
     super.initState();
     model.addListener(_sync);
-    _events = mobile.callEvents.listen(_act);
+    // Android's call screen follows the phone itself (platform.dart).
+    if (!mobile.systemFollowsPhone) _events = mobile.callEvents.listen(_act);
     _routeChanges = mobile.audioRouteChanges.listen(_routed);
     _sync();
   }
@@ -102,6 +103,17 @@ class _MobileBridgeState extends State<MobileBridge> {
         calls.values.any((c) => _told[c.id]?.connected != c.isConnected)) {
       unawaited(_askRoutes());
     }
+    if (mobile.systemFollowsPhone) {
+      // Kept only to know when the calls change, for the routes.
+      _told
+        ..removeWhere((id, _) => !calls.containsKey(id))
+        ..addAll({
+          for (final c in calls.values)
+            c.id: _Told(connected: c.isConnected, held: c.held),
+        });
+      _proximityFor();
+      return;
+    }
     for (final call in calls.values) {
       final told = _told[call.id];
       if (told == null) {
@@ -145,6 +157,7 @@ class _MobileBridgeState extends State<MobileBridge> {
     if (call == null) return;
     switch (event.action) {
       case SystemCallAction.shown:
+      case SystemCallAction.ended:
         break;
       case SystemCallAction.failed:
         // Do Not Disturb or a blocked caller: the user asked not to be rung.

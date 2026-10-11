@@ -15,8 +15,12 @@ use crate::frb_generated::StreamSink;
 /// The phone, once started. One per app.
 static PHONE: Mutex<Option<Phone>> = Mutex::new(None);
 
+/// The system's call screen following the phone (Android: `system.rs`).
+static FOLLOWER: Mutex<Option<tokio::task::JoinHandle<()>>> = Mutex::new(None);
+
 /// The runtime the phone runs on: its tasks outlive any one call from Dart.
-fn runtime() -> &'static tokio::runtime::Runtime {
+#[frb(ignore)]
+pub(crate) fn runtime() -> &'static tokio::runtime::Runtime {
     static RT: OnceLock<tokio::runtime::Runtime> = OnceLock::new();
     RT.get_or_init(|| {
         tokio::runtime::Builder::new_multi_thread()
@@ -104,10 +108,15 @@ pub async fn sign_in(
 /// Start the phone from the session at `session_path`: registered, ringing,
 /// and serving the control socket so `anvil-cli` can drive the app.
 pub async fn start_phone(session_path: String) -> anyhow::Result<()> {
+    // One start at a time: a push and the app's screen may both ask.
+    static STARTING: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
+    let _starting = STARTING.lock().await;
     if PHONE.lock().is_some() {
         return Ok(());
     }
     let settings_path = std::path::Path::new(&session_path).with_file_name("settings.json");
+    // Where the platform wakes this install, when it has said (`system.rs`).
+    let push = crate::system::load_push(std::path::Path::new(&session_path));
     let phone = on_runtime(async move {
         let store = Arc::new(FileTokenStore::new(session_path));
         let session = store
@@ -115,7 +124,8 @@ pub async fn start_phone(session_path: String) -> anyhow::Result<()> {
             .ok_or_else(|| anyhow::anyhow!("not signed in"))?;
         let client = Arc::new(FcpClient::new(session, Some(store as Arc<dyn TokenStore>)));
         let config = client.softphone().await?;
-        let account = client.account_config(&config).await?;
+        let mut account = client.account_config(&config).await?;
+        account.push = push;
         let brand = anvil_fcp::brand_config(Arc::clone(&client), None)?;
         let audio =
             anvil_audio::CpalHost::new().map_err(|e| anyhow::anyhow!("no audio devices: {e}"))?;
@@ -145,12 +155,22 @@ pub async fn start_phone(session_path: String) -> anyhow::Result<()> {
         Ok(phone)
     })
     .await?;
+    // Android's Telecom shows the calls from here, with or without Dart: a
+    // push starts the phone with no Flutter running (`system.rs`).
+    if cfg!(target_os = "android") {
+        let _guard = runtime().enter();
+        *FOLLOWER.lock() = Some(crate::system::follow(phone.clone()));
+    }
     *PHONE.lock() = Some(phone);
     Ok(())
 }
 
 /// Stop the phone; the session stays signed in.
 pub async fn stop_phone() -> anyhow::Result<()> {
+    if let Some(follower) = FOLLOWER.lock().take() {
+        follower.abort();
+        crate::system::reset();
+    }
     let phone = PHONE.lock().take();
     if let Some(phone) = phone {
         on_runtime(async move {
@@ -551,6 +571,40 @@ fn kind_only(kind: &str) -> PhoneChange {
 }
 
 /// Carry out a command on the running phone; the call a `call` placed.
+/// Native code's way to the phone (`android.rs`): woken by a push, the
+/// phone starts from the saved session, or registers again at once if it
+/// runs — its connection to the registrar may be gone.
+#[frb(ignore)]
+pub(crate) async fn wake(session_path: String) -> anyhow::Result<()> {
+    if PHONE.lock().is_some() {
+        execute(Command::Register).await?;
+        return Ok(());
+    }
+    start_phone(session_path).await
+}
+
+/// Native code's way to the phone: the push address the platform gave,
+/// kept for every start and registered now if the phone runs.
+#[frb(ignore)]
+pub(crate) async fn set_push(
+    session_path: String,
+    address: Option<anvil_core::PushAddress>,
+) -> anyhow::Result<()> {
+    crate::system::save_push(std::path::Path::new(&session_path), address.as_ref())?;
+    if PHONE.lock().is_some() {
+        execute(Command::Push { address }).await?;
+    }
+    Ok(())
+}
+
+/// Native code's way to the phone: what the user did at the system's call
+/// screen.
+#[frb(ignore)]
+pub(crate) async fn act(json: String) -> anyhow::Result<()> {
+    let phone = phone()?;
+    on_runtime(async move { crate::system::act(&phone, &json).await }).await
+}
+
 async fn execute(command: Command) -> anyhow::Result<Option<u64>> {
     let phone = phone()?;
     on_runtime(async move {

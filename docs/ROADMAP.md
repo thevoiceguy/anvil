@@ -152,8 +152,11 @@ live in FCP: `docs/SOFTPHONE.md` in `thevoiceguy/fcp`. Anvil's phases:
         install's RFC 5626 instance, a new token registered at once, a 555
         registered again without it; proved against a scripted registrar
         and FCP
-  - [ ] **A2** Android: FCM, the call push to Telecom, the phone started
-        without the UI, the cancel push
+  - [x] **A2** Android: FCM (the publisher's project given at build
+        time), the call push to Telecom at once, the phone started without
+        the UI through JNI, the INVITE matched by FCP's `X-FCP-Call-Id`,
+        the cancel push; Telecom fed by the Rust core, not Dart; proved on
+        the emulator with pushes handed in as FCM would
   - [ ] **A3** iOS: PushKit, CallKit from the payload, the phone started
         without the UI
 - [ ] **U6** Accessibility, localisation, store listings

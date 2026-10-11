@@ -24,6 +24,8 @@ tokio       = { workspace = true }
 anyhow      = { workspace = true }
 parking_lot = { workspace = true }
 tracing     = { workspace = true }
+serde       = { workspace = true }
+serde_json  = { workspace = true }
 
 # A phone's model for the name it signs in under (src/device.rs).
 [target.'cfg(any(target_os = "android", target_os = "ios"))'.dependencies]

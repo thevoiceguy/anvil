@@ -63,6 +63,9 @@ pub enum Event {
         call: CallId,
         from: String,
         display_name: Option<String>,
+        /// The server's id for the call (FCP's `X-FCP-Call-Id`): what a
+        /// push that woke the app called it.
+        server_call: Option<String>,
     },
     CallRinging {
         call: CallId,

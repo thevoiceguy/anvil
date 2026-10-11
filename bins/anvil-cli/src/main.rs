@@ -305,6 +305,8 @@ enum Command {
     },
     /// Read the user's data from FCP again.
     Refresh,
+    /// Register again now, as a phone woken by a push does.
+    Register,
     /// The running phone: registration, calls, message waiting.
     Status,
     /// Print the running phone's changes until Ctrl+C.
@@ -362,6 +364,7 @@ impl Command {
                 .ok()
             }
             Command::Refresh => P::Refresh,
+            Command::Register => P::Register,
             Command::Status => P::Status,
             _ => return None,
         })
@@ -1068,7 +1071,7 @@ async fn run(cli: Cli, cfg: AnvilConfig, tone_stats: Option<Arc<ToneStats>>) -> 
                             reason.map(|r| format!(" ({r})")).unwrap_or_default()
                         );
                     }
-                    Event::IncomingCall { call, from, display_name } => {
+                    Event::IncomingCall { call, from, display_name, .. } => {
                         let label = display_name.as_deref().unwrap_or(&from);
                         println!("[event] IncomingCall from {label}");
                         if cli.auto_answer && active_call.is_none() {

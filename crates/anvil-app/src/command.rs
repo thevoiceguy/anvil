@@ -89,6 +89,9 @@ pub enum Command {
     },
     /// Read the user's data from FCP again.
     Refresh,
+    /// Register again now: woken by a push, the app's connection to the
+    /// registrar may be gone, and the call waits for the REGISTER.
+    Register,
     /// The phone as it is now.
     Status,
     /// On the control socket: every change from now on, one per line.
@@ -144,7 +147,7 @@ impl Command {
     /// `waiting off`, `heard <id>`, `delete <id>`, `play <id>`, `stop`,
     /// `favourite alice`,
     /// `unfavourite alice`, `audio in USB Headset`, `audio out default`,
-    /// `refresh`, `status`. A trailing number names the call.
+    /// `refresh`, `register`, `status`. A trailing number names the call.
     pub fn parse_line(line: &str) -> Result<Self, String> {
         let words: Vec<&str> = line.split_whitespace().collect();
         let id = |w: Option<&&str>| -> Result<Option<u64>, String> {
@@ -257,6 +260,7 @@ impl Command {
                 }
             }
             "refresh" => Command::Refresh,
+            "register" => Command::Register,
             "status" => Command::Status,
             other => return Err(format!("{other:?} is not a command")),
         })

@@ -267,6 +267,10 @@ impl Phone {
                 self.anvil().await?.set_push(address).await?;
                 Ok(Response::ok())
             }
+            Command::Register => {
+                self.anvil().await?.register().await?;
+                Ok(Response::ok())
+            }
             Command::Dnd { on } => {
                 let fcp = self.inner.fcp.as_ref().ok_or_else(|| {
                     PhoneError::Refused("do not disturb needs a phone signed in to FCP".into())
@@ -707,9 +711,11 @@ async fn follow(inner: std::sync::Weak<Inner>, mut events: EventStream) {
                 call,
                 from,
                 display_name,
+                server_call,
             } => {
                 let view = CallView {
                     display_name,
+                    server_call,
                     ..CallView::new(call.0, Direction::Incoming, &from, CallState::Ringing)
                 };
                 let v = view.clone();

@@ -10,11 +10,16 @@ import 'package:anvil/src/phone/rust_phone.dart';
 import 'package:anvil/src/rust/api/phone.dart' as rust;
 import 'package:anvil/src/rust/frb_generated.dart';
 
+import 'dart:async';
 import 'dart:io';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:integration_test/integration_test.dart';
+import 'package:path_provider/path_provider.dart';
+
+/// The app's support directory, where its session is kept.
+late String supportDir;
 
 void main() {
   IntegrationTestWidgetsFlutterBinding.ensureInitialized();
@@ -156,5 +161,94 @@ void main() {
     await mobile.setProximity(true);
     await mobile.setProximity(false);
     if (Platform.isAndroid) await mobile.reportEnded(903);
+  });
+
+  // FCP wakes the app with a push (FCP's docs/PUSH.md §2.5): a call push
+  // rings at once while the phone wakes and registers, and the phone's
+  // call takes its place. The emulator has no Firebase project, so the
+  // pushes are handed in as FCM would hand them (Android only).
+  File session() => File('$supportDir/session.json');
+
+  /// The events for the call a push shows (ids below zero) until it is no
+  /// longer shown, or fifteen seconds.
+  Future<List<SystemCallAction>> pushed(Future<void> Function() deliver) async {
+    final seen = <SystemCallAction>[];
+    final over = Completer<void>();
+    final events = NativeMobile().callEvents.where((e) => e.call < 0).listen((
+      e,
+    ) {
+      seen.add(e.action);
+      if (e.action == SystemCallAction.ended && !over.isCompleted) {
+        over.complete();
+      }
+    });
+    await deliver();
+    await over.future.timeout(const Duration(seconds: 15), onTimeout: () {});
+    unawaited(events.cancel());
+    return seen;
+  }
+
+  testWidgets('a push to an app signed out rings nothing', (tester) async {
+    if (!Platform.isAndroid) return;
+    supportDir = (await getApplicationSupportDirectory()).path;
+    if (session().existsSync()) session().deleteSync();
+    final seen = <SystemCallAction>[];
+    final events = NativeMobile().callEvents
+        .where((e) => e.call < 0)
+        .listen((e) => seen.add(e.action));
+    await NativeMobile().deliverPush({
+      'type': 'call',
+      'call': 'push-signed-out',
+      'from': '1002',
+      'name': 'Ann Lee',
+    });
+    await Future<void>.delayed(const Duration(seconds: 3));
+    unawaited(events.cancel());
+    expect(seen, isEmpty);
+  });
+
+  testWidgets('a call push rings, and stops when the phone cannot wake', (
+    tester,
+  ) async {
+    if (!Platform.isAndroid) return;
+    supportDir = (await getApplicationSupportDirectory()).path;
+    // A session the phone cannot start from: no server to register with.
+    session().writeAsStringSync('not a session');
+    addTearDown(() => session().deleteSync());
+    final seen = await pushed(
+      () => NativeMobile().deliverPush({
+        'type': 'call',
+        'call': 'push-no-phone',
+        'from': '1002',
+        'name': 'Ann Lee',
+      }),
+    );
+    debugPrint('pushed call: ${seen.map((a) => a.name).join(' ')}');
+    expect(seen, contains(SystemCallAction.ended));
+  });
+
+  testWidgets('a cancel push ends the call a push showed', (tester) async {
+    if (!Platform.isAndroid) return;
+    supportDir = (await getApplicationSupportDirectory()).path;
+    session().writeAsStringSync('not a session');
+    addTearDown(() => session().deleteSync());
+    final seen = await pushed(() async {
+      await NativeMobile().deliverPush({
+        'type': 'call',
+        'call': 'push-cancelled',
+        'from': '1002',
+      });
+      await NativeMobile().deliverPush({
+        'type': 'cancel',
+        'call': 'push-cancelled',
+      });
+    });
+    debugPrint('cancelled call: ${seen.map((a) => a.name).join(' ')}');
+    expect(seen, contains(SystemCallAction.ended));
+  });
+
+  testWidgets('a test push is taken', (tester) async {
+    if (!Platform.isAndroid) return;
+    await NativeMobile().deliverPush({'type': 'test', 'call': 'test-1'});
   });
 }

@@ -63,6 +63,30 @@ void main() {
     expect(mobile.log.last, 'ended 1');
   });
 
+  testWidgets("on Android the system's call screen follows the phone itself", (
+    tester,
+  ) async {
+    // Native code reports the calls there and carries out what the user
+    // does (FCP's docs/PUSH.md §2.5): the app does neither, or each call
+    // would show twice and be answered twice.
+    final phone = FakePhone()..saved = const SignedInAccountFake();
+    final mobile = FakeMobile(systemFollowsPhone: true);
+    await tester.pumpWidget(AnvilApp(phone: phone, mobile: mobile));
+    await tester.pumpAndSettle();
+    mobile.log.clear();
+    phone.ring('1002', name: 'Ann Lee');
+    await tester.pumpAndSettle();
+    mobile.act(const SystemCallEvent(SystemCallAction.answer, 1));
+    await tester.pumpAndSettle();
+    expect(
+      mobile.log.where(
+        (l) => l.startsWith('incoming') || l.startsWith('connected'),
+      ),
+      isEmpty,
+    );
+    expect(phone.log, isNot(contains('answer 1')));
+  });
+
   testWidgets('ending a call ringing in at the system declines it', (
     tester,
   ) async {

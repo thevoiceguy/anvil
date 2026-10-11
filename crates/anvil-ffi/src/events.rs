@@ -228,6 +228,7 @@ pub(crate) fn dispatch(slot: CallbackSlot, event: &Event) {
             call,
             from,
             display_name,
+            ..
         } => {
             ev.kind = AnvilEventKind::IncomingCall;
             ev.call_id = call.0;

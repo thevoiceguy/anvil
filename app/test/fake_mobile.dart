@@ -5,8 +5,11 @@ import 'package:anvil/src/mobile/platform.dart';
 /// The phone around the app, as a log of what it was told and a way for a
 /// test to act at the system's call screen.
 class FakeMobile implements MobilePlatform {
-  FakeMobile({this.allow = true});
+  FakeMobile({this.allow = true, this.systemFollowsPhone = false});
   final bool allow;
+
+  @override
+  final bool systemFollowsPhone;
   final log = <String>[];
   final _events = StreamController<SystemCallEvent>.broadcast();
   final _routes = StreamController<AudioRoutes>.broadcast();

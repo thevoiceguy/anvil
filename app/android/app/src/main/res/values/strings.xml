@@ -4,4 +4,8 @@
     <!-- The call notification's channels, as Settings lists them. -->
     <string name="calls_ringing_channel">Incoming calls</string>
     <string name="calls_ongoing_channel">Calls in progress</string>
+    <!-- An administrator's test push (FCP's push-test), shown briefly. -->
+    <string name="push_notices_channel">Server notices</string>
+    <string name="push_test_title">Anvil can be woken for calls</string>
+    <string name="push_test_text">Your phone system sent a test push, and it arrived.</string>
 </resources>

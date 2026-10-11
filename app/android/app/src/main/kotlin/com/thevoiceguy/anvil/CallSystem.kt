@@ -17,15 +17,22 @@ import android.telecom.DisconnectCause
 import android.telecom.PhoneAccount
 import android.telecom.PhoneAccountHandle
 import android.telecom.TelecomManager
+import android.os.SystemClock
 import android.util.Log
 import io.flutter.plugin.common.MethodChannel
+import org.json.JSONObject
 
 /**
  * The app's calls as Android's Telecom knows them (a self-managed
- * ConnectionService): the app reports each call, Telecom keeps the phone's
- * audio and other calling apps in step, and what the user does at the
- * call's notification or a headset comes back as `callEvent`s on
- * `anvil/mobile` (lib/src/mobile/platform.dart).
+ * ConnectionService): the phone in the Rust core tells of each call
+ * ([fromPhone], through [PhoneLink]), Telecom keeps the phone's audio and
+ * other calling apps in step, and what the user does at the call's
+ * notification or a headset goes back to the phone — and to Dart, when it
+ * runs, as `callEvent`s on `anvil/mobile` (lib/src/mobile/platform.dart).
+ *
+ * A call a push told of (FCP's `docs/PUSH.md` §2.5) rings at once, before
+ * the phone has woken and registered; the phone's call, when its INVITE
+ * comes, takes its place — the one FCP names as the push did.
  */
 object CallSystem {
     private const val TAG = "AnvilCalls"
@@ -35,11 +42,29 @@ object CallSystem {
     var channel: MethodChannel? = null
 
     /** A call: who it is with, and where it is. */
-    class Call(val id: Long, val name: String, val number: String, val incoming: Boolean) {
+    class Call(var id: Long, val name: String, val number: String, val incoming: Boolean) {
         var connected = false
         var held = false
         var connection: AnvilConnection? = null
+
+        /** The server's id for the call, as a push or its INVITE named it. */
+        var serverCall: String? = null
+
+        /** Answered at the screen before the phone's call came. */
+        var answerWhenReady = false
+
+        /** Shown from a push: the phone's call not here yet. */
+        val pushed get() = id < 0
     }
+
+    /** A pushed call rings this long without the phone's call, then stops. */
+    private const val PUSHED_RING_MS = 60_000L
+
+    /** Ids for pushed calls: below zero, apart from the phone's. */
+    private var nextPushed = -1L
+
+    /** Calls declined from a push before their INVITE came: when. */
+    private val declined = HashMap<String, Long>()
 
     val calls = LinkedHashMap<Long, Call>()
 
@@ -185,11 +210,112 @@ object CallSystem {
         }
     }
 
-    fun emit(action: String, id: Long, extra: Map<String, Any?> = emptyMap()) {
+    /** Dart hears what happened at the system, when it runs (its tests do). */
+    private fun tell(action: String, id: Long, extra: Map<String, Any?> = emptyMap()) {
         val event = HashMap<String, Any?>(extra)
         event["action"] = action
         event["id"] = id
         main.post { channel?.invokeMethod("callEvent", event) }
+    }
+
+    /** What the user or the system did with a call: for the phone, and Dart. */
+    fun emit(action: String, id: Long, extra: Map<String, Any?> = emptyMap()) {
+        tell(action, id, extra)
+        if (action == "shown") return
+        if (id >= 0) {
+            PhoneLink.act(action, id, extra)
+            return
+        }
+        // A pushed call: the phone's is not here yet.
+        main.post {
+            val call = calls[id] ?: return@post
+            when (action) {
+                "answer" -> call.answerWhenReady = true
+                "end" -> {
+                    call.serverCall?.let { decline(it) }
+                    CallService.appContext?.let { reportEnded(it, id) }
+                }
+            }
+        }
+    }
+
+    private fun decline(serverCall: String) {
+        val now = SystemClock.elapsedRealtime()
+        declined.entries.removeAll { now - it.value > PUSHED_RING_MS }
+        declined[serverCall] = now
+    }
+
+    /** What the phone says of its calls (`app/rust/src/system.rs`). */
+    fun fromPhone(context: Context, event: JSONObject) {
+        val id = event.optLong("id", -1)
+        val name = event.optString("name")
+        val number = event.optString("number")
+        when (event.optString("kind")) {
+            "incoming" -> {
+                val serverCall = if (event.isNull("server_call")) null else event.optString("server_call")
+                phoneRinging(context, id, name, number, serverCall)
+            }
+            "outgoing" -> if (!calls.containsKey(id)) reportOutgoing(context, id, name, number)
+            "connected" -> reportConnected(context, id)
+            "held" -> reportHeld(context, id, event.optBoolean("on"))
+            "ended" -> reportEnded(context, id)
+            // The phone stopped: its calls are over; a pushed call waits on.
+            "reset" -> calls.values.filter { !it.pushed }.map { it.id }.forEach { reportEnded(context, it) }
+        }
+    }
+
+    /** The phone's call ringing in: the pushed call it is, or a new one. */
+    private fun phoneRinging(context: Context, id: Long, name: String, number: String, serverCall: String?) {
+        if (calls.containsKey(id)) return
+        if (serverCall != null && declined.remove(serverCall) != null) {
+            PhoneLink.act("end", id)
+            return
+        }
+        // FCP names its calls; a server that does not, the call a push
+        // showed first.
+        val pushed = calls.values.firstOrNull { it.pushed && serverCall != null && it.serverCall == serverCall }
+            ?: calls.values.firstOrNull { it.pushed && serverCall == null }
+        if (pushed == null) {
+            reportIncoming(context, id, name, number)
+            calls[id]?.serverCall = serverCall
+            return
+        }
+        calls.remove(pushed.id)
+        pushed.id = id
+        calls[id] = pushed
+        pushed.connection?.callId = id
+        CallService.update(context)
+        if (pushed.answerWhenReady) PhoneLink.act("answer", id)
+    }
+
+    /**
+     * A push says a call is coming (`serverCall`, FCP's id for it): it rings
+     * now, while the phone wakes and registers.
+     */
+    fun reportPushed(context: Context, serverCall: String, name: String, number: String) {
+        if (calls.values.any { it.serverCall == serverCall } || declined.containsKey(serverCall)) return
+        val id = nextPushed--
+        val call = Call(id, name, number, incoming = true)
+        call.serverCall = serverCall
+        ring(context, call)
+        main.postDelayed({
+            if (calls[id]?.pushed == true) {
+                Log.i(TAG, "the call $serverCall never came")
+                reportEnded(context, id)
+            }
+        }, PUSHED_RING_MS)
+    }
+
+    /** The call a push told of is over (answered elsewhere, or given up). */
+    fun cancelPushed(context: Context, serverCall: String) {
+        val call = calls.values.firstOrNull { it.pushed && it.serverCall == serverCall } ?: return
+        reportEnded(context, call.id)
+    }
+
+    /** The phone could not wake: the pushed calls cannot reach it. */
+    fun wakeFailed(context: Context, serverCall: String) {
+        val call = calls.values.firstOrNull { it.pushed && it.serverCall == serverCall } ?: return
+        reportEnded(context, call.id)
     }
 
     private fun extras(call: Call) = Bundle().apply {
@@ -199,7 +325,11 @@ object CallSystem {
     }
 
     fun reportIncoming(context: Context, id: Long, name: String, number: String) {
-        val call = Call(id, name, number, incoming = true)
+        ring(context, Call(id, name, number, incoming = true))
+    }
+
+    private fun ring(context: Context, call: Call) {
+        val id = call.id
         calls[id] = call
         try {
             register(context)
@@ -257,6 +387,7 @@ object CallSystem {
 
     fun reportEnded(context: Context, id: Long) {
         val call = calls.remove(id) ?: return
+        tell("ended", id)
         if (calls.isEmpty()) {
             routes = null
             endpoints = emptyList()

@@ -107,13 +107,19 @@ background restrictions tighten every release.
 
 ### Flow for an incoming call
 
-1. PBX → app backend → FCM high-priority push.
-2. Android delivers push; app has ~10 s to either show a notification or start
-   a foreground service. If we miss the window we get throttled.
-3. Service brings Rust up, SIP INVITE lands.
-4. `ConnectionService.onCreateIncomingConnection` returns an Anvil `Connection`.
-5. Telecom shows the system call UI; user taps accept → Kotlin calls
-   `anvilAnswer(callId)`.
+1. FCP sends an FCM high-priority data message straight to the device
+   (see "Push" below); no app backend sits between.
+2. `AnvilMessagingService` hands it to `Push.handle`, which adds the call
+   to Telecom and starts the call's service at once, inside the window a
+   high-priority message gives.
+3. `PhoneLink.wake` starts the phone in the Rust core from the saved
+   session (or registers again if it runs); the INVITE lands and takes the
+   ringing call's place.
+4. Answer or Decline at the call's notification, or at Telecom, goes to the
+   phone through `PhoneLink.act`, Flutter running or not.
+
+An app awake rings the same way from step 3: the phone's calls reach
+Telecom from the Rust core (`app/rust/src/system.rs`), never from Dart.
 
 ### Flow for an outgoing call
 
@@ -192,6 +198,35 @@ and the device. Anvil's part is to say where it is woken:
    `PushState::Accepted`.
 4. **Woken.** The push's payload names the call; the app reports it to
    CallKit or Telecom at once, starts the phone and registers; FCP rings
-   the new binding. Later phases (A2 Android, A3 iOS) do this part.
+   the new binding, naming the call in `X-FCP-Call-Id` as the push did
+   (`Event::IncomingCall::server_call`), so the app knows which INVITE is
+   the call on the screen. A cancel push ends a call whose INVITE never
+   came; one with no INVITE in a minute ends by itself.
+
+### Android (phase A2)
+
+- **The token.** `Push.register` asks Firebase for the install's FCM
+  token at each start of the app's screen, and `onNewToken` hears a
+  renewed one; `PhoneLink.setPush` keeps it in `push.json` beside the
+  session (`app/rust/src/system.rs`), which every start of the phone reads,
+  and registers it at once if the phone runs.
+- **The Firebase project** is the publisher's and is given at build time,
+  not kept in the repository: `ANVIL_FCM_APP_ID`, `ANVIL_FCM_SENDER_ID`,
+  `ANVIL_FCM_API_KEY` and `ANVIL_FCM_PROJECT_ID` in the environment (or
+  `-P`), the values a `google-services.json` would hold. Built without
+  them, the app has no token and registers without a push address.
+- **The phone without Flutter.** Kotlin reaches the Rust core through JNI
+  (`AnvilNative.wake`, `setPush`, `nextCallEvent`, `act`;
+  `app/rust/src/android.rs`). The phone's calls come to `CallSystem` as
+  events, whether Dart or a push started the phone, and Dart's
+  `MobileBridge` leaves Telecom alone on Android.
+- **A call shown from a push** has an id below zero until the phone's
+  call arrives; answered before then, it is answered when it does;
+  declined, its INVITE is declined when it comes.
+- **Tested** on the emulator (`integration_test/mobile_test.dart`) with
+  pushes handed in as FCM would (`deliverPush`, debug builds only): a
+  signed-out app rings nothing, a call push rings and stops when the phone
+  cannot wake, a cancel push ends it. Real delivery needs the publisher's
+  Firebase project and a device with Google Play services.
 
 `anvil-cli --push fcm:<project>:<token>` registers a push address by hand.
