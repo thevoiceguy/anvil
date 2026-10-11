@@ -231,14 +231,14 @@ jobs:
         # Xcode builds the Rust core for the simulator from scratch here (its
         # build folder is not the cache's): 15 to 30 minutes and more. Built
         # apart from the run, so the run below rebuilds nothing.
-        timeout-minutes: 70
+        timeout-minutes: 60
         run: flutter build ios --simulator --debug -t integration_test/mobile_test.dart
       - name: The app starts with its Rust core on a phone
         # Now and then the run hangs once the app is built, before any test
         # (installing on the simulator, or attaching to the app): each try
         # gets ten minutes (its build is a minute or two: the step above), on a
         # simulator booted again, three tries.
-        timeout-minutes: 60
+        timeout-minutes: 40
         env:
           UDID: ${{ steps.sim.outputs.udid }}
         run: |
