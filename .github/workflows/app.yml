@@ -227,8 +227,42 @@ jobs:
           sys.exit("no iPhone simulator")')
           xcrun simctl boot "$udid"
           echo "udid=$udid" >> "$GITHUB_OUTPUT"
-      - name: The app starts with its Rust core on a phone
+      - name: The test app, built for the simulator
         # Xcode builds the Rust core for the simulator from scratch here (its
-        # build folder is not the cache's): 15 to 30 minutes and more.
+        # build folder is not the cache's): 15 to 30 minutes and more. Built
+        # apart from the run, so the run below rebuilds nothing.
+        timeout-minutes: 70
+        run: flutter build ios --simulator --debug -t integration_test/mobile_test.dart
+      - name: The app starts with its Rust core on a phone
+        # Now and then the run hangs once the app is built, before any test
+        # (installing on the simulator, or attaching to the app): each try
+        # gets twenty minutes, on a simulator booted again, three tries.
         timeout-minutes: 60
-        run: flutter test integration_test/mobile_test.dart -d ${{ steps.sim.outputs.udid }}
+        env:
+          UDID: ${{ steps.sim.outputs.udid }}
+        run: |
+          for attempt in 1 2 3; do
+            xcrun simctl spawn "$UDID" log stream --level debug \
+              --predicate 'process == "Runner"' >> simulator.log 2>&1 &
+            flutter test integration_test/mobile_test.dart -d "$UDID" &
+            test=$!
+            ( sleep 1200; touch hung; echo "::warning::try $attempt hung"
+              kill -TERM "$test"; sleep 10; kill -KILL "$test" ) 2>/dev/null &
+            watchdog=$!
+            wait "$test" && status=0 || status=$?
+            kill "$watchdog" 2>/dev/null || true
+            # Passed, or ran and failed: that is the job's answer. Only a hang
+            # is tried again.
+            if [ ! -e hung ]; then exit "$status"; fi
+            rm hung
+            xcrun simctl shutdown "$UDID" || true
+            xcrun simctl boot "$UDID"
+          done
+          exit 1
+      - name: The simulator's log
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ios-simulator-log
+          path: app/simulator.log
+          if-no-files-found: ignore
