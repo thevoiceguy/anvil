@@ -170,20 +170,38 @@ void main() {
   File session() => File('$supportDir/session.json');
 
   /// The events for the call a push shows (ids below zero) until it is no
-  /// longer shown, or fifteen seconds.
+  /// longer shown, or fifteen seconds. Telecom keeps an ended call a moment
+  /// after it ends and refuses a new one as busy until it lets it go — the
+  /// last test's call, here — so [deliver] is tried again while it does.
   Future<List<SystemCallAction>> pushed(Future<void> Function() deliver) async {
     final seen = <SystemCallAction>[];
     final over = Completer<void>();
+    var busy = Completer<void>();
     final events = NativeMobile().callEvents.where((e) => e.call < 0).listen((
       e,
     ) {
       seen.add(e.action);
+      if (e.action == SystemCallAction.failed &&
+          e.reason == 'busy' &&
+          !busy.isCompleted) {
+        busy.complete();
+      }
       if (e.action == SystemCallAction.ended && !over.isCompleted) {
         over.complete();
       }
     });
-    await deliver();
-    await over.future.timeout(const Duration(seconds: 15), onTimeout: () {});
+    for (var tries = 0; tries < 20; tries++) {
+      busy = Completer<void>();
+      await deliver();
+      final refused = await Future.any([
+        busy.future.then((_) => true),
+        over.future.then((_) => false),
+        Future<bool>.delayed(const Duration(seconds: 15), () => false),
+      ]);
+      if (!refused) break;
+      seen.clear();
+      await Future<void>.delayed(const Duration(milliseconds: 250));
+    }
     unawaited(events.cancel());
     return seen;
   }
