@@ -60,13 +60,15 @@ Root: HKCU; Subkey: "Software\Classes\Anvil.Url"; ValueType: string; ValueData: 
 Root: HKCU; Subkey: "Software\Classes\Anvil.Url"; ValueType: string; ValueName: "URL Protocol"; ValueData: ""
 Root: HKCU; Subkey: "Software\Classes\Anvil.Url\DefaultIcon"; ValueType: string; ValueData: "{app}\anvil.exe,0"
 Root: HKCU; Subkey: "Software\Classes\Anvil.Url\shell\open\command"; ValueType: string; ValueData: """{app}\anvil.exe"" ""%1"""
+; Before Capabilities: the uninstaller undoes entries last to first, so the
+; parent is checked for emptiness once Capabilities is gone.
+Root: HKCU; Subkey: "Software\Anvil"; Flags: uninsdeletekeyifempty
 Root: HKCU; Subkey: "Software\Anvil\Capabilities"; ValueType: string; ValueName: "ApplicationName"; ValueData: "Anvil"; Flags: uninsdeletekey
 Root: HKCU; Subkey: "Software\Anvil\Capabilities"; ValueType: string; ValueName: "ApplicationDescription"; ValueData: "Calls through your phone system"
 Root: HKCU; Subkey: "Software\Anvil\Capabilities\URLAssociations"; ValueType: string; ValueName: "tel"; ValueData: "Anvil.Url"
 Root: HKCU; Subkey: "Software\Anvil\Capabilities\URLAssociations"; ValueType: string; ValueName: "sip"; ValueData: "Anvil.Url"
 Root: HKCU; Subkey: "Software\Anvil\Capabilities\URLAssociations"; ValueType: string; ValueName: "sips"; ValueData: "Anvil.Url"
 Root: HKCU; Subkey: "Software\Anvil\Capabilities\URLAssociations"; ValueType: string; ValueName: "callto"; ValueData: "Anvil.Url"
-Root: HKCU; Subkey: "Software\Anvil"; Flags: uninsdeletekeyifempty
 Root: HKCU; Subkey: "Software\RegisteredApplications"; ValueType: string; ValueName: "Anvil"; ValueData: "Software\Anvil\Capabilities"; Flags: uninsdeletevalue
 ; A scheme nothing on this machine opens is Anvil's outright (tel: always
 ; has Windows' own handler, so it is chosen in the default apps).
