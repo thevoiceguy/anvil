@@ -99,18 +99,19 @@ impl Install {
     pub(crate) fn start(&self, file: &Path, pid: u32) -> Result<(), UpdateError> {
         match self {
             Self::WindowsSetup => {
-                // The setup waits for nothing: it closes what is still
-                // running (Restart Manager), and `/relaunch=1` starts the app
-                // when it is done (windows.iss).
-                let mut command = Command::new(file);
+                // Once this app has gone (a tray app that hangs on is ended
+                // after thirty seconds), the setup runs silently over it and
+                // `/relaunch=1` starts the app when it is done (windows.iss).
+                let mut command = Command::new("powershell.exe");
                 command.args([
-                    "/VERYSILENT",
-                    "/SUPPRESSMSGBOXES",
-                    "/NORESTART",
-                    "/CLOSEAPPLICATIONS",
-                    "/relaunch=1",
+                    "-NoProfile",
+                    "-NonInteractive",
+                    "-WindowStyle",
+                    "Hidden",
+                    "-Command",
+                    &windows_script(file, pid),
                 ]);
-                detach(&mut command);
+                hidden_console(&mut command);
                 command.spawn()?;
                 Ok(())
             }
@@ -164,6 +165,23 @@ open {bundle}
     }
 }
 
+/// What PowerShell runs to install `setup` once process `pid` has gone.
+fn windows_script(setup: &Path, pid: u32) -> String {
+    format!(
+        "$ErrorActionPreference = 'SilentlyContinue'; \
+         Wait-Process -Id {pid} -Timeout 30; \
+         Stop-Process -Id {pid} -Force; \
+         Start-Process -FilePath {setup} -ArgumentList \
+         '/VERYSILENT','/SUPPRESSMSGBOXES','/NORESTART','/CLOSEAPPLICATIONS','/relaunch=1'",
+        setup = quote_powershell(setup),
+    )
+}
+
+/// A path for PowerShell, single-quoted.
+fn quote_powershell(path: &Path) -> String {
+    format!("'{}'", path.display().to_string().replace('\'', "''"))
+}
+
 /// A path for `sh`, single-quoted.
 fn quote(path: &Path) -> String {
     format!("'{}'", path.display().to_string().replace('\'', r"'\''"))
@@ -208,6 +226,22 @@ fn detach(command: &mut Command) {
     command.creation_flags(DETACHED_PROCESS | CREATE_NEW_PROCESS_GROUP);
 }
 
+/// A console program (PowerShell) run on in a console nobody sees, on
+/// past this process: started with no console at all (`DETACHED_PROCESS`),
+/// PowerShell may not run.
+#[cfg(windows)]
+fn hidden_console(command: &mut Command) {
+    use std::os::windows::process::CommandExt;
+    const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+    const CREATE_NEW_PROCESS_GROUP: u32 = 0x0000_0200;
+    command.creation_flags(CREATE_NO_WINDOW | CREATE_NEW_PROCESS_GROUP);
+}
+
+#[cfg(not(windows))]
+fn hidden_console(command: &mut Command) {
+    detach(command);
+}
+
 #[cfg(unix)]
 fn detach(command: &mut Command) {
     use std::os::unix::process::CommandExt;
@@ -226,6 +260,76 @@ mod tests {
     fn a_path_is_quoted_for_the_shell() {
         assert_eq!(quote(Path::new("/tmp/a b")), "'/tmp/a b'");
         assert_eq!(quote(Path::new("/tmp/it's")), r"'/tmp/it'\''s'");
+    }
+
+    #[test]
+    fn windows_installs_once_the_app_has_gone() {
+        let script = windows_script(Path::new(r"C:\Users\o'hara\setup.exe"), 4242);
+        let wait = script.find("Wait-Process -Id 4242").unwrap();
+        let stop = script.find("Stop-Process -Id 4242").unwrap();
+        let setup = script
+            .find(r"Start-Process -FilePath 'C:\Users\o''hara\setup.exe'")
+            .unwrap();
+        assert!(wait < stop && stop < setup, "{script}");
+        assert!(script.contains("'/relaunch=1'"), "{script}");
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn the_windows_setup_runs_once_this_has_gone() {
+        let dir = std::env::temp_dir().join(format!("anvil-update-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let marker = dir.join("ran.txt");
+        // A setup that says what it was asked.
+        let setup = dir.join("setup.cmd");
+        std::fs::write(&setup, format!("@echo %* > \"{}\"\r\n", marker.display())).unwrap();
+        let gone = std::process::Command::new("cmd")
+            .args(["/C", "exit"])
+            .spawn()
+            .unwrap();
+        let pid = gone.id();
+        let mut gone = gone;
+        gone.wait().unwrap();
+
+        // The script itself first, its output kept: what is wrong with it,
+        // if anything is, is said here rather than as a setup never run.
+        let out = std::process::Command::new("powershell.exe")
+            .args(["-NoProfile", "-NonInteractive", "-Command"])
+            .arg(windows_script(&setup, pid).replace("SilentlyContinue", "Continue"))
+            .output()
+            .unwrap();
+        let said = format!(
+            "{}{}",
+            String::from_utf8_lossy(&out.stdout),
+            String::from_utf8_lossy(&out.stderr)
+        );
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(30);
+        while !marker.exists() {
+            assert!(
+                std::time::Instant::now() < deadline,
+                "the script did not run the setup: {said}"
+            );
+            std::thread::sleep(std::time::Duration::from_millis(100));
+        }
+        std::fs::remove_file(&marker).unwrap();
+
+        // Then as the app runs it: hidden, outliving its caller.
+        Install::WindowsSetup.start(&setup, pid).unwrap();
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(60);
+        while !marker.exists() {
+            assert!(
+                std::time::Instant::now() < deadline,
+                "the setup was not run"
+            );
+            std::thread::sleep(std::time::Duration::from_millis(100));
+        }
+        std::thread::sleep(std::time::Duration::from_millis(500));
+        let args = std::fs::read_to_string(&marker).unwrap();
+        assert!(
+            args.contains("/VERYSILENT") && args.contains("/relaunch=1"),
+            "{args}"
+        );
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]

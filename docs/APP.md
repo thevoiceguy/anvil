@@ -307,6 +307,19 @@ Three PRs, the screens thin over the state as §3 has it:
 - CI lints the workspace on Windows too.
 - Not done: the setting to turn the control socket off (§8).
 
+### Windows: W3, updates that land
+- The app updating itself started the setup at once and quit, racing it:
+  the setup leaned on the Restart Manager to close a tray app that may not
+  have gone yet, and a silent setup that met files in use failed with no
+  one told. Now a hidden PowerShell waits for the app's process to go
+  (thirty seconds, then ends it), and only then runs the setup silently
+  with `/relaunch=1` (`crates/anvil-update/src/install.rs`).
+- The setup has `AppMutex=Anvil.Softphone` (the running app's mutex, W1):
+  an install by hand over a running Anvil asks for it to be closed.
+- Proved: on Windows, a unit test runs the real script against a stand-in
+  setup; the release workflow updates over a running app the same way and
+  sees the app started again.
+
 ### U3: desktop distribution
 - Installers for the three desktops built on a tag, the auto-updater, signing
   as soon as the certificates exist.

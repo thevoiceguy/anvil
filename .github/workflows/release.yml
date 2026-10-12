@@ -219,7 +219,22 @@ jobs:
           if ($p.HasExited) { throw "the first anvil.exe exited when a second started" }
           $data = "$env:LOCALAPPDATA\Anvil\Anvil"
           if (-not (Test-Path $data)) { throw "the app keeps nothing in the local profile ($data)" }
-          Stop-Process -Id $p.Id -Force
+          # An update over the running app, as the app starts one
+          # (crates/anvil-update/src/install.rs): the setup waits for the app
+          # to go, runs silently, and starts it again. (Waited for as one
+          # process: `Start-Process -Wait` waits for the app it relaunches too.)
+          $wait = "Wait-Process -Id $($p.Id) -Timeout 30; Stop-Process -Id $($p.Id) -Force; " +
+                  "(Start-Process -PassThru -FilePath '$($setup.FullName)' -ArgumentList " +
+                  "'/VERYSILENT','/SUPPRESSMSGBOXES','/NORESTART','/CLOSEAPPLICATIONS','/relaunch=1').WaitForExit()"
+          $updater = Start-Process powershell.exe -ArgumentList '-NoProfile', '-NonInteractive', '-Command', $wait -PassThru
+          Start-Sleep -Seconds 3
+          Stop-Process -Id $p.Id -Force   # the app quitting for the update
+          if (-not $updater.WaitForExit(180000)) { throw "the update did not finish" }
+          Start-Sleep -Seconds 10
+          $again = Get-Process anvil -ErrorAction SilentlyContinue
+          if (-not $again) { throw "the app was not started again after the update" }
+          if (-not (Test-Path "$dir\anvil.exe")) { throw "the update left no anvil.exe" }
+          $again | Stop-Process -Force
           Start-Sleep -Seconds 2
           Start-Process "$dir\unins000.exe" -ArgumentList '/VERYSILENT', '/SUPPRESSMSGBOXES' -Wait
           Start-Sleep -Seconds 2
