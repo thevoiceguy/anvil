@@ -1,5 +1,5 @@
-//! What the phone keeps on this device: favourites and the audio devices
-//! chosen. FCP keeps everything else.
+//! What the phone keeps on this device: favourites, the audio devices
+//! chosen and the ringtone. FCP keeps everything else.
 
 use std::collections::BTreeSet;
 use std::path::Path;
@@ -15,6 +15,12 @@ pub(crate) struct LocalSettings {
     pub audio_input: Option<String>,
     #[serde(default)]
     pub audio_output: Option<String>,
+    /// The speaker to ring on; `None` is the system's default.
+    #[serde(default)]
+    pub ring_output: Option<String>,
+    /// The ringtone by id (`ring`); `None` is the brand's, else Anvil's.
+    #[serde(default)]
+    pub ringtone: Option<String>,
 }
 
 impl LocalSettings {
@@ -65,6 +71,8 @@ mod tests {
             favourites: ["alice".to_string()].into(),
             audio_input: Some("USB Headset".into()),
             audio_output: None,
+            ring_output: Some("Speakers".into()),
+            ringtone: Some("classic".into()),
         };
         saved.save(&path).unwrap();
         assert_eq!(LocalSettings::load(&path), saved);

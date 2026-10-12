@@ -180,7 +180,9 @@ live in FCP: `docs/SOFTPHONE.md` in `thevoiceguy/fcp`. Anvil's phases:
         in the app
   - [x] **W4b** Audio devices: the default communications device on
         Windows, a device lost mid-call, the default followed during a call
-  - [ ] **W4c** A ringtone of the app's own
+  - [x] **W4c** A ringtone of the app's own: on the speakers (not the
+        headset) or the device chosen, Anvil's two and the brand's (WAV,
+        Ogg Vorbis, MP3), a call waiting tone in a call instead
   - [ ] **W5** Echo cancellation and noise suppression
 
 ---

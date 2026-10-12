@@ -54,6 +54,25 @@ pub trait AudioHost: Send + Sync {
     fn chosen_devices(&self) -> (Option<String>, Option<String>) {
         (None, None)
     }
+    /// Open a speaker stream for ringing: the device chosen for it, else
+    /// the system's default for sounds (on Windows the speakers, not the
+    /// headset calls use). A host with no such choice rings where calls
+    /// play.
+    fn make_ringer(&self, cfg: AudioFormat) -> Result<Box<dyn AudioSink>, AnvilError> {
+        self.make_playback(cfg)
+    }
+    /// Ring on this output device (by id; `None` is the system's default).
+    /// A host with no choice of device refuses.
+    fn choose_ring_device(&self, output: Option<&str>) -> Result<(), AnvilError> {
+        let _ = output;
+        Err(AnvilError::AudioDevice(
+            "this audio host has no choice of device".into(),
+        ))
+    }
+    /// The device chosen for ringing, `None` for the system's default.
+    fn chosen_ring_device(&self) -> Option<String> {
+        None
+    }
 }
 
 /// Microphone-side stream. Produces one frame per call.
@@ -98,22 +117,57 @@ pub(crate) fn play(
     samples: Vec<i16>,
     sample_rate: u32,
 ) -> Result<tokio::task::JoinHandle<()>, AnvilError> {
+    let format = clip_format(sample_rate)?;
+    let sink = host.make_playback(format)?;
+    Ok(tokio::spawn(play_out(sink, format, samples, None)))
+}
+
+/// Ring: the clip over and over, `gap` of silence after each, on the
+/// ringing speaker or (`in_call`) the one calls use, as a tone heard in a
+/// call, until the task is aborted.
+pub(crate) fn ring(
+    host: &dyn AudioHost,
+    samples: Vec<i16>,
+    sample_rate: u32,
+    gap: std::time::Duration,
+    in_call: bool,
+) -> Result<tokio::task::JoinHandle<()>, AnvilError> {
+    let format = clip_format(sample_rate)?;
+    let sink = if in_call {
+        host.make_playback(format)?
+    } else {
+        host.make_ringer(format)?
+    };
+    Ok(tokio::spawn(play_out(sink, format, samples, Some(gap))))
+}
+
+fn clip_format(sample_rate: u32) -> Result<AudioFormat, AnvilError> {
     if !(8_000..=192_000).contains(&sample_rate) {
         return Err(AnvilError::AudioDevice(format!(
             "a clip at {sample_rate} Hz cannot be played"
         )));
     }
-    let format = AudioFormat {
+    Ok(AudioFormat {
         sample_rate,
         channels: 1,
         frame_ms: 20,
-    };
-    let mut sink = host.make_playback(format)?;
-    let per_frame = (sample_rate / 50) as usize;
-    Ok(tokio::spawn(async move {
-        let tail = vec![0i16; per_frame * 15];
-        let mut tick = tokio::time::interval(std::time::Duration::from_millis(20));
-        tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+    })
+}
+
+/// Write `samples` to `sink` in real time: once with 300 ms of silence
+/// after, or (`repeat`) with that gap after each pass, for ever.
+async fn play_out(
+    mut sink: Box<dyn AudioSink>,
+    format: AudioFormat,
+    samples: Vec<i16>,
+    repeat: Option<std::time::Duration>,
+) {
+    let per_frame = (format.sample_rate / 50) as usize;
+    let gap = repeat.unwrap_or(std::time::Duration::from_millis(300));
+    let tail = vec![0i16; per_frame * (gap.as_millis() as usize / 20)];
+    let mut tick = tokio::time::interval(std::time::Duration::from_millis(20));
+    tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+    loop {
         for chunk in samples.chunks(per_frame).chain(tail.chunks(per_frame)) {
             tick.tick().await;
             let mut frame = chunk.to_vec();
@@ -129,7 +183,10 @@ pub(crate) fn play(
                 return;
             }
         }
-    }))
+        if repeat.is_none() || samples.is_empty() {
+            return;
+        }
+    }
 }
 
 #[cfg(test)]
@@ -180,5 +237,30 @@ mod play_tests {
             .iter()
             .all(|f| f.samples.iter().all(|&s| s == 0)));
         assert!(play(&host, vec![0; 10], 100).is_err());
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn a_ring_repeats_with_its_gap_until_stopped() {
+        let kept = Arc::new(Mutex::new(Vec::new()));
+        let host = Keeping(Arc::clone(&kept));
+        let clip = vec![7i16; 320];
+        let task = ring(
+            &host,
+            clip,
+            8000,
+            std::time::Duration::from_millis(100),
+            false,
+        )
+        .unwrap();
+        // Each pass: two frames of the clip, five of silence; the first frame
+        // at once, one every 20 ms after.
+        tokio::time::sleep(std::time::Duration::from_millis(20 * 7 * 3 - 10)).await;
+        task.abort();
+        let frames = kept.lock().unwrap();
+        assert_eq!(frames.len(), 21);
+        let loud: Vec<bool> = frames.iter().map(|f| f.samples[0] == 7).collect();
+        for pass in loud.chunks(7) {
+            assert_eq!(pass, [true, true, false, false, false, false, false]);
+        }
     }
 }

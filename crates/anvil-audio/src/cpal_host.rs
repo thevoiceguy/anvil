@@ -38,6 +38,18 @@ pub struct CpalHost {
     capture_processor: ProcessorFactory,
     /// The devices chosen by name; `None` is the system's default.
     chosen: Mutex<(Option<String>, Option<String>)>,
+    /// The device chosen for ringing; `None` is the system's default.
+    ring: Mutex<Option<String>>,
+}
+
+/// What a stream is for, which decides its default device.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Role {
+    /// A call's audio: on Windows the default device for communications.
+    Call,
+    /// Ringing: the system's default (on Windows the speakers, not a
+    /// headset).
+    Ring,
 }
 
 impl CpalHost {
@@ -47,6 +59,7 @@ impl CpalHost {
         Ok(Self {
             capture_processor: Box::new(|| Box::new(NullProcessor)),
             chosen: Mutex::new((None, None)),
+            ring: Mutex::new(None),
         })
     }
 
@@ -70,7 +83,26 @@ impl AudioHost for CpalHost {
 
     fn make_playback(&self, cfg: AudioFormat) -> Result<Box<dyn AudioSink>, AnvilError> {
         let device = self.chosen.lock().1.clone();
-        CpalPlayback::open(cfg, device).map(|h| Box::new(h) as Box<dyn AudioSink>)
+        CpalPlayback::open(cfg, device, Role::Call).map(|h| Box::new(h) as Box<dyn AudioSink>)
+    }
+
+    fn make_ringer(&self, cfg: AudioFormat) -> Result<Box<dyn AudioSink>, AnvilError> {
+        let device = self.ring.lock().clone();
+        CpalPlayback::open(cfg, device, Role::Ring).map(|h| Box::new(h) as Box<dyn AudioSink>)
+    }
+
+    fn choose_ring_device(&self, output: Option<&str>) -> Result<(), AnvilError> {
+        if let Some(id) = output {
+            if !self.devices().iter().any(|d| d.id == id && !d.is_input) {
+                return Err(AnvilError::AudioDevice(format!("no output device {id:?}")));
+            }
+        }
+        *self.ring.lock() = output.map(String::from);
+        Ok(())
+    }
+
+    fn chosen_ring_device(&self) -> Option<String> {
+        self.ring.lock().clone()
     }
 
     fn choose_devices(&self, input: Option<&str>, output: Option<&str>) -> Result<(), AnvilError> {
@@ -97,7 +129,7 @@ impl AudioHost for CpalHost {
         let host = cpal::default_host();
         let mut out = Vec::new();
         if let Ok(inputs) = host.input_devices() {
-            let default_name = default_name(&host, true);
+            let default_name = default_name(&host, true, Role::Call);
             for dev in inputs {
                 if let Ok(name) = dev.name() {
                     out.push(DeviceInfo {
@@ -110,7 +142,7 @@ impl AudioHost for CpalHost {
             }
         }
         if let Ok(outputs) = host.output_devices() {
-            let default_name = default_name(&host, false);
+            let default_name = default_name(&host, false, Role::Call);
             for dev in outputs {
                 if let Ok(name) = dev.name() {
                     out.push(DeviceInfo {
@@ -146,12 +178,18 @@ fn named(host: &cpal::Host, input: bool, wanted: &str) -> Option<cpal::Device> {
 }
 
 /// The default device for a call: on Windows the one for communications
-/// (a headset), else the system's default.
-fn default_device(host: &cpal::Host, input: bool) -> Option<cpal::Device> {
+/// (a headset), else the system's default; for ringing, the system's
+/// default.
+fn default_device(host: &cpal::Host, input: bool, role: Role) -> Option<cpal::Device> {
     #[cfg(windows)]
-    if let Some(device) = crate::comms::default_name(input).and_then(|n| named(host, input, &n)) {
-        return Some(device);
+    if role == Role::Call {
+        if let Some(device) = crate::comms::default_name(input).and_then(|n| named(host, input, &n))
+        {
+            return Some(device);
+        }
     }
+    #[cfg(not(windows))]
+    let _ = role;
     if input {
         host.default_input_device()
     } else {
@@ -160,13 +198,18 @@ fn default_device(host: &cpal::Host, input: bool) -> Option<cpal::Device> {
 }
 
 /// The default device's name.
-fn default_name(host: &cpal::Host, input: bool) -> Option<String> {
-    default_device(host, input).and_then(|d| d.name().ok())
+fn default_name(host: &cpal::Host, input: bool, role: Role) -> Option<String> {
+    default_device(host, input, role).and_then(|d| d.name().ok())
 }
 
-/// The device a call's stream opens on: the one chosen, while it is
-/// there; else the default, which the stream then follows (`true`).
-fn pick(host: &cpal::Host, input: bool, wanted: Option<&str>) -> Option<(cpal::Device, bool)> {
+/// The device a stream opens on: the one chosen, while it is there; else
+/// the default for its role, which the stream then follows (`true`).
+fn pick(
+    host: &cpal::Host,
+    input: bool,
+    wanted: Option<&str>,
+    role: Role,
+) -> Option<(cpal::Device, bool)> {
     if let Some(wanted) = wanted {
         if let Some(device) = named(host, input, wanted) {
             return Some((device, false));
@@ -176,19 +219,25 @@ fn pick(host: &cpal::Host, input: bool, wanted: Option<&str>) -> Option<(cpal::D
             "the chosen audio device is gone; using the default"
         );
     }
-    default_device(host, input).map(|d| (d, true))
+    default_device(host, input, role).map(|d| (d, true))
 }
 
 /// Whether a stream on the default, `current`, should move: the default
 /// is another device now, or the device chosen is back.
-fn should_move(host: &cpal::Host, input: bool, wanted: Option<&str>, current: &str) -> bool {
+fn should_move(
+    host: &cpal::Host,
+    input: bool,
+    wanted: Option<&str>,
+    current: &str,
+    role: Role,
+) -> bool {
     if let Some(wanted) = wanted {
         if named(host, input, wanted).is_some() {
             tracing::info!(device = wanted, "the chosen audio device is back");
             return true;
         }
     }
-    match default_name(host, input) {
+    match default_name(host, input, role) {
         Some(default) if default != current => {
             tracing::info!(from = current, to = %default, "the default audio device changed");
             true
@@ -371,7 +420,7 @@ fn run_capture(cfg: AudioFormat, frame_tx: mpsc::Sender<AudioFrame>, wanted: Opt
     let host = cpal::default_host();
     while !frame_tx.is_closed() {
         let failed = Arc::new(std::sync::atomic::AtomicBool::new(false));
-        let opened = pick(&host, true, wanted.as_deref())
+        let opened = pick(&host, true, wanted.as_deref(), Role::Call)
             .ok_or_else(|| "no input device".to_string())
             .and_then(|(device, following)| {
                 let name = device.name().unwrap_or_default();
@@ -405,7 +454,7 @@ fn run_capture(cfg: AudioFormat, frame_tx: mpsc::Sender<AudioFrame>, wanted: Opt
             }
             if following && checked.elapsed() >= FOLLOW_EVERY {
                 checked = std::time::Instant::now();
-                if should_move(&host, true, wanted.as_deref(), &name) {
+                if should_move(&host, true, wanted.as_deref(), &name, Role::Call) {
                     break;
                 }
             }
@@ -424,12 +473,12 @@ struct CpalPlayback {
 }
 
 impl CpalPlayback {
-    fn open(cfg: AudioFormat, device: Option<String>) -> Result<Self, AnvilError> {
+    fn open(cfg: AudioFormat, device: Option<String>, role: Role) -> Result<Self, AnvilError> {
         let (frame_tx, frame_rx) = mpsc::channel::<AudioFrame>(8);
 
         let worker = thread::Builder::new()
             .name("anvil-playback".into())
-            .spawn(move || run_playback(cfg, frame_rx, device))
+            .spawn(move || run_playback(cfg, frame_rx, device, role))
             .map_err(|e| AnvilError::AudioDevice(format!("spawn playback thread: {e}")))?;
 
         Ok(Self {
@@ -540,18 +589,19 @@ fn open_playback(
     Ok((stream, out_buf, device_rate, channels))
 }
 
-/// Play a call until its sink is dropped: on the device chosen or the
-/// default, opened again on another when it fails (unplugged) or, on the
-/// default, when the default changes.
+/// Play a call (or a ring) until its sink is dropped: on the device chosen
+/// or the default, opened again on another when it fails (unplugged) or,
+/// on the default, when the default changes.
 fn run_playback(
     cfg: AudioFormat,
     mut frame_rx: mpsc::Receiver<AudioFrame>,
     wanted: Option<String>,
+    role: Role,
 ) {
     let host = cpal::default_host();
     loop {
         let failed = Arc::new(std::sync::atomic::AtomicBool::new(false));
-        let opened = pick(&host, false, wanted.as_deref())
+        let opened = pick(&host, false, wanted.as_deref(), role)
             .ok_or_else(|| "no output device".to_string())
             .and_then(|(device, following)| {
                 let name = device.name().unwrap_or_default();
@@ -612,7 +662,7 @@ fn run_playback(
             }
             if following && checked.elapsed() >= FOLLOW_EVERY {
                 checked = std::time::Instant::now();
-                if should_move(&host, false, wanted.as_deref(), &name) {
+                if should_move(&host, false, wanted.as_deref(), &name, role) {
                     break true;
                 }
             }

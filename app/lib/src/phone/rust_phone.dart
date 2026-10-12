@@ -167,6 +167,11 @@ class RustPhone implements PhoneApi {
       outputs: s.outputs.map(_device).toList(),
       input: s.input,
       output: s.output,
+      ringDevice: s.ringDevice,
+      ringtones: [
+        for (final r in s.ringtones) Ringtone(id: r.id, name: r.name),
+      ],
+      ringtone: s.ringtone,
       playing: s.playing,
     );
   }
@@ -275,6 +280,13 @@ class RustPhone implements PhoneApi {
   @override
   Future<void> chooseAudio({required bool input, String? device}) =>
       rust.chooseAudio(input: input, device: device);
+
+  @override
+  Future<void> chooseRingDevice(String? device) =>
+      rust.chooseRingDevice(device: device);
+
+  @override
+  Future<void> chooseRingtone(String? id) => rust.chooseRingtone(id: id);
 
   @override
   Future<void> refresh() => rust.refresh();

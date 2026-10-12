@@ -61,6 +61,12 @@ PhoneSnapshot withData(PhoneSnapshot s) => s.copyWith(
   calling: const CallingSettings(forwardBusy: '1009'),
   inputs: const [AudioDevice(id: 'usb', name: 'USB Headset')],
   outputs: const [AudioDevice(id: 'spk', name: 'Speakers', isDefault: true)],
+  ringtones: const [
+    Ringtone(id: 'anvil', name: 'Anvil'),
+    Ringtone(id: 'classic', name: 'Classic'),
+    Ringtone(id: 'brand:Acme', name: 'Acme'),
+  ],
+  ringtone: 'anvil',
 );
 
 Future<FakePhone> signedIn(
@@ -351,42 +357,53 @@ void main() {
     expect(find.byKey(const Key('message-m2')), findsNothing);
   });
 
-  testWidgets('settings change dnd, call waiting, forwards and audio', (
-    tester,
-  ) async {
-    final phone = await signedIn(tester);
-    await go(tester, 'Settings');
-    expect(find.text('1009'), findsOneWidget, reason: 'forwarded when busy');
+  testWidgets(
+    'settings change dnd, call waiting, forwards, audio and ringing',
+    (tester) async {
+      final phone = await signedIn(tester);
+      await go(tester, 'Settings');
+      expect(find.text('1009'), findsOneWidget, reason: 'forwarded when busy');
 
-    await tapKey(tester, 'dnd');
-    expect(phone.log, contains('dnd true'));
-    expect(find.byKey(const Key('dndChip')), findsOneWidget);
+      await tapKey(tester, 'dnd');
+      expect(phone.log, contains('dnd true'));
+      expect(find.byKey(const Key('dndChip')), findsOneWidget);
 
-    await tapKey(tester, 'callWaiting');
-    expect(phone.log.last, startsWith('calling waiting=false'));
+      await tapKey(tester, 'callWaiting');
+      expect(phone.log.last, startsWith('calling waiting=false'));
 
-    await tapKey(tester, 'forward-noAnswer');
-    await tester.enterText(find.byKey(const Key('forwardTarget')), '1010');
-    await tester.enterText(find.byKey(const Key('forwardSecs')), '20');
-    await tapKey(tester, 'forwardSave');
-    expect(phone.log.last, contains('noAnswer=1010'));
-    expect(phone.log.last, contains('secs=20'));
-    expect(find.text('1010'), findsOneWidget);
+      await tapKey(tester, 'forward-noAnswer');
+      await tester.enterText(find.byKey(const Key('forwardTarget')), '1010');
+      await tester.enterText(find.byKey(const Key('forwardSecs')), '20');
+      await tapKey(tester, 'forwardSave');
+      expect(phone.log.last, contains('noAnswer=1010'));
+      expect(phone.log.last, contains('secs=20'));
+      expect(find.text('1010'), findsOneWidget);
 
-    await tapKey(tester, 'forward-busy');
-    await tapKey(tester, 'forwardClear');
-    expect(phone.log.last, contains('busy= '));
-    expect(phone.state.calling!.forwardBusy, isNull);
+      await tapKey(tester, 'forward-busy');
+      await tapKey(tester, 'forwardClear');
+      expect(phone.log.last, contains('busy= '));
+      expect(phone.state.calling!.forwardBusy, isNull);
 
-    await tapKey(tester, 'microphone');
-    await tester.tap(find.text('USB Headset').last);
-    await tester.pumpAndSettle();
-    expect(phone.log, contains('audio in usb'));
+      await tapKey(tester, 'microphone');
+      await tester.tap(find.text('USB Headset').last);
+      await tester.pumpAndSettle();
+      expect(phone.log, contains('audio in usb'));
 
-    await tapKey(tester, 'signOut');
-    expect(phone.log, contains('signOut'));
-    expect(find.byKey(const Key('signIn')), findsOneWidget);
-  });
+      await tapKey(tester, 'ringDevice');
+      await tester.tap(find.text('Speakers').last);
+      await tester.pumpAndSettle();
+      expect(phone.log, contains('ring on spk'));
+
+      await tapKey(tester, 'ringtone');
+      await tester.tap(find.text('Acme').last);
+      await tester.pumpAndSettle();
+      expect(phone.log, contains('ringtone brand:Acme'));
+
+      await tapKey(tester, 'signOut');
+      expect(phone.log, contains('signOut'));
+      expect(find.byKey(const Key('signIn')), findsOneWidget);
+    },
+  );
 
   testWidgets('a narrow window navigates from the bottom', (tester) async {
     await signedIn(tester, size: const Size(400, 800));

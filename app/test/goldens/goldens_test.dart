@@ -94,6 +94,12 @@ PhoneSnapshot seeded(PhoneSnapshot s) => s.copyWith(
   calling: const CallingSettings(forwardBusy: '1009', noAnswerSecs: 20),
   inputs: const [AudioDevice(id: 'usb', name: 'USB Headset')],
   outputs: const [AudioDevice(id: 'spk', name: 'Speakers', isDefault: true)],
+  ringtones: const [
+    Ringtone(id: 'anvil', name: 'Anvil'),
+    Ringtone(id: 'classic', name: 'Classic'),
+    Ringtone(id: 'brand:Acme', name: 'Acme'),
+  ],
+  ringtone: 'anvil',
 );
 
 /// The app's fonts, as the bundle declares them: tests otherwise draw text

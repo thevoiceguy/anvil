@@ -139,6 +139,15 @@ Future<void> favourite({required String who, required bool on_}) =>
 Future<void> chooseAudio({required bool input, String? device}) =>
     RustLib.instance.api.crateApiPhoneChooseAudio(input: input, device: device);
 
+/// Ring on this speaker by id, `None` for the system's default.
+Future<void> chooseRingDevice({String? device}) =>
+    RustLib.instance.api.crateApiPhoneChooseRingDevice(device: device);
+
+/// Ring with this ringtone by id, `None` for the brand's (else Anvil's);
+/// heard once now when no call is up.
+Future<void> chooseRingtone({String? id}) =>
+    RustLib.instance.api.crateApiPhoneChooseRingtone(id: id);
+
 /// Read the user's data from FCP again.
 Future<void> refresh() => RustLib.instance.api.crateApiPhoneRefresh();
 
@@ -458,6 +467,13 @@ class PhoneState {
   final String? input;
   final String? output;
 
+  /// The speaker chosen to ring on; `None` is the system's default.
+  final String? ringDevice;
+
+  /// Anvil's ringtones, then the brand's; the one that rings, by id.
+  final List<Ringtone> ringtones;
+  final String ringtone;
+
   /// The voicemail message playing.
   final String? playing;
 
@@ -478,6 +494,9 @@ class PhoneState {
     required this.outputs,
     this.input,
     this.output,
+    this.ringDevice,
+    required this.ringtones,
+    required this.ringtone,
     this.playing,
   });
 
@@ -499,6 +518,9 @@ class PhoneState {
       outputs.hashCode ^
       input.hashCode ^
       output.hashCode ^
+      ringDevice.hashCode ^
+      ringtones.hashCode ^
+      ringtone.hashCode ^
       playing.hashCode;
 
   @override
@@ -522,6 +544,9 @@ class PhoneState {
           outputs == other.outputs &&
           input == other.input &&
           output == other.output &&
+          ringDevice == other.ringDevice &&
+          ringtones == other.ringtones &&
+          ringtone == other.ringtone &&
           playing == other.playing;
 }
 
@@ -599,6 +624,25 @@ class Recent {
 
 /// Whether the account is registered.
 enum Registration { unregistered, registering, registered, failed }
+
+/// A ringtone to choose: `anvil`, `classic`, or `brand:` and its name.
+class Ringtone {
+  final String id;
+  final String name;
+
+  const Ringtone({required this.id, required this.name});
+
+  @override
+  int get hashCode => id.hashCode ^ name.hashCode;
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is Ringtone &&
+          runtimeType == other.runtimeType &&
+          id == other.id &&
+          name == other.name;
+}
 
 /// The system's microphones and speakers.
 class SystemAudio {

@@ -899,6 +899,29 @@ impl Anvil {
         audio::play(self.audio.as_ref(), samples, sample_rate)
     }
 
+    /// Ring: the clip over and over with `gap` after each, until the task is
+    /// aborted; on the ringing speaker, or (`in_call`) the one calls use, as
+    /// a call waiting tone is heard.
+    pub fn ring(
+        &self,
+        samples: Vec<i16>,
+        sample_rate: u32,
+        gap: std::time::Duration,
+        in_call: bool,
+    ) -> Result<JoinHandle<()>, AnvilError> {
+        audio::ring(self.audio.as_ref(), samples, sample_rate, gap, in_call)
+    }
+
+    /// Ring on this output device (by id; `None` for the system's default).
+    pub fn choose_ring_device(&self, output: Option<&str>) -> Result<(), AnvilError> {
+        self.audio.choose_ring_device(output)
+    }
+
+    /// The device chosen for ringing, `None` for the system's default.
+    pub fn chosen_ring_device(&self) -> Option<String> {
+        self.audio.chosen_ring_device()
+    }
+
     /// The microphones and speakers the audio host offers.
     pub fn audio_devices(&self) -> Vec<audio::DeviceInfo> {
         self.audio.devices()
