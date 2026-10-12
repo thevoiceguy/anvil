@@ -26,8 +26,9 @@ everything below lives in the platform-native wrapper that consumes `anvil-ffi`.
 
 ## Windows
 
-- **Audio:** WASAPI via `cpal`. `Windows.Media.Devices` for enumeration if we want
-  system-level default-device change events.
+- **Audio:** WASAPI via `cpal`; the default communications device through
+  `IMMDeviceEnumerator` (`anvil-audio/src/comms.rs`); a default that changes
+  is noticed by checking every two seconds, not by events.
 - **Build:** `x86_64-pc-windows-msvc` target. MSVC toolchain (not MinGW).
 - **Packaging:** an Inno Setup installer for the user, without administrator
   rights (`app/packaging/windows.iss`; MSIX would need a certificate first).
