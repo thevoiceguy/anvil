@@ -8,6 +8,9 @@
   "signInPassword": "Password",
   "signInCode": "One-time code",
   "signInButton": "Sign in",
+  "signInBrowserButton": "Sign in with your browser",
+  "signInBrowserWaiting": "Finish signing in in your browser.",
+  "signInServerNeeded": "Enter your server or email address first.",
   "signInFailed": "Could not sign in: {reason}",
   "@signInFailed": {
     "placeholders": {

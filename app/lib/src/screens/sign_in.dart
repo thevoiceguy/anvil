@@ -1,11 +1,26 @@
 import 'package:flutter/material.dart';
+import 'package:url_launcher/url_launcher.dart';
 
 import '../../l10n/app_localizations.dart';
 import '../phone/phone_model.dart';
 
+/// Opens an address in the system browser.
+Future<void> openInBrowser(String url) async {
+  if (!await launchUrl(Uri.parse(url), mode: LaunchMode.externalApplication)) {
+    throw Exception('no browser opened $url');
+  }
+}
+
 class SignInScreen extends StatefulWidget {
-  const SignInScreen({super.key, required this.model});
+  const SignInScreen({
+    super.key,
+    required this.model,
+    this.openUrl = openInBrowser,
+  });
   final PhoneModel model;
+
+  /// How a sign-in through the browser opens it (the tests watch it).
+  final Future<void> Function(String url) openUrl;
 
   @override
   State<SignInScreen> createState() => _SignInScreenState();
@@ -33,9 +48,27 @@ class _SignInScreenState extends State<SignInScreen> {
     }
   }
 
+  /// Sign in through the browser: single sign-on, a second factor, whatever
+  /// the server's sign-in page asks.
+  Future<void> _browser() async {
+    final s = Strings.of(context);
+    final place = _server.text.trim();
+    if (place.isEmpty) {
+      setState(() => _error = s.signInServerNeeded);
+      return;
+    }
+    setState(() => _error = null);
+    try {
+      await widget.model.signInWithBrowser(place: place, open: widget.openUrl);
+    } catch (e) {
+      if (mounted) setState(() => _error = s.signInFailed(e.toString()));
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     final s = Strings.of(context);
+    final model = widget.model;
     return Scaffold(
       body: Center(
         child: ConstrainedBox(
@@ -87,9 +120,29 @@ class _SignInScreenState extends State<SignInScreen> {
               const SizedBox(height: 20),
               FilledButton(
                 key: const Key('signIn'),
-                onPressed: widget.model.busy ? null : _submit,
+                onPressed: model.busy ? null : _submit,
                 child: Text(s.signInButton),
               ),
+              if (model.api.canSignInWithBrowser) ...[
+                const SizedBox(height: 8),
+                if (model.browserSignIn) ...[
+                  Text(
+                    s.signInBrowserWaiting,
+                    key: const Key('browserWaiting'),
+                    textAlign: TextAlign.center,
+                  ),
+                  TextButton(
+                    key: const Key('cancelBrowser'),
+                    onPressed: model.cancelBrowserSignIn,
+                    child: Text(s.cancelButton),
+                  ),
+                ] else
+                  OutlinedButton(
+                    key: const Key('signInBrowser'),
+                    onPressed: model.busy ? null : _browser,
+                    child: Text(s.signInBrowserButton),
+                  ),
+              ],
               if (_error != null) ...[
                 const SizedBox(height: 12),
                 Text(

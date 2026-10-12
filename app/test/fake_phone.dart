@@ -105,6 +105,28 @@ class FakePhone implements PhoneApi {
   }
 
   @override
+  bool canSignInWithBrowser = true;
+
+  /// What the browser comes back with: who signed in, or why not.
+  final browser = Completer<SignedInAccount>();
+
+  @override
+  Future<String> startBrowserSignIn({required String place}) async {
+    log.add('browser $place');
+    return 'https://$place/auth/app/authorize?state=x';
+  }
+
+  @override
+  Future<SignedInAccount> finishBrowserSignIn() async =>
+      saved = await browser.future;
+
+  @override
+  Future<void> cancelBrowserSignIn() async {
+    log.add('browser cancelled');
+    if (!browser.isCompleted) browser.completeError(Exception('cancelled'));
+  }
+
+  @override
   Future<void> start() async {
     log.add('start');
     final started = PhoneSnapshot(

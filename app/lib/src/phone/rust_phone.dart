@@ -72,6 +72,23 @@ class RustPhone implements PhoneApi {
   }
 
   @override
+  bool get canSignInWithBrowser =>
+      Platform.isWindows || Platform.isMacOS || Platform.isLinux;
+
+  @override
+  Future<String> startBrowserSignIn({required String place}) async =>
+      rust.startBrowserSignIn(place: place, sessionPath: await _session());
+
+  @override
+  Future<SignedInAccount> finishBrowserSignIn() async {
+    final a = await rust.finishBrowserSignIn(sessionPath: await _session());
+    return SignedInAccount(a.username, a.server);
+  }
+
+  @override
+  Future<void> cancelBrowserSignIn() async => rust.cancelBrowserSignIn();
+
+  @override
   Future<void> start() async => rust.startPhone(sessionPath: await _session());
 
   @override

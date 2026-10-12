@@ -34,6 +34,15 @@ class StringsEn extends Strings {
   String get signInButton => 'Sign in';
 
   @override
+  String get signInBrowserButton => 'Sign in with your browser';
+
+  @override
+  String get signInBrowserWaiting => 'Finish signing in in your browser.';
+
+  @override
+  String get signInServerNeeded => 'Enter your server or email address first.';
+
+  @override
   String signInFailed(String reason) {
     return 'Could not sign in: $reason';
   }
