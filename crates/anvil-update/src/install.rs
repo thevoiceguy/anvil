@@ -111,7 +111,7 @@ impl Install {
                     "-Command",
                     &windows_script(file, pid),
                 ]);
-                detach(&mut command);
+                hidden_console(&mut command);
                 command.spawn()?;
                 Ok(())
             }
@@ -226,6 +226,22 @@ fn detach(command: &mut Command) {
     command.creation_flags(DETACHED_PROCESS | CREATE_NEW_PROCESS_GROUP);
 }
 
+/// A console program (PowerShell) run on in a console nobody sees, on
+/// past this process: started with no console at all (`DETACHED_PROCESS`),
+/// PowerShell may not run.
+#[cfg(windows)]
+fn hidden_console(command: &mut Command) {
+    use std::os::windows::process::CommandExt;
+    const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+    const CREATE_NEW_PROCESS_GROUP: u32 = 0x0000_0200;
+    command.creation_flags(CREATE_NO_WINDOW | CREATE_NEW_PROCESS_GROUP);
+}
+
+#[cfg(not(windows))]
+fn hidden_console(command: &mut Command) {
+    detach(command);
+}
+
 #[cfg(unix)]
 fn detach(command: &mut Command) {
     use std::os::unix::process::CommandExt;
@@ -275,6 +291,29 @@ mod tests {
         let mut gone = gone;
         gone.wait().unwrap();
 
+        // The script itself first, its output kept: what is wrong with it,
+        // if anything is, is said here rather than as a setup never run.
+        let out = std::process::Command::new("powershell.exe")
+            .args(["-NoProfile", "-NonInteractive", "-Command"])
+            .arg(windows_script(&setup, pid).replace("SilentlyContinue", "Continue"))
+            .output()
+            .unwrap();
+        let said = format!(
+            "{}{}",
+            String::from_utf8_lossy(&out.stdout),
+            String::from_utf8_lossy(&out.stderr)
+        );
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(30);
+        while !marker.exists() {
+            assert!(
+                std::time::Instant::now() < deadline,
+                "the script did not run the setup: {said}"
+            );
+            std::thread::sleep(std::time::Duration::from_millis(100));
+        }
+        std::fs::remove_file(&marker).unwrap();
+
+        // Then as the app runs it: hidden, outliving its caller.
         Install::WindowsSetup.start(&setup, pid).unwrap();
         let deadline = std::time::Instant::now() + std::time::Duration::from_secs(60);
         while !marker.exists() {

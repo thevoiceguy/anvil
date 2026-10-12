@@ -221,10 +221,11 @@ jobs:
           if (-not (Test-Path $data)) { throw "the app keeps nothing in the local profile ($data)" }
           # An update over the running app, as the app starts one
           # (crates/anvil-update/src/install.rs): the setup waits for the app
-          # to go, runs silently, and starts it again.
+          # to go, runs silently, and starts it again. (Waited for as one
+          # process: `Start-Process -Wait` waits for the app it relaunches too.)
           $wait = "Wait-Process -Id $($p.Id) -Timeout 30; Stop-Process -Id $($p.Id) -Force; " +
-                  "Start-Process -Wait -FilePath '$($setup.FullName)' -ArgumentList " +
-                  "'/VERYSILENT','/SUPPRESSMSGBOXES','/NORESTART','/CLOSEAPPLICATIONS','/relaunch=1'"
+                  "(Start-Process -PassThru -FilePath '$($setup.FullName)' -ArgumentList " +
+                  "'/VERYSILENT','/SUPPRESSMSGBOXES','/NORESTART','/CLOSEAPPLICATIONS','/relaunch=1').WaitForExit()"
           $updater = Start-Process powershell.exe -ArgumentList '-NoProfile', '-NonInteractive', '-Command', $wait -PassThru
           Start-Sleep -Seconds 3
           Stop-Process -Id $p.Id -Force   # the app quitting for the update
