@@ -21,6 +21,8 @@ use forge_resampler::Resampler;
 use parking_lot::Mutex;
 use tokio::sync::mpsc;
 
+#[cfg(feature = "apm")]
+use anvil_core::audio::Processing;
 use anvil_core::audio::{
     AudioFormat, AudioFrame, AudioHost, AudioProcessor, AudioSink, AudioSource, DeviceInfo,
     NullProcessor,
@@ -40,6 +42,12 @@ pub struct CpalHost {
     chosen: Mutex<(Option<String>, Option<String>)>,
     /// The device chosen for ringing; `None` is the system's default.
     ring: Mutex<Option<String>>,
+    /// What is done to the microphone, read by each call's canceller.
+    #[cfg(feature = "apm")]
+    processing: std::sync::Arc<Mutex<Processing>>,
+    /// What calls' speakers play, for the cancellers.
+    #[cfg(feature = "apm")]
+    reference: std::sync::Arc<crate::echo::Reference>,
 }
 
 /// What a stream is for, which decides its default device.
@@ -60,6 +68,10 @@ impl CpalHost {
             capture_processor: Box::new(|| Box::new(NullProcessor)),
             chosen: Mutex::new((None, None)),
             ring: Mutex::new(None),
+            #[cfg(feature = "apm")]
+            processing: std::sync::Arc::new(Mutex::new(Processing::default())),
+            #[cfg(feature = "apm")]
+            reference: crate::echo::Reference::new(),
         })
     }
 
@@ -77,18 +89,39 @@ impl CpalHost {
 impl AudioHost for CpalHost {
     fn make_capture(&self, cfg: AudioFormat) -> Result<Box<dyn AudioSource>, AnvilError> {
         let processor = (self.capture_processor)();
+        #[cfg(feature = "apm")]
+        let processor = Box::new(crate::echo::Canceller::new(
+            &self.reference,
+            std::sync::Arc::clone(&self.processing),
+            processor,
+        ));
         let device = self.chosen.lock().0.clone();
         CpalCapture::open(cfg, processor, device).map(|h| Box::new(h) as Box<dyn AudioSource>)
     }
 
     fn make_playback(&self, cfg: AudioFormat) -> Result<Box<dyn AudioSink>, AnvilError> {
         let device = self.chosen.lock().1.clone();
-        CpalPlayback::open(cfg, device, Role::Call).map(|h| Box::new(h) as Box<dyn AudioSink>)
+        #[cfg(feature = "apm")]
+        let tap = Some(self.reference.tap(cfg.sample_rate));
+        #[cfg(not(feature = "apm"))]
+        let tap = None;
+        CpalPlayback::open(cfg, device, Role::Call, tap).map(|h| Box::new(h) as Box<dyn AudioSink>)
     }
 
     fn make_ringer(&self, cfg: AudioFormat) -> Result<Box<dyn AudioSink>, AnvilError> {
         let device = self.ring.lock().clone();
-        CpalPlayback::open(cfg, device, Role::Ring).map(|h| Box::new(h) as Box<dyn AudioSink>)
+        CpalPlayback::open(cfg, device, Role::Ring, None).map(|h| Box::new(h) as Box<dyn AudioSink>)
+    }
+
+    #[cfg(feature = "apm")]
+    fn set_processing(&self, processing: Processing) -> Result<(), AnvilError> {
+        *self.processing.lock() = processing;
+        Ok(())
+    }
+
+    #[cfg(feature = "apm")]
+    fn processing(&self) -> Option<Processing> {
+        Some(*self.processing.lock())
     }
 
     fn choose_ring_device(&self, output: Option<&str>) -> Result<(), AnvilError> {
@@ -470,10 +503,27 @@ fn run_capture(cfg: AudioFormat, frame_tx: mpsc::Sender<AudioFrame>, wanted: Opt
 struct CpalPlayback {
     frame_tx: mpsc::Sender<AudioFrame>,
     _worker: thread::JoinHandle<()>,
+    /// Where what a call's speaker plays is kept for the echo canceller.
+    tap: Option<Tap>,
+}
+
+#[cfg(feature = "apm")]
+type Tap = crate::echo::Tap;
+/// No canceller to tell.
+#[cfg(not(feature = "apm"))]
+struct Tap;
+#[cfg(not(feature = "apm"))]
+impl Tap {
+    fn played(&self, _: &AudioFrame) {}
 }
 
 impl CpalPlayback {
-    fn open(cfg: AudioFormat, device: Option<String>, role: Role) -> Result<Self, AnvilError> {
+    fn open(
+        cfg: AudioFormat,
+        device: Option<String>,
+        role: Role,
+        tap: Option<Tap>,
+    ) -> Result<Self, AnvilError> {
         let (frame_tx, frame_rx) = mpsc::channel::<AudioFrame>(8);
 
         let worker = thread::Builder::new()
@@ -484,6 +534,7 @@ impl CpalPlayback {
         Ok(Self {
             frame_tx,
             _worker: worker,
+            tap,
         })
     }
 }
@@ -491,6 +542,9 @@ impl CpalPlayback {
 #[async_trait]
 impl AudioSink for CpalPlayback {
     async fn write_frame(&mut self, frame: &AudioFrame) -> Result<(), AnvilError> {
+        if let Some(tap) = &self.tap {
+            tap.played(frame);
+        }
         // Clone the frame; the channel owns it until the playback side pops it.
         self.frame_tx
             .send(frame.clone())

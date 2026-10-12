@@ -372,6 +372,32 @@ Three PRs, the screens thin over the state as §3 has it:
   the ringtone and device kept) and the decoders' tests on real Ogg and
   MP3 files.
 
+### W5: echo cancellation and noise suppression
+- The desktop's microphone is cleaned before it is sent: WebRTC's audio
+  processing — AEC3, its noise suppressor and its high-pass filter — as
+  `sonora` ports it to Rust, so nothing C++ is built on any platform
+  (`anvil-audio/src/echo.rs`, the `apm` feature, on by default).
+- The canceller hears what the speaker plays: each call's speaker stream
+  queues what it is given, and the microphone takes the same length of it
+  for each frame it cleans, so the reference comes at the microphone's
+  pace however the network delivered it. AEC3 finds the delay through the
+  speaker's buffer and the room itself. A call waiting tone is mixed in;
+  the ringer is not (ringing stops at answer). With a held call and one
+  up, only the newest call's canceller takes the reference.
+- Both are on unless turned off, under Settings → Audio (or
+  `audio echo on|off` and `audio noise on|off` from the CLI), kept on
+  this device, and a change reaches the call that is up. A host that does
+  no cleaning of its own (a phone's platform audio) shows neither and
+  refuses the command.
+- Measured by `echo.rs`'s tests on a room with 60 ms between speaker and
+  microphone: the echo down by more than 60 dB after convergence, a
+  person speaking in the far end's pauses down by under 1 dB, steady
+  noise down by about 12 dB; about 1.5% of one core at 48 kHz. Proved
+  through the phone by `anvil-app/tests/phone.rs` (the setting reaches the
+  host, is kept for the next start, and is refused where there is none).
+  How it sounds on real speakers and microphones is for the testing
+  session.
+
 ### U3: desktop distribution
 - Installers for the three desktops built on a tag, the auto-updater, signing
   as soon as the certificates exist.

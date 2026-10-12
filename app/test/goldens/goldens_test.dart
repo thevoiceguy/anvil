@@ -100,6 +100,8 @@ PhoneSnapshot seeded(PhoneSnapshot s) => s.copyWith(
     Ringtone(id: 'brand:Acme', name: 'Acme'),
   ],
   ringtone: 'anvil',
+  echoCancellation: true,
+  noiseSuppression: true,
 );
 
 /// The app's fonts, as the bundle declares them: tests otherwise draw text

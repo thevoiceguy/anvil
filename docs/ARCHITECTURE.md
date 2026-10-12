@@ -64,7 +64,7 @@ the host OS owns those concerns.
 |---------------|-----------------|------------------------------------------------------|
 | `anvil-core`  | `tls`           | Enable TLS transport via siphon-rs (on by default)   |
 | `anvil-core`  | `srtp`          | SDES-SRTP for non-WebRTC SIP peers                   |
-| `anvil-audio` | `apm`           | Link WebRTC audio-processing (AEC/NS/AGC)            |
+| `anvil-audio` | `apm`           | Echo cancellation and noise suppression (`sonora`, WebRTC's in Rust; on by default) |
 | `anvil-audio` | `cpal-default`  | Use cpal as the audio backend (on by default)        |
 | `anvil-brand` | `http`          | HTTP fetch via reqwest (on by default)               |
 | `anvil-brand` | `fs-cache`      | Filesystem-backed brand cache (on by default)        |
@@ -249,8 +249,9 @@ pub trait AudioSink: Send {
 
 Implementations:
 
-- `anvil-audio` — desktop, `cpal` behind the host. Applies APM (AEC/NS/AGC) when the
-  `apm` feature is on.
+- `anvil-audio` — desktop, `cpal` behind the host. Cancels echo and suppresses
+  noise (WebRTC's AEC3 and noise suppressor, ported to Rust by `sonora`) when
+  the `apm` feature is on, as it is by default.
 - **iOS**: host backed by `AVAudioEngine`, owned by Swift; bridged through FFI.
   Apple already does AEC for us when using the voice-processing audio unit.
 - **Android**: host backed by Oboe / AudioRecord, bridged through JNI.

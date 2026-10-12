@@ -34,8 +34,8 @@ pub use anvil_fcp::{CallingSettings, CallingUpdate};
 pub use clip::{decode_wav, Clip};
 pub use command::{AudioKind, Command, Response};
 pub use state::{
-    AudioDevice, AudioDevices, Brand, CallState, CallView, Change, Direction, MessageWaiting,
-    Person, Push, Quality, Recent, Registration, Ringtone, State, Voicemail,
+    AudioDevice, AudioDevices, AudioProcessing, Brand, CallState, CallView, Change, Direction,
+    MessageWaiting, Person, Push, Quality, Recent, Registration, Ringtone, State, Voicemail,
 };
 
 use settings::LocalSettings;
@@ -118,6 +118,15 @@ impl Phone {
         if local.ring_output.is_some() {
             if let Err(e) = anvil.choose_ring_device(local.ring_output.as_deref()) {
                 tracing::warn!(%e, "the speaker chosen to ring on is not here; using the default");
+            }
+        }
+        let processing = anvil_core::audio::Processing {
+            echo_cancellation: local.echo_cancellation,
+            noise_suppression: local.noise_suppression,
+        };
+        if anvil.audio_processing().is_some_and(|p| p != processing) {
+            if let Err(e) = anvil.set_audio_processing(processing) {
+                tracing::warn!(%e, "the microphone's cleaning was not set");
             }
         }
         if local.audio_input.is_some() || local.audio_output.is_some() {
@@ -408,6 +417,34 @@ impl Phone {
                 self.read_audio_devices().await;
                 Ok(Response::ok())
             }
+            Command::Processing {
+                echo_cancellation,
+                noise_suppression,
+            } => {
+                let anvil = self.anvil().await?;
+                let Some(mut processing) = anvil.audio_processing() else {
+                    return Err(PhoneError::Refused(
+                        "this phone's audio does no echo cancellation or noise suppression of its own"
+                            .into(),
+                    ));
+                };
+                if let Some(on) = echo_cancellation {
+                    processing.echo_cancellation = on;
+                }
+                if let Some(on) = noise_suppression {
+                    processing.noise_suppression = on;
+                }
+                anvil.set_audio_processing(processing)?;
+                drop(anvil);
+                {
+                    let mut local = self.inner.local.lock();
+                    local.echo_cancellation = processing.echo_cancellation;
+                    local.noise_suppression = processing.noise_suppression;
+                }
+                self.inner.save_settings();
+                self.read_audio_devices().await;
+                Ok(Response::ok())
+            }
             Command::Ringtone { id } => {
                 if let Some(id) = &id {
                     if self.inner.tone(id).is_none() {
@@ -606,6 +643,10 @@ impl Phone {
             ring: anvil.chosen_ring_device(),
             ringtones: self.inner.ringtones(),
             ringtone: self.inner.ringtone(),
+            processing: anvil.audio_processing().map(|p| AudioProcessing {
+                echo_cancellation: p.echo_cancellation,
+                noise_suppression: p.noise_suppression,
+            }),
             ..Default::default()
         };
         for d in anvil.audio_devices() {

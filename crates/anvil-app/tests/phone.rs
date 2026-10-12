@@ -6,8 +6,10 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use anvil_app::control::{Client, Endpoint};
-use anvil_app::{AudioKind, CallState, Change, Command, Phone, PhoneConfig};
-use anvil_core::audio::{AudioFormat, AudioFrame, AudioHost, AudioSink, AudioSource, DeviceInfo};
+use anvil_app::{AudioKind, AudioProcessing, CallState, Change, Command, Phone, PhoneConfig};
+use anvil_core::audio::{
+    AudioFormat, AudioFrame, AudioHost, AudioSink, AudioSource, DeviceInfo, Processing,
+};
 use anvil_core::config::{AccountConfig, MediaConfig};
 use anvil_core::{AnvilConfig, AnvilError, BrandConfig, Transport};
 use async_trait::async_trait;
@@ -360,6 +362,108 @@ async fn the_audio_devices_chosen_are_kept_for_the_next_start() {
             .ok
     );
     assert_eq!(again.lock().0, None);
+    alice.shutdown().await;
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// Quiet audio that cleans the microphone as it is told; what it was told
+/// is shared with the test.
+struct Cleaning(Arc<parking_lot::Mutex<Processing>>);
+
+impl AudioHost for Cleaning {
+    fn make_capture(&self, cfg: AudioFormat) -> Result<Box<dyn AudioSource>, AnvilError> {
+        Quiet.make_capture(cfg)
+    }
+    fn make_playback(&self, cfg: AudioFormat) -> Result<Box<dyn AudioSink>, AnvilError> {
+        Quiet.make_playback(cfg)
+    }
+    fn devices(&self) -> Vec<DeviceInfo> {
+        Vec::new()
+    }
+    fn set_processing(&self, processing: Processing) -> Result<(), AnvilError> {
+        *self.0.lock() = processing;
+        Ok(())
+    }
+    fn processing(&self) -> Option<Processing> {
+        Some(*self.0.lock())
+    }
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn echo_cancellation_and_noise_suppression_are_kept_for_the_next_start() {
+    log();
+    let dir = std::env::temp_dir().join(format!("anvil-app-cleaning-{}", std::process::id()));
+    let settings = dir.join("settings.json");
+    let _ = std::fs::remove_dir_all(&dir);
+    let on = AudioProcessing {
+        echo_cancellation: true,
+        noise_suppression: true,
+    };
+
+    let told = Arc::new(parking_lot::Mutex::new(Processing::default()));
+    let alice = phone_with(
+        "alice",
+        "127.0.0.39",
+        Box::new(Cleaning(Arc::clone(&told))),
+        Some(settings.clone()),
+    )
+    .await;
+    assert_eq!(
+        alice.state().audio.processing,
+        Some(on),
+        "on unless turned off"
+    );
+
+    let off = alice
+        .execute(Command::parse_line("audio echo off").unwrap())
+        .await
+        .unwrap();
+    assert!(off.ok, "{off:?}");
+    assert_eq!(
+        *told.lock(),
+        Processing {
+            echo_cancellation: false,
+            noise_suppression: true,
+        }
+    );
+    assert_eq!(
+        alice.state().audio.processing,
+        Some(AudioProcessing {
+            echo_cancellation: false,
+            noise_suppression: true,
+        })
+    );
+    alice.shutdown().await;
+
+    // Started again: the host is told before any call.
+    let again = Arc::new(parking_lot::Mutex::new(Processing::default()));
+    let alice = phone_with(
+        "alice",
+        "127.0.0.39",
+        Box::new(Cleaning(Arc::clone(&again))),
+        Some(settings.clone()),
+    )
+    .await;
+    assert!(!again.lock().echo_cancellation);
+    assert!(again.lock().noise_suppression);
+    assert!(
+        alice
+            .execute(Command::parse_line("audio echo on").unwrap())
+            .await
+            .unwrap()
+            .ok
+    );
+    assert_eq!(*again.lock(), Processing::default());
+    assert_eq!(alice.state().audio.processing, Some(on));
+    alice.shutdown().await;
+
+    // A host that does none of its own: nothing to show, and refused.
+    let alice = phone_with("alice", "127.0.0.39", Box::new(Quiet), Some(settings)).await;
+    assert_eq!(alice.state().audio.processing, None);
+    assert!(alice
+        .execute(Command::parse_line("audio noise off").unwrap())
+        .await
+        .is_err());
     alice.shutdown().await;
     let _ = std::fs::remove_dir_all(&dir);
 }

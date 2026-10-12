@@ -6,7 +6,7 @@ use std::path::Path;
 
 use serde::{Deserialize, Serialize};
 
-#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub(crate) struct LocalSettings {
     /// People by [`Person::key`](crate::Person::key).
     #[serde(default)]
@@ -21,6 +21,34 @@ pub(crate) struct LocalSettings {
     /// The ringtone by id (`ring`); `None` is the brand's, else Anvil's.
     #[serde(default)]
     pub ringtone: Option<String>,
+    /// Echo cancellation; on unless turned off.
+    #[serde(default = "on", skip_serializing_if = "is_on")]
+    pub echo_cancellation: bool,
+    /// Noise suppression; on unless turned off.
+    #[serde(default = "on", skip_serializing_if = "is_on")]
+    pub noise_suppression: bool,
+}
+
+impl Default for LocalSettings {
+    fn default() -> Self {
+        Self {
+            favourites: BTreeSet::new(),
+            audio_input: None,
+            audio_output: None,
+            ring_output: None,
+            ringtone: None,
+            echo_cancellation: true,
+            noise_suppression: true,
+        }
+    }
+}
+
+fn on() -> bool {
+    true
+}
+
+fn is_on(on: &bool) -> bool {
+    *on
 }
 
 impl LocalSettings {
@@ -73,6 +101,8 @@ mod tests {
             audio_output: None,
             ring_output: Some("Speakers".into()),
             ringtone: Some("classic".into()),
+            echo_cancellation: false,
+            noise_suppression: true,
         };
         saved.save(&path).unwrap();
         assert_eq!(LocalSettings::load(&path), saved);

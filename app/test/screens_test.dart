@@ -67,6 +67,8 @@ PhoneSnapshot withData(PhoneSnapshot s) => s.copyWith(
     Ringtone(id: 'brand:Acme', name: 'Acme'),
   ],
   ringtone: 'anvil',
+  echoCancellation: true,
+  noiseSuppression: true,
 );
 
 Future<FakePhone> signedIn(
@@ -398,6 +400,12 @@ void main() {
       await tester.tap(find.text('Acme').last);
       await tester.pumpAndSettle();
       expect(phone.log, contains('ringtone brand:Acme'));
+
+      await tapKey(tester, 'echoCancellation');
+      expect(phone.log.last, 'echo false');
+      expect(phone.state.echoCancellation, isFalse);
+      await tapKey(tester, 'noiseSuppression');
+      expect(phone.log.last, 'noise false');
 
       await tapKey(tester, 'signOut');
       expect(phone.log, contains('signOut'));

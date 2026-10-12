@@ -182,7 +182,9 @@ Telecom from the Rust core (`app/rust/src/system.rs`), never from Dart.
 | iOS      | (host-owned, not cpal) | AVAudioSession `.voiceChat` mode (hardware)  |
 | Android  | (host-owned, not cpal) | Oboe + `VOICE_COMMUNICATION` preset          |
 
-Software APM = `webrtc-audio-processing` wrapped in `anvil-audio`.
+Software APM = WebRTC's AEC3 and noise suppressor as `sonora` ports them to Rust, in
+`anvil-audio`'s `echo.rs` (W5). Until the phones have hosts of their own, the app
+runs `CpalHost` there too, with the same software APM.
 
 ---
 

@@ -168,6 +168,10 @@
   "ringtone": "Ringtone",
   "ringtoneAnvil": "Anvil",
   "ringtoneClassic": "Classic",
+  "echoCancellation": "Echo cancellation",
+  "echoCancellationNote": "Stops the other person hearing themselves through your speakers. Turn it off only with a headset, if your voice sounds clipped.",
+  "noiseSuppression": "Noise suppression",
+  "noiseSuppressionNote": "Turns down steady noise around you, such as fans and hum.",
   "settingsAccount": "Account",
   "signedInAs": "{user} on {server}",
   "@signedInAs": {

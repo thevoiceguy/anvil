@@ -258,6 +258,18 @@ pub struct AudioDevices {
     /// The ringtone that rings, by id.
     #[serde(default)]
     pub ringtone: String,
+    /// What is done to the microphone; `None` when the audio host does
+    /// nothing of its own (the platform's call audio does it, or nothing
+    /// does).
+    #[serde(default)]
+    pub processing: Option<AudioProcessing>,
+}
+
+/// Echo cancellation and noise suppression, each on or off.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub struct AudioProcessing {
+    pub echo_cancellation: bool,
+    pub noise_suppression: bool,
 }
 
 /// A ringtone to choose: `anvil`, `classic`, or `brand:` and the brand's

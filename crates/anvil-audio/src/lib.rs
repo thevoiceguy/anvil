@@ -1,9 +1,9 @@
 //! # anvil-audio
 //!
 //! Desktop audio host for Anvil. Wraps [`cpal`] to provide microphone capture and
-//! speaker playback as `anvil_core::audio::AudioSource` / `AudioSink`. Optionally
-//! applies acoustic echo cancellation, noise suppression, and AGC via WebRTC's
-//! audio processing module when the `apm` feature is enabled.
+//! speaker playback as `anvil_core::audio::AudioSource` / `AudioSink`. With the
+//! `apm` feature (on by default) it cancels echo and suppresses noise with
+//! WebRTC's audio processing, ported to Rust by `sonora` (`echo.rs`).
 //!
 //! Mobile hosts (iOS AVAudioEngine, Android Oboe) implement `AudioHost` themselves
 //! and do not use this crate.
@@ -26,6 +26,10 @@ mod tone;
 
 #[cfg(feature = "tone")]
 pub use tone::{ToneHost, ToneStats};
+
+#[cfg(feature = "apm")]
+#[cfg_attr(not(feature = "cpal-default"), allow(dead_code))]
+mod echo;
 
 mod processor;
 pub use processor::SimpleAgc;
