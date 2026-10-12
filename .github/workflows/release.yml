@@ -197,7 +197,8 @@ jobs:
             "/DBundle=$env:GITHUB_WORKSPACE\app\build\windows\x64\runner\Release" "/DOut=$env:GITHUB_WORKSPACE\dist" windows.iss
           Get-ChildItem $env:GITHUB_WORKSPACE\dist
       # Installed silently for this user, started (still running ten seconds
-      # later), stopped, and uninstalled.
+      # later), started again with a link (which hands it on and leaves),
+      # stopped, and uninstalled with what it registered.
       - name: The installer installs, starts and goes
         shell: pwsh
         run: |
@@ -205,14 +206,29 @@ jobs:
           Start-Process $setup.FullName -ArgumentList '/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART' -Wait
           $dir = "$env:LOCALAPPDATA\Programs\Anvil"
           if (-not (Test-Path "$dir\anvil.exe")) { throw "anvil.exe is not installed" }
+          $open = (Get-ItemProperty 'HKCU:\Software\Classes\Anvil.Url\shell\open\command').'(default)'
+          if ($open -notlike "*anvil.exe*%1*") { throw "links are not opened by Anvil: $open" }
+          if ((Get-ItemProperty 'HKCU:\Software\RegisteredApplications').Anvil -ne 'Software\Anvil\Capabilities') {
+            throw "Anvil is not offered in the default apps"
+          }
           $p = Start-Process "$dir\anvil.exe" -PassThru
           Start-Sleep -Seconds 10
           if ($p.HasExited) { throw "anvil.exe exited with $($p.ExitCode)" }
+          $second = Start-Process "$dir\anvil.exe" -ArgumentList 'tel:1002' -PassThru
+          if (-not $second.WaitForExit(15000)) { throw "a second start kept running" }
+          if ($p.HasExited) { throw "the first anvil.exe exited when a second started" }
           Stop-Process -Id $p.Id -Force
           Start-Sleep -Seconds 2
           Start-Process "$dir\unins000.exe" -ArgumentList '/VERYSILENT', '/SUPPRESSMSGBOXES' -Wait
           Start-Sleep -Seconds 2
           if (Test-Path "$dir\anvil.exe") { throw "the uninstaller left anvil.exe" }
+          foreach ($key in 'HKCU:\Software\Classes\Anvil.Url', 'HKCU:\Software\Anvil',
+                           'HKCU:\Software\Classes\AppUserModelId\Anvil.Softphone') {
+            if (Test-Path $key) { throw "the uninstaller left $key" }
+          }
+          if ((Get-ItemProperty 'HKCU:\Software\RegisteredApplications' -ErrorAction SilentlyContinue).Anvil) {
+            throw "the uninstaller left Anvil in the default apps"
+          }
       - uses: actions/upload-artifact@v4
         with:
           name: release-app-windows

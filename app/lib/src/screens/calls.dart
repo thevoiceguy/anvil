@@ -723,7 +723,7 @@ class CallBar extends StatelessWidget {
 }
 
 class Keypad extends StatefulWidget {
-  const Keypad({super.key, required this.onCall, this.onBack});
+  const Keypad({super.key, required this.onCall, this.onBack, this.initial});
 
   /// Place a call to what was typed.
   final ValueChanged<String> onCall;
@@ -731,12 +731,15 @@ class Keypad extends StatefulWidget {
   /// Back to the call up, when the keypad is for a second one.
   final VoidCallback? onBack;
 
+  /// What is on it to begin with (a link's number).
+  final String? initial;
+
   @override
   State<Keypad> createState() => _KeypadState();
 }
 
 class _KeypadState extends State<Keypad> {
-  final _target = TextEditingController();
+  late final _target = TextEditingController(text: widget.initial);
 
   @override
   void dispose() {

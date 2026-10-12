@@ -31,7 +31,45 @@ class _HomeScreenState extends State<HomeScreen> {
   /// The keypad over a call up, to place a second one.
   bool _adding = false;
 
+  /// What a link put on the keypad, and how many times one has: a new
+  /// one makes the keypad anew with it.
+  String? _filled;
+  int _fills = 0;
+
   PhoneModel get model => widget.model;
+
+  @override
+  void initState() {
+    super.initState();
+    // A link that came before anyone had signed in.
+    if (model.dialRequest.value case final target?) {
+      model.dialRequest.value = null;
+      _fill(target);
+    }
+    model.dialRequest.addListener(_take);
+  }
+
+  @override
+  void dispose() {
+    model.dialRequest.removeListener(_take);
+    super.dispose();
+  }
+
+  void _take() {
+    final target = model.dialRequest.value;
+    if (target == null) return;
+    model.dialRequest.value = null;
+    setState(() => _fill(target));
+  }
+
+  /// A link to call: the keypad, over a call up if there is one, with the
+  /// number on it.
+  void _fill(String target) {
+    _page = Section.phone;
+    _adding = model.snapshot.calls.any((c) => !c.isRingingIn);
+    _filled = target;
+    _fills++;
+  }
 
   /// Call someone from any page: the phone page then shows the call.
   void _dial(String target) {
@@ -160,6 +198,8 @@ class _HomeScreenState extends State<HomeScreen> {
               onAddCall: () => setState(() => _adding = true),
             )
           : Keypad(
+              key: ValueKey(_fills),
+              initial: _filled,
               onCall: _dial,
               onBack: up.isEmpty ? null : () => setState(() => _adding = false),
             ),

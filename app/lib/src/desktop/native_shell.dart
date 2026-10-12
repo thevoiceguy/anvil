@@ -1,21 +1,37 @@
 // The desktop shell on Windows, macOS and Linux: tray_manager for the tray,
 // flutter_local_notifications for a call ringing in, window_manager to keep
 // the window in the tray when closed, launch_at_startup for starting at
-// login. Each part that fails to start is logged and left out.
+// login. Each part that fails to start is logged and left out. On Windows a
+// second start hands its arguments to this one (windows/runner/instance.cpp)
+// and the session ending signs the phone out first, over `anvil/instance`.
 
 import 'dart:async';
 import 'dart:io';
 
 import 'package:flutter/foundation.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 import 'package:launch_at_startup/launch_at_startup.dart';
 import 'package:tray_manager/tray_manager.dart';
 import 'package:window_manager/window_manager.dart';
 
+import 'links.dart';
 import 'shell.dart';
 
 class NativeShell with TrayListener, WindowListener implements DesktopShell {
+  /// `args`: what the app was started with.
+  NativeShell({List<String> args = const []})
+    : _start = startEvents(args, handedOn: false),
+      _hidden = Platform.isWindows && args.contains(hiddenArgument);
+
+  static const _instance = MethodChannel('anvil/instance');
+
   final _events = StreamController<ShellEvent>.broadcast();
+  List<ShellEvent> _start;
+
+  /// Started at login: the runner left the window unshown.
+  final bool _hidden;
+  Future<void> Function()? _sessionEnds;
   final _notifications = FlutterLocalNotificationsPlugin();
   bool _tray = false;
   bool _notify = false;
@@ -34,6 +50,27 @@ class NativeShell with TrayListener, WindowListener implements DesktopShell {
   Stream<ShellEvent> get events => _events.stream;
 
   @override
+  List<ShellEvent> takeStartEvents() {
+    final taken = _start;
+    _start = [];
+    return taken;
+  }
+
+  @override
+  void whenSessionEnds(Future<void> Function()? stop) => _sessionEnds = stop;
+
+  Future<Object?> _fromRunner(MethodCall call) async {
+    switch (call.method) {
+      case 'started':
+        final args = [for (final a in call.arguments as List) '$a'];
+        startEvents(args, handedOn: true).forEach(_events.add);
+      case 'ending':
+        await _sessionEnds?.call();
+    }
+    return null;
+  }
+
+  @override
   Future<void> init({required String appName}) async {
     await _part('window', () async {
       await windowManager.ensureInitialized();
@@ -46,6 +83,13 @@ class NativeShell with TrayListener, WindowListener implements DesktopShell {
       await trayManager.setIcon(_icon(TrayState.offline));
       _tray = true;
     });
+    // Started at login with no tray to be found in: the window after all.
+    if (_hidden && !_tray && _window) {
+      await _part('window', windowManager.show);
+    }
+    if (Platform.isWindows) {
+      _instance.setMethodCallHandler(_fromRunner);
+    }
     await _part('notifications', () async {
       await _notifications.initialize(
         settings: InitializationSettings(
@@ -81,10 +125,21 @@ class NativeShell with TrayListener, WindowListener implements DesktopShell {
       _notify = true;
     });
     await _part('start at login', () async {
-      launchAtStartup.setup(
-        appName: appName,
-        appPath: Platform.resolvedExecutable,
-      );
+      final path = Platform.resolvedExecutable;
+      if (Platform.isWindows) {
+        // Windows starts the app in the tray at login. The entry an older
+        // version wrote (the bare path) is rewritten if it is on.
+        launchAtStartup.setup(appName: appName, appPath: path);
+        final before = await launchAtStartup.isEnabled();
+        launchAtStartup.setup(
+          appName: appName,
+          appPath: '"$path"',
+          args: const [hiddenArgument],
+        );
+        if (before) await launchAtStartup.enable();
+      } else {
+        launchAtStartup.setup(appName: appName, appPath: path);
+      }
       _login = true;
     });
   }
