@@ -1,6 +1,8 @@
 //! The control socket (`docs/APP.md` §3): the running phone, reachable by
 //! the same user on the same machine — a Unix socket in a directory only
-//! they can open, or a named pipe that refuses remote clients. One JSON
+//! they can open, or a named pipe that refuses remote clients, admits only
+//! its user, and is trusted by a client only when its server runs as that
+//! user (`user_only.rs`). One JSON
 //! [`Command`] per line in, one [`Response`] per line out; after a
 //! `subscribe`, one [`Change`](crate::Change) per line until the client
 //! goes.
@@ -62,6 +64,8 @@ pub enum ControlError {
     NotRunning(Endpoint),
     #[error("a phone is already running at {0}")]
     AlreadyRunning(Endpoint),
+    #[error("{0} is held by another user of this computer")]
+    Taken(Endpoint),
     #[error("{0}")]
     Io(#[from] std::io::Error),
     #[error("the phone answered something unreadable: {0}")]
@@ -111,24 +115,32 @@ async fn serve_unix(_: Phone, _: PathBuf, endpoint: Endpoint) -> Result<(), Cont
 
 #[cfg(windows)]
 async fn serve_pipe(phone: Phone, name: String, endpoint: Endpoint) -> Result<(), ControlError> {
-    use tokio::net::windows::named_pipe::ServerOptions;
-    let mut server = ServerOptions::new()
-        .first_pipe_instance(true)
-        .reject_remote_clients(true)
-        .create(&name)
-        .map_err(|e| {
-            if e.kind() == std::io::ErrorKind::PermissionDenied {
-                ControlError::AlreadyRunning(endpoint.clone())
-            } else {
-                e.into()
-            }
-        })?;
+    use tokio::net::windows::named_pipe::{NamedPipeServer, ServerOptions};
+    let mut access = crate::user_only::UserOnly::new()?;
+    let mut create = |first: bool| -> std::io::Result<NamedPipeServer> {
+        // SAFETY: the attributes live as long as `access`, past the call.
+        unsafe {
+            ServerOptions::new()
+                .first_pipe_instance(first)
+                .reject_remote_clients(true)
+                .create_with_security_attributes_raw(&name, access.as_ptr())
+        }
+    };
+    let mut server = match create(true) {
+        Ok(server) => server,
+        // The name is taken: our own phone, or someone else posing as it.
+        Err(e) if e.kind() == std::io::ErrorKind::PermissionDenied => {
+            return Err(match Client::connect(&endpoint).await {
+                Err(ControlError::Taken(_)) => ControlError::Taken(endpoint),
+                _ => ControlError::AlreadyRunning(endpoint),
+            });
+        }
+        Err(e) => return Err(e.into()),
+    };
     loop {
         server.connect().await?;
         let connected = server;
-        server = ServerOptions::new()
-            .reject_remote_clients(true)
-            .create(&name)?;
+        server = create(false)?;
         tokio::spawn(connection(phone.clone(), connected));
     }
 }
@@ -251,6 +263,10 @@ impl Client {
             #[cfg(windows)]
             Endpoint::Pipe(name) => {
                 let pipe = open_pipe(name).await.map_err(not_running)?;
+                // Commands and their answers go only to our own phone.
+                if !crate::user_only::served_by_this_user(&pipe)? {
+                    return Err(ControlError::Taken(endpoint.clone()));
+                }
                 let (r, w) = tokio::io::split(pipe);
                 (Box::new(r), Box::new(w))
             }

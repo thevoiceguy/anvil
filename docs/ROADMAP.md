@@ -170,7 +170,7 @@ live in FCP: `docs/SOFTPHONE.md` in `thevoiceguy/fcp`. Anvil's phases:
         app, `tel:`/`sip:`/`sips:`/`callto:` links to the keypad, start at
         login in the tray, the phone signed out when Windows' session ends,
         the installer's links, app id and clean uninstall
-  - [ ] **W2** Secrets and the control pipe: the session sealed with DPAPI
+  - [x] **W2** Secrets and the control pipe: the session sealed with DPAPI
         in the local (not roaming) profile, the pipe for this user only and
         its server checked, the CLI's session folder and browser on Windows
   - [ ] **W3** Updates that land: the setup waits for the app to go, an

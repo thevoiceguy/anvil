@@ -1,6 +1,7 @@
 // The real phone: `anvil-app` through flutter_rust_bridge.
 
 import 'dart:async';
+import 'dart:io';
 
 import 'package:path_provider/path_provider.dart';
 
@@ -12,8 +13,39 @@ class RustPhone implements PhoneApi {
 
   Future<String> _session() async {
     if (_sessionPath != null) return _sessionPath!;
-    final dir = await getApplicationSupportDirectory();
-    return _sessionPath = '${dir.path}/session.json';
+    var dir = (await getApplicationSupportDirectory()).path;
+    if (Platform.isWindows) dir = await localOnWindows(dir);
+    return _sessionPath = '$dir${Platform.pathSeparator}session.json';
+  }
+
+  /// Windows keeps the app's files — the session's tokens, its settings —
+  /// in the local profile (`%LOCALAPPDATA%`), not the roaming one, which
+  /// follows the user to every machine of a domain. What an older version
+  /// kept in the roaming profile is moved.
+  static Future<String> localOnWindows(
+    String roaming, {
+    Map<String, String>? environment,
+  }) async {
+    final env = environment ?? Platform.environment;
+    final from = env['APPDATA'], to = env['LOCALAPPDATA'];
+    if (from == null || to == null || !roaming.startsWith(from)) return roaming;
+    final local = Directory(to + roaming.substring(from.length));
+    final old = Directory(roaming);
+    final sep = Platform.pathSeparator;
+    if (!File('${local.path}${sep}session.json').existsSync() &&
+        File('$roaming${sep}session.json').existsSync()) {
+      try {
+        local.createSync(recursive: true);
+        for (final entry in old.listSync()) {
+          final name = entry.path.substring(old.path.length + 1);
+          entry.renameSync('${local.path}$sep$name');
+        }
+      } on FileSystemException {
+        // Left where it was: the user signs in again.
+      }
+    }
+    local.createSync(recursive: true);
+    return local.path;
   }
 
   @override

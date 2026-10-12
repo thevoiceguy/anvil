@@ -188,6 +188,7 @@ dependencies = [
  "tokio-postgres",
  "tracing",
  "tracing-subscriber",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -232,6 +233,7 @@ dependencies = [
  "anvil-fcp",
  "anyhow",
  "clap",
+ "dirs",
  "tokio",
  "tracing",
  "tracing-subscriber",
@@ -305,6 +307,7 @@ dependencies = [
  "tracing",
  "tracing-subscriber",
  "url",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]

@@ -19,6 +19,8 @@
 mod brand;
 mod client;
 mod discovery;
+#[cfg(windows)]
+mod dpapi;
 mod me;
 mod session;
 mod signin;

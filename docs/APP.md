@@ -285,6 +285,28 @@ Three PRs, the screens thin over the state as §3 has it:
   uninstaller removes what the notifications registered.
 - Linux still starts a second phone on a second start, and has no links.
 
+### Windows: W2, secrets and the control pipe
+- The session (its tokens and the device's SIP password) is sealed with
+  DPAPI for the user (`anvil-fcp`'s `FileTokenStore`), so a copied file
+  opens on no other account or machine; a file an older version kept in
+  the clear is read and sealed. Unix keeps it at mode 0600, as before.
+- The app's files live in the local profile (`%LOCALAPPDATA%\Anvil\Anvil`),
+  not the roaming one that follows the user to every machine of a domain;
+  an older version's are moved. The uninstaller removes them.
+- The control pipe admits its own user only (a protected DACL naming the
+  user's SID), and a client talks to it only when its server runs as the
+  same user (`GetNamedPipeServerProcessId`), so another user of the
+  machine can neither drive the phone nor pose as it; a pipe name another
+  user took is reported as such.
+- `anvil-cli` keeps its session in `%LOCALAPPDATA%\anvil` (it used the
+  folder it ran in), and opens the sign-in page with `explorer`
+  (`cmd /C start` cut the address at its first `&`). A session an older
+  CLI left in some folder is not found: `anvil-cli login` again.
+- A Windows device is named after the computer (`COMPUTERNAME`); it was
+  "Anvil on this computer".
+- CI lints the workspace on Windows too.
+- Not done: the setting to turn the control socket off (§8).
+
 ### U3: desktop distribution
 - Installers for the three desktops built on a tag, the auto-updater, signing
   as soon as the certificates exist.

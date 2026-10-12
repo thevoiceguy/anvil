@@ -15,6 +15,8 @@ pub mod control;
 mod data;
 mod settings;
 mod state;
+#[cfg(windows)]
+mod user_only;
 
 use std::collections::BTreeMap;
 use std::path::PathBuf;

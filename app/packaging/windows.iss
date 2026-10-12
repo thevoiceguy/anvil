@@ -1,7 +1,7 @@
 ; The Windows installer (Inno Setup 6): installs for this user, without
 ; administrator rights, in %LOCALAPPDATA%\Programs\Anvil, with a Start menu
-; entry and an uninstaller that also removes start-at-login and what the
-; notifications registered. Anvil offers to open tel:, sip:, sips: and
+; entry and an uninstaller that also removes start-at-login, what the
+; notifications registered, and the app's files (the signed-in session). Anvil offers to open tel:, sip:, sips: and
 ; callto: links (Windows' default apps), and takes sip:, sips: and callto:
 ; where nothing else does.
 ;
@@ -81,6 +81,14 @@ Root: HKCU; Subkey: "Software\Classes\sips\shell\open\command"; ValueType: strin
 Root: HKCU; Subkey: "Software\Classes\callto"; ValueType: string; ValueData: "URL:callto"; Flags: uninsdeletekey; Check: Unclaimed('callto')
 Root: HKCU; Subkey: "Software\Classes\callto"; ValueType: string; ValueName: "URL Protocol"; ValueData: ""; Check: Unclaimed('callto')
 Root: HKCU; Subkey: "Software\Classes\callto\shell\open\command"; ValueType: string; ValueData: """{app}\anvil.exe"" ""%1"""; Check: Unclaimed('callto')
+
+[UninstallDelete]
+; The app's files: the session (its tokens and the device's SIP password,
+; sealed for the user) and settings, local since W2, roaming before.
+Type: filesandordirs; Name: "{localappdata}\Anvil\Anvil"
+Type: dirifempty; Name: "{localappdata}\Anvil"
+Type: filesandordirs; Name: "{userappdata}\Anvil\Anvil"
+Type: dirifempty; Name: "{userappdata}\Anvil"
 
 [Run]
 Filename: "{app}\anvil.exe"; Description: "{cm:LaunchProgram,Anvil}"; Flags: nowait postinstall skipifsilent
