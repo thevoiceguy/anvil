@@ -217,11 +217,14 @@ jobs:
           $second = Start-Process "$dir\anvil.exe" -ArgumentList 'tel:1002' -PassThru
           if (-not $second.WaitForExit(15000)) { throw "a second start kept running" }
           if ($p.HasExited) { throw "the first anvil.exe exited when a second started" }
+          $data = "$env:LOCALAPPDATA\Anvil\Anvil"
+          if (-not (Test-Path $data)) { throw "the app keeps nothing in the local profile ($data)" }
           Stop-Process -Id $p.Id -Force
           Start-Sleep -Seconds 2
           Start-Process "$dir\unins000.exe" -ArgumentList '/VERYSILENT', '/SUPPRESSMSGBOXES' -Wait
           Start-Sleep -Seconds 2
           if (Test-Path "$dir\anvil.exe") { throw "the uninstaller left anvil.exe" }
+          if (Test-Path $data) { throw "the uninstaller left the app's files ($data)" }
           foreach ($key in 'HKCU:\Software\Classes\Anvil.Url', 'HKCU:\Software\Anvil',
                            'HKCU:\Software\Classes\AppUserModelId\Anvil.Softphone') {
             if (Test-Path $key) { throw "the uninstaller left $key" }

@@ -641,14 +641,24 @@ async fn run_phone(cli: &Cli) -> Result<()> {
     Ok(())
 }
 
-/// Where the FCP session lives.
+/// Where the FCP session lives: `$XDG_CONFIG_HOME/anvil` (else
+/// `~/.config/anvil`), or `%LOCALAPPDATA%\anvil` on Windows — never the
+/// folder the command ran in.
 fn session_path(cli: &Cli) -> std::path::PathBuf {
     cli.session.clone().unwrap_or_else(|| {
-        let base = std::env::var_os("XDG_CONFIG_HOME")
-            .map(std::path::PathBuf::from)
-            .or_else(|| std::env::var_os("HOME").map(|h| std::path::Path::new(&h).join(".config")))
-            .unwrap_or_else(|| std::path::PathBuf::from("."));
-        base.join("anvil").join("session.json")
+        let base = if cfg!(windows) {
+            dirs::data_local_dir()
+        } else {
+            std::env::var_os("XDG_CONFIG_HOME")
+                .map(std::path::PathBuf::from)
+                .or_else(|| {
+                    std::env::var_os("HOME").map(|h| std::path::Path::new(&h).join(".config"))
+                })
+        };
+        base.or_else(dirs::config_dir)
+            .unwrap_or_else(std::env::temp_dir)
+            .join("anvil")
+            .join("session.json")
     })
 }
 
@@ -710,7 +720,9 @@ fn open_browser(url: &str) {
     let opener = if cfg!(target_os = "macos") {
         ("open", vec![url])
     } else if cfg!(target_os = "windows") {
-        ("cmd", vec!["/C", "start", "", url])
+        // Not `cmd /C start`: cmd reads each `&` in the address's query as
+        // the end of a command and opens what comes before it.
+        ("explorer", vec![url])
     } else {
         ("xdg-open", vec![url])
     };

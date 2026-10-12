@@ -14,11 +14,15 @@
 //!
 //! `anvil-core` knows SIP and media, not FCP; this crate is FCP's.
 
-#![forbid(unsafe_code)]
+// Unsafe only where Windows' API needs it, in one module.
+#![deny(unsafe_code)]
 
 mod brand;
 mod client;
 mod discovery;
+#[cfg(windows)]
+#[allow(unsafe_code)]
+mod dpapi;
 mod me;
 mod session;
 mod signin;
