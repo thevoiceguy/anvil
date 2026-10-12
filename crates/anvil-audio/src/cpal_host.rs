@@ -97,7 +97,7 @@ impl AudioHost for CpalHost {
         let host = cpal::default_host();
         let mut out = Vec::new();
         if let Ok(inputs) = host.input_devices() {
-            let default_name = host.default_input_device().and_then(|d| d.name().ok());
+            let default_name = default_name(&host, true);
             for dev in inputs {
                 if let Ok(name) = dev.name() {
                     out.push(DeviceInfo {
@@ -110,7 +110,7 @@ impl AudioHost for CpalHost {
             }
         }
         if let Ok(outputs) = host.output_devices() {
-            let default_name = host.default_output_device().and_then(|d| d.name().ok());
+            let default_name = default_name(&host, false);
             for dev in outputs {
                 if let Ok(name) = dev.name() {
                     out.push(DeviceInfo {
@@ -126,23 +126,91 @@ impl AudioHost for CpalHost {
     }
 }
 
-/// The device named `wanted` among `devices`; `None` when none was asked
-/// for, or the one asked for has gone (unplugged), so the default is used.
-fn named<I>(devices: Result<I, cpal::DevicesError>, wanted: Option<&str>) -> Option<cpal::Device>
+/// The device named `wanted` among `devices`, quietly.
+fn find_named<I>(devices: Result<I, cpal::DevicesError>, wanted: &str) -> Option<cpal::Device>
 where
     I: Iterator<Item = cpal::Device>,
 {
-    let wanted = wanted?;
-    let found = devices
+    devices
         .ok()?
-        .find(|d| d.name().ok().as_deref() == Some(wanted));
-    if found.is_none() {
+        .find(|d| d.name().ok().as_deref() == Some(wanted))
+}
+
+/// The device named `wanted`, for capture (`input`) or playback.
+fn named(host: &cpal::Host, input: bool, wanted: &str) -> Option<cpal::Device> {
+    if input {
+        find_named(host.input_devices(), wanted)
+    } else {
+        find_named(host.output_devices(), wanted)
+    }
+}
+
+/// The default device for a call: on Windows the one for communications
+/// (a headset), else the system's default.
+fn default_device(host: &cpal::Host, input: bool) -> Option<cpal::Device> {
+    #[cfg(windows)]
+    if let Some(device) = crate::comms::default_name(input).and_then(|n| named(host, input, &n)) {
+        return Some(device);
+    }
+    if input {
+        host.default_input_device()
+    } else {
+        host.default_output_device()
+    }
+}
+
+/// The default device's name.
+fn default_name(host: &cpal::Host, input: bool) -> Option<String> {
+    default_device(host, input).and_then(|d| d.name().ok())
+}
+
+/// The device a call's stream opens on: the one chosen, while it is
+/// there; else the default, which the stream then follows (`true`).
+fn pick(host: &cpal::Host, input: bool, wanted: Option<&str>) -> Option<(cpal::Device, bool)> {
+    if let Some(wanted) = wanted {
+        if let Some(device) = named(host, input, wanted) {
+            return Some((device, false));
+        }
         tracing::warn!(
             device = wanted,
             "the chosen audio device is gone; using the default"
         );
     }
-    found
+    default_device(host, input).map(|d| (d, true))
+}
+
+/// Whether a stream on the default, `current`, should move: the default
+/// is another device now, or the device chosen is back.
+fn should_move(host: &cpal::Host, input: bool, wanted: Option<&str>, current: &str) -> bool {
+    if let Some(wanted) = wanted {
+        if named(host, input, wanted).is_some() {
+            tracing::info!(device = wanted, "the chosen audio device is back");
+            return true;
+        }
+    }
+    match default_name(host, input) {
+        Some(default) if default != current => {
+            tracing::info!(from = current, to = %default, "the default audio device changed");
+            true
+        }
+        _ => false,
+    }
+}
+
+/// How often a stream on the default checks whether it should move.
+const FOLLOW_EVERY: std::time::Duration = std::time::Duration::from_secs(2);
+
+/// A stream error callback that marks the stream as failed (a device
+/// unplugged), for its thread to open another.
+fn on_error(
+    what: &'static str,
+    failed: &Arc<std::sync::atomic::AtomicBool>,
+) -> impl FnMut(cpal::StreamError) + Send + 'static {
+    let failed = Arc::clone(failed);
+    move |err| {
+        tracing::warn!(?err, "{what} stream error");
+        failed.store(true, std::sync::atomic::Ordering::Relaxed);
+    }
 }
 
 // ─── Capture ────────────────────────────────────────────────────────────────
@@ -187,25 +255,17 @@ impl AudioSource for CpalCapture {
     }
 }
 
-fn run_capture(cfg: AudioFormat, frame_tx: mpsc::Sender<AudioFrame>, wanted: Option<String>) {
-    let host = cpal::default_host();
-    let device = match named(host.input_devices(), wanted.as_deref())
-        .or_else(|| host.default_input_device())
-    {
-        Some(d) => d,
-        None => {
-            tracing::error!("no default input device");
-            return;
-        }
-    };
-
-    let default_config = match device.default_input_config() {
-        Ok(c) => c,
-        Err(e) => {
-            tracing::error!(%e, "default_input_config failed");
-            return;
-        }
-    };
+/// Open a capture stream on `device` feeding `frame_tx`; `failed` is set
+/// when it stops working.
+fn open_capture(
+    device: &cpal::Device,
+    cfg: AudioFormat,
+    frame_tx: &mpsc::Sender<AudioFrame>,
+    failed: &Arc<std::sync::atomic::AtomicBool>,
+) -> Result<(cpal::Stream, u32, u16), String> {
+    let default_config = device
+        .default_input_config()
+        .map_err(|e| format!("default_input_config: {e}"))?;
 
     let device_rate = default_config.sample_rate().0;
     let channels = default_config.channels();
@@ -218,13 +278,8 @@ fn run_capture(cfg: AudioFormat, frame_tx: mpsc::Sender<AudioFrame>, wanted: Opt
         buffer_size: cpal::BufferSize::Default,
     };
 
-    let mut resampler = match Resampler::new(device_rate, cfg.sample_rate, 1) {
-        Ok(r) => r,
-        Err(e) => {
-            tracing::error!(%e, %device_rate, "resampler init");
-            return;
-        }
-    };
+    let mut resampler = Resampler::new(device_rate, cfg.sample_rate, 1)
+        .map_err(|e| format!("resampler at {device_rate} Hz: {e}"))?;
     let frame_buf: Arc<Mutex<VecDeque<i16>>> = Arc::new(Mutex::new(VecDeque::new()));
 
     // The callback hands samples to a small inline pipeline: downmix to mono,
@@ -254,42 +309,35 @@ fn run_capture(cfg: AudioFormat, frame_tx: mpsc::Sender<AudioFrame>, wanted: Opt
 
     // cpal can deliver samples in several formats depending on the driver.
     let stream = match sample_format {
-        SampleFormat::F32 => {
-            device.build_input_stream(&stream_config, callback_f32, report_input_err, None)
-        }
+        SampleFormat::F32 => device.build_input_stream(
+            &stream_config,
+            callback_f32,
+            on_error("capture", failed),
+            None,
+        ),
         SampleFormat::I16 => {
             let tx = tx.clone();
             let buf = Arc::clone(&buf_for_cb);
             // Reuse the same pipeline: i16 → f32 → same path. Allocating is
             // OK on Linux/desktop; real-time audio constraints on mobile are
             // handled by the host natively, not by cpal.
-            let mut rs = match Resampler::new(device_rate, cfg.sample_rate, 1) {
-                Ok(r) => r,
-                Err(e) => {
-                    tracing::error!(%e, "resampler init (i16 path)");
-                    return;
-                }
-            };
+            let mut rs = Resampler::new(device_rate, cfg.sample_rate, 1)
+                .map_err(|e| format!("resampler: {e}"))?;
             device.build_input_stream(
                 &stream_config,
                 move |data: &[i16], _info: &cpal::InputCallbackInfo| {
                     let mono = downmix_i16(data, channels);
                     push_frames(&mut rs, mono, &buf, frame_samples, fmt_for_frames, &tx);
                 },
-                report_input_err,
+                on_error("capture", failed),
                 None,
             )
         }
         SampleFormat::U16 => {
             let tx = tx.clone();
             let buf = Arc::clone(&buf_for_cb);
-            let mut rs = match Resampler::new(device_rate, cfg.sample_rate, 1) {
-                Ok(r) => r,
-                Err(e) => {
-                    tracing::error!(%e, "resampler init (u16 path)");
-                    return;
-                }
-            };
+            let mut rs = Resampler::new(device_rate, cfg.sample_rate, 1)
+                .map_err(|e| format!("resampler: {e}"))?;
             device.build_input_stream(
                 &stream_config,
                 move |data: &[u16], _info: &cpal::InputCallbackInfo| {
@@ -302,42 +350,70 @@ fn run_capture(cfg: AudioFormat, frame_tx: mpsc::Sender<AudioFrame>, wanted: Opt
                         .collect();
                     push_frames(&mut rs, mono, &buf, frame_samples, fmt_for_frames, &tx);
                 },
-                report_input_err,
+                on_error("capture", failed),
                 None,
             )
         }
-        other => {
-            tracing::error!(?other, "unsupported input sample format");
-            return;
-        }
+        other => return Err(format!("unsupported input sample format {other:?}")),
     };
 
-    let stream = match stream {
-        Ok(s) => s,
-        Err(e) => {
-            tracing::error!(%e, "build_input_stream failed");
-            return;
+    let stream = stream.map_err(|e| format!("build_input_stream: {e}"))?;
+    stream
+        .play()
+        .map_err(|e| format!("input stream play: {e}"))?;
+    Ok((stream, device_rate, channels))
+}
+
+/// Capture for a call until its source is dropped: on the device chosen or
+/// the default, opened again on another when it fails (unplugged) or, on
+/// the default, when the default changes.
+fn run_capture(cfg: AudioFormat, frame_tx: mpsc::Sender<AudioFrame>, wanted: Option<String>) {
+    let host = cpal::default_host();
+    while !frame_tx.is_closed() {
+        let failed = Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let opened = pick(&host, true, wanted.as_deref())
+            .ok_or_else(|| "no input device".to_string())
+            .and_then(|(device, following)| {
+                let name = device.name().unwrap_or_default();
+                open_capture(&device, cfg, &frame_tx, &failed).map(|s| (s, name, following))
+            });
+        let ((stream, device_rate, channels), name, following) = match opened {
+            Ok(opened) => opened,
+            Err(e) => {
+                tracing::error!(%e, "audio capture not opened; trying again");
+                thread::sleep(std::time::Duration::from_secs(1));
+                continue;
+            }
+        };
+        tracing::info!(
+            device = %name,
+            device_rate,
+            channels,
+            target_rate = cfg.sample_rate,
+            "audio capture running"
+        );
+        let mut checked = std::time::Instant::now();
+        // Until the source is dropped, the stream fails, or it should move.
+        loop {
+            if frame_tx.is_closed() {
+                tracing::debug!("audio capture stopping");
+                return;
+            }
+            if failed.load(std::sync::atomic::Ordering::Relaxed) {
+                tracing::warn!(device = %name, "the capture device failed; opening another");
+                break;
+            }
+            if following && checked.elapsed() >= FOLLOW_EVERY {
+                checked = std::time::Instant::now();
+                if should_move(&host, true, wanted.as_deref(), &name) {
+                    break;
+                }
+            }
+            thread::park_timeout(std::time::Duration::from_millis(200));
         }
-    };
-
-    if let Err(e) = stream.play() {
-        tracing::error!(%e, "input stream play failed");
-        return;
+        drop(stream);
+        thread::sleep(std::time::Duration::from_millis(200));
     }
-
-    tracing::info!(
-        device_rate,
-        channels,
-        target_rate = cfg.sample_rate,
-        "audio capture running"
-    );
-
-    // Stream runs until frame_tx is closed (the AudioSource was dropped).
-    while !tx.is_closed() {
-        thread::park_timeout(std::time::Duration::from_millis(200));
-    }
-
-    tracing::debug!("audio capture stopping");
 }
 
 // ─── Playback ───────────────────────────────────────────────────────────────
@@ -374,29 +450,16 @@ impl AudioSink for CpalPlayback {
     }
 }
 
-fn run_playback(
-    cfg: AudioFormat,
-    mut frame_rx: mpsc::Receiver<AudioFrame>,
-    wanted: Option<String>,
-) {
-    let host = cpal::default_host();
-    let device = match named(host.output_devices(), wanted.as_deref())
-        .or_else(|| host.default_output_device())
-    {
-        Some(d) => d,
-        None => {
-            tracing::error!("no default output device");
-            return;
-        }
-    };
-
-    let default_config = match device.default_output_config() {
-        Ok(c) => c,
-        Err(e) => {
-            tracing::error!(%e, "default_output_config failed");
-            return;
-        }
-    };
+/// Open a playback stream on `device`, fed from its own queue; `failed`
+/// is set when it stops working.
+#[allow(clippy::type_complexity)]
+fn open_playback(
+    device: &cpal::Device,
+    failed: &Arc<std::sync::atomic::AtomicBool>,
+) -> Result<(cpal::Stream, Arc<Mutex<VecDeque<i16>>>, u32, u16), String> {
+    let default_config = device
+        .default_output_config()
+        .map_err(|e| format!("default_output_config: {e}"))?;
     let device_rate = default_config.sample_rate().0;
     let channels = default_config.channels();
     let sample_format = default_config.sample_format();
@@ -426,9 +489,12 @@ fn run_playback(
     };
 
     let stream = match sample_format {
-        SampleFormat::F32 => {
-            device.build_output_stream(&stream_config, callback_f32, report_output_err, None)
-        }
+        SampleFormat::F32 => device.build_output_stream(
+            &stream_config,
+            callback_f32,
+            on_error("playback", failed),
+            None,
+        ),
         SampleFormat::I16 => {
             let buf = Arc::clone(&out_buf);
             device.build_output_stream(
@@ -442,7 +508,7 @@ fn run_playback(
                         }
                     }
                 },
-                report_output_err,
+                on_error("playback", failed),
                 None,
             )
         }
@@ -460,62 +526,103 @@ fn run_playback(
                         }
                     }
                 },
-                report_output_err,
+                on_error("playback", failed),
                 None,
             )
         }
-        other => {
-            tracing::error!(?other, "unsupported output sample format");
-            return;
-        }
+        other => return Err(format!("unsupported output sample format {other:?}")),
     };
 
-    let stream = match stream {
-        Ok(s) => s,
-        Err(e) => {
-            tracing::error!(%e, "build_output_stream failed");
-            return;
-        }
-    };
-    if let Err(e) = stream.play() {
-        tracing::error!(%e, "output stream play failed");
-        return;
-    }
+    let stream = stream.map_err(|e| format!("build_output_stream: {e}"))?;
+    stream
+        .play()
+        .map_err(|e| format!("output stream play: {e}"))?;
+    Ok((stream, out_buf, device_rate, channels))
+}
 
-    let mut upsampler = match Resampler::new(cfg.sample_rate, device_rate, 1) {
-        Ok(r) => r,
-        Err(e) => {
-            tracing::error!(%e, "output resampler init");
-            return;
-        }
-    };
+/// Play a call until its sink is dropped: on the device chosen or the
+/// default, opened again on another when it fails (unplugged) or, on the
+/// default, when the default changes.
+fn run_playback(
+    cfg: AudioFormat,
+    mut frame_rx: mpsc::Receiver<AudioFrame>,
+    wanted: Option<String>,
+) {
+    let host = cpal::default_host();
+    loop {
+        let failed = Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let opened = pick(&host, false, wanted.as_deref())
+            .ok_or_else(|| "no output device".to_string())
+            .and_then(|(device, following)| {
+                let name = device.name().unwrap_or_default();
+                open_playback(&device, &failed).map(|s| (s, name, following))
+            })
+            .and_then(|(opened, name, following)| {
+                Resampler::new(cfg.sample_rate, opened.2, 1)
+                    .map(|up| (opened, up, name, following))
+                    .map_err(|e| format!("output resampler: {e}"))
+            });
+        let ((stream, out_buf, device_rate, channels), mut upsampler, name, following) =
+            match opened {
+                Ok(opened) => opened,
+                Err(e) => {
+                    tracing::error!(%e, "audio playback not opened; trying again");
+                    // The call's audio is dropped meanwhile, not queued.
+                    let until = std::time::Instant::now() + std::time::Duration::from_secs(1);
+                    while std::time::Instant::now() < until {
+                        match frame_rx.try_recv() {
+                            Err(mpsc::error::TryRecvError::Disconnected) => return,
+                            _ => thread::sleep(std::time::Duration::from_millis(20)),
+                        }
+                    }
+                    continue;
+                }
+            };
+        tracing::info!(
+            device = %name,
+            device_rate,
+            channels,
+            source_rate = cfg.sample_rate,
+            "audio playback running"
+        );
 
-    tracing::info!(
-        device_rate,
-        channels,
-        source_rate = cfg.sample_rate,
-        "audio playback running"
-    );
-
-    // Drain frames, resample up to device rate, push into out_buf.
-    while let Some(frame) = frame_rx.blocking_recv() {
-        let upsampled = match upsampler.resample(&frame.samples) {
-            Ok(v) => v,
-            Err(e) => {
-                tracing::warn!(%e, "playback resample");
-                continue;
+        // Drain frames, resample up to device rate, push into out_buf,
+        // until the sink is dropped, the stream fails, or it should move.
+        let mut checked = std::time::Instant::now();
+        let moved = loop {
+            let Some(frame) = frame_rx.blocking_recv() else {
+                break false;
+            };
+            match upsampler.resample(&frame.samples) {
+                Ok(upsampled) => {
+                    let mut guard = out_buf.lock();
+                    guard.extend(upsampled);
+                    // Cap at 200ms to keep latency bounded if the producer
+                    // runs ahead.
+                    let cap = (device_rate as usize * 200) / 1000;
+                    while guard.len() > cap {
+                        guard.pop_front();
+                    }
+                }
+                Err(e) => tracing::warn!(%e, "playback resample"),
+            }
+            if failed.load(std::sync::atomic::Ordering::Relaxed) {
+                tracing::warn!(device = %name, "the playback device failed; opening another");
+                break true;
+            }
+            if following && checked.elapsed() >= FOLLOW_EVERY {
+                checked = std::time::Instant::now();
+                if should_move(&host, false, wanted.as_deref(), &name) {
+                    break true;
+                }
             }
         };
-        let mut guard = out_buf.lock();
-        guard.extend(upsampled);
-        // Cap at 200ms to keep latency bounded if the producer runs ahead.
-        let cap = (device_rate as usize * 200) / 1000;
-        while guard.len() > cap {
-            guard.pop_front();
+        drop(stream);
+        if !moved {
+            tracing::debug!("audio playback stopping");
+            return;
         }
     }
-
-    tracing::debug!("audio playback stopping");
 }
 
 // ─── helpers ────────────────────────────────────────────────────────────────
@@ -565,12 +672,4 @@ fn push_frames(
             // A warning would spam the log.
         }
     }
-}
-
-fn report_input_err(err: cpal::StreamError) {
-    tracing::warn!(?err, "capture stream error");
-}
-
-fn report_output_err(err: cpal::StreamError) {
-    tracing::warn!(?err, "playback stream error");
 }

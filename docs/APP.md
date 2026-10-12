@@ -334,6 +334,19 @@ Three PRs, the screens thin over the state as §3 has it:
   up. Desktop only: a phone's app may be suspended while its browser is
   in front, so the loopback would not answer.
 
+### W4b: audio devices
+- On Windows a call uses the default device for communications — the one a
+  headset user sets as "Default Communication Device" — not the default
+  for everything, which is all cpal knows (`anvil-audio/src/comms.rs`,
+  `IMMDeviceEnumerator` with `eCommunications`); the device list marks it
+  as the default.
+- A call's capture and playback survive their device: a stream that fails
+  (a headset unplugged) is opened again on the default, at once rather than
+  never; a stream on the default moves when the default changes (a headset
+  plugged in, a new default chosen), and back to the device the user chose
+  when it returns; checked every two seconds.
+- Not proved by a test: CI's runners have no audio devices to unplug.
+
 ### U3: desktop distribution
 - Installers for the three desktops built on a tag, the auto-updater, signing
   as soon as the certificates exist.

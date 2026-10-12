@@ -178,8 +178,9 @@ live in FCP: `docs/SOFTPHONE.md` in `thevoiceguy/fcp`. Anvil's phases:
   - [x] **W4a** Trust and sign-in: the system's certificates trusted on a
         desktop beside the bundled ones, sign-in through the browser (SSO)
         in the app
-  - [ ] **W4b** Audio: the default communications device, a device lost
-        mid-call, a ringtone of the app's own
+  - [x] **W4b** Audio devices: the default communications device on
+        Windows, a device lost mid-call, the default followed during a call
+  - [ ] **W4c** A ringtone of the app's own
   - [ ] **W5** Echo cancellation and noise suppression
 
 ---
