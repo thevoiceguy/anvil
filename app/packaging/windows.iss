@@ -34,6 +34,10 @@ Compression=lzma2
 SolidCompression=yes
 WizardStyle=modern
 CloseApplications=yes
+; The running app's mutex (windows/runner/instance.cpp): an install by hand
+; asks for Anvil to be closed first. The app updating itself waits for it to
+; go before the setup starts (crates/anvil-update).
+AppMutex=Anvil.Softphone
 
 [Tasks]
 Name: "desktopicon"; Description: "{cm:CreateDesktopIcon}"; Flags: unchecked
