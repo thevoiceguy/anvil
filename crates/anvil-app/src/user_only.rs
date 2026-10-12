@@ -115,9 +115,21 @@ impl UserOnly {
         })
     }
 
-    /// For `ServerOptions::create_with_security_attributes_raw`.
-    pub fn as_ptr(&mut self) -> *mut core::ffi::c_void {
-        (&mut self.attributes as *mut SECURITY_ATTRIBUTES).cast()
+    /// An instance of the pipe `name` that this user alone may open;
+    /// `first` refuses a name someone already serves.
+    pub fn create(
+        &mut self,
+        name: &str,
+        first: bool,
+    ) -> io::Result<tokio::net::windows::named_pipe::NamedPipeServer> {
+        let attributes: *mut SECURITY_ATTRIBUTES = &mut self.attributes;
+        // SAFETY: the attributes and their descriptor outlive the call.
+        unsafe {
+            tokio::net::windows::named_pipe::ServerOptions::new()
+                .first_pipe_instance(first)
+                .reject_remote_clients(true)
+                .create_with_security_attributes_raw(name, attributes.cast())
+        }
     }
 }
 

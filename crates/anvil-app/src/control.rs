@@ -115,18 +115,8 @@ async fn serve_unix(_: Phone, _: PathBuf, endpoint: Endpoint) -> Result<(), Cont
 
 #[cfg(windows)]
 async fn serve_pipe(phone: Phone, name: String, endpoint: Endpoint) -> Result<(), ControlError> {
-    use tokio::net::windows::named_pipe::{NamedPipeServer, ServerOptions};
     let mut access = crate::user_only::UserOnly::new()?;
-    let mut create = |first: bool| -> std::io::Result<NamedPipeServer> {
-        // SAFETY: the attributes live as long as `access`, past the call.
-        unsafe {
-            ServerOptions::new()
-                .first_pipe_instance(first)
-                .reject_remote_clients(true)
-                .create_with_security_attributes_raw(&name, access.as_ptr())
-        }
-    };
-    let mut server = match create(true) {
+    let mut server = match access.create(&name, true) {
         Ok(server) => server,
         // The name is taken: our own phone, or someone else posing as it.
         Err(e) if e.kind() == std::io::ErrorKind::PermissionDenied => {
@@ -140,7 +130,7 @@ async fn serve_pipe(phone: Phone, name: String, endpoint: Endpoint) -> Result<()
     loop {
         server.connect().await?;
         let connected = server;
-        server = create(false)?;
+        server = access.create(&name, false)?;
         tokio::spawn(connection(phone.clone(), connected));
     }
 }

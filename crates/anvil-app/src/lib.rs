@@ -7,7 +7,8 @@
 //! [`control`] serves it on a local socket: `anvil run` serves it, and
 //! `anvil call …` drives whatever does.
 
-#![forbid(unsafe_code)]
+// Unsafe only where Windows' API needs it, in one module.
+#![deny(unsafe_code)]
 
 mod clip;
 mod command;
@@ -16,6 +17,7 @@ mod data;
 mod settings;
 mod state;
 #[cfg(windows)]
+#[allow(unsafe_code)]
 mod user_only;
 
 use std::collections::BTreeMap;
