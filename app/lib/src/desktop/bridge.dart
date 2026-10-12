@@ -1,6 +1,8 @@
 // The phone and the desktop kept in step: the tray shows how the phone is,
 // a call ringing in gets a notification (gone once it stops ringing), and
-// what the user does at the tray or a notification reaches the phone.
+// what the user does at the tray or a notification reaches the phone. A link
+// the app was opened with (tel:, sip:) goes to the keypad, and the phone
+// signs out when the user's session ends.
 
 import 'dart:async';
 
@@ -42,6 +44,10 @@ class _DesktopBridgeState extends State<DesktopBridge> {
     super.initState();
     model.addListener(_sync);
     _events = shell.events.listen(_act);
+    for (final event in shell.takeStartEvents()) {
+      unawaited(_act(event));
+    }
+    shell.whenSessionEnds(model.stop);
   }
 
   @override
@@ -53,6 +59,7 @@ class _DesktopBridgeState extends State<DesktopBridge> {
   @override
   void dispose() {
     model.removeListener(_sync);
+    shell.whenSessionEnds(null);
     unawaited(_events?.cancel());
     super.dispose();
   }
@@ -143,6 +150,11 @@ class _DesktopBridgeState extends State<DesktopBridge> {
       case ShellAction.quit:
         await model.stop();
         await shell.quit();
+      // Put on the keypad, never called by itself: a web page can open a
+      // link without the user meaning to call.
+      case ShellAction.dial:
+        await shell.showWindow();
+        model.dialRequest.value = event.target;
     }
   }
 

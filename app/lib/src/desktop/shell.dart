@@ -58,15 +58,32 @@ class IncomingNotice {
   final String decline;
 }
 
-/// What the user did at the tray or a notification.
-enum ShellAction { show, answer, decline, toggleDnd, quit }
+/// What the user did at the tray or a notification, or a start of the app
+/// asked for (`dial`: a tel: or sip: link).
+enum ShellAction { show, answer, decline, toggleDnd, quit, dial }
 
 class ShellEvent {
-  const ShellEvent(this.action, {this.call});
+  const ShellEvent(this.action, {this.call, this.target});
   final ShellAction action;
 
   /// The call an answer or decline is for.
   final int? call;
+
+  /// What a link asks to call, for the keypad.
+  final String? target;
+
+  @override
+  bool operator ==(Object other) =>
+      other is ShellEvent &&
+      other.action == action &&
+      other.call == call &&
+      other.target == target;
+
+  @override
+  int get hashCode => Object.hash(action, call, target);
+
+  @override
+  String toString() => 'ShellEvent($action, call: $call, target: $target)';
 }
 
 abstract class DesktopShell {
@@ -75,6 +92,14 @@ abstract class DesktopShell {
   Future<void> init({required String appName});
 
   Stream<ShellEvent> get events;
+
+  /// What the app's own start asked for (a link it was opened with), once:
+  /// [events] has no listener that early.
+  List<ShellEvent> takeStartEvents();
+
+  /// `stop` signs the phone out when the user's session ends (Windows'
+  /// sign-out or shutdown), before the system ends the app.
+  void whenSessionEnds(Future<void> Function()? stop);
 
   Future<void> setTray(TrayState state, String tooltip, TrayMenu menu);
 

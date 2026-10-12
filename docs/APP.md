@@ -143,7 +143,7 @@ share sheet.
 
 | | Package | Signing | Needs |
 |---|---|---|---|
-| Windows | MSIX or an installer (`.msi`) | a code-signing certificate | a certificate (EV or OV) |
+| Windows | an installer for the user (Inno Setup, `app/packaging/windows.iss`) | a code-signing certificate | a certificate (EV or OV) |
 | macOS | `.dmg`, notarized | Developer ID + notarization | an Apple Developer account |
 | Linux | AppImage and Flatpak; `.deb` | none required | nothing |
 | iOS | TestFlight, App Store | Apple | an Apple Developer account |
@@ -261,6 +261,29 @@ Three PRs, the screens thin over the state as §3 has it:
     no microphone usage text; both are added.
   - The global answer/hang-up shortcut and the compact in-call window
     (§4) are not in U2.
+
+### Windows: W1, one app
+- One Anvil per user session (`app/windows/runner/instance.cpp`): a second
+  start — the Start menu while the app is in the tray, a link, start at
+  login after a manual start — hands its arguments to the running app over
+  `WM_COPYDATA` and leaves, so one device's credentials never register
+  twice. The running app shows its window, or puts the link's number on
+  the keypad (`lib/src/desktop/links.dart`).
+- Links to call: the installer registers `Anvil.Url` for `tel:`, `sip:`,
+  `sips:` and `callto:` and offers Anvil for each in Windows' default
+  apps; `sip:`, `sips:` and `callto:` are Anvil's outright where nothing
+  else opens them. A link's number goes on the keypad, over a call up if
+  there is one, and is never called by itself: a web page can open a link
+  without the user meaning to call.
+- Start at login starts the app in the tray (`--hidden`; the runner leaves
+  the window unshown, and shows it anyway if there is no tray). An entry an
+  older version wrote is rewritten.
+- Signing out of Windows or shutting down signs the phone out first: the
+  runner answers `WM_ENDSESSION` by asking the app to stop the phone (it
+  unregisters) and waits up to four seconds.
+- The installer gives the shortcuts the notifications' app id and the
+  uninstaller removes what the notifications registered.
+- Linux still starts a second phone on a second start, and has no links.
 
 ### U3: desktop distribution
 - Installers for the three desktops built on a tag, the auto-updater, signing

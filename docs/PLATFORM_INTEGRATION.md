@@ -29,7 +29,11 @@ everything below lives in the platform-native wrapper that consumes `anvil-ffi`.
 - **Audio:** WASAPI via `cpal`. `Windows.Media.Devices` for enumeration if we want
   system-level default-device change events.
 - **Build:** `x86_64-pc-windows-msvc` target. MSVC toolchain (not MinGW).
-- **Packaging:** MSIX preferred; plain `.msi` via WiX as fallback.
+- **Packaging:** an Inno Setup installer for the user, without administrator
+  rights (`app/packaging/windows.iss`; MSIX would need a certificate first).
+- **One app per session, links:** a named mutex and `WM_COPYDATA`
+  (`app/windows/runner/instance.cpp`); `tel:`, `sip:`, `sips:`, `callto:`
+  through `Anvil.Url` and the default apps (`docs/APP.md`, W1).
 - **Gotcha:** Windows firewall prompts on first bind to 0.0.0.0 — consider
   binding to a specific local address if the user has picked one.
 

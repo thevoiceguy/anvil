@@ -11,7 +11,10 @@ import 'package:flutter_test/flutter_test.dart';
 import 'fake_phone.dart';
 import 'fake_shell.dart';
 
-Future<(FakePhone, FakeShell)> running(WidgetTester tester) async {
+Future<(FakePhone, FakeShell)> running(
+  WidgetTester tester, {
+  List<ShellEvent> start = const [],
+}) async {
   tester.view.physicalSize = const Size(1000, 1400);
   tester.view.devicePixelRatio = 1;
   addTearDown(tester.view.reset);
@@ -23,7 +26,7 @@ Future<(FakePhone, FakeShell)> running(WidgetTester tester) async {
         Person(key: 'ann', name: 'Ann Lee', extension: '1002', dial: '1002'),
       ],
     );
-  final shell = FakeShell();
+  final shell = FakeShell()..start = [...start];
   await tester.pumpWidget(AnvilApp(phone: phone, shell: shell));
   await tester.pumpAndSettle();
   return (phone, shell);
@@ -133,5 +136,59 @@ void main() {
           .value,
       isTrue,
     );
+  });
+
+  testWidgets('a link the app was opened with is put on the keypad', (
+    tester,
+  ) async {
+    final (phone, shell) = await running(
+      tester,
+      start: const [ShellEvent(ShellAction.dial, target: '+15125550100')],
+    );
+    expect(shell.log, contains('show'));
+    final keypad = tester.widget<TextField>(find.byKey(const Key('target')));
+    expect(keypad.controller!.text, '+15125550100');
+    expect(
+      phone.log.where((l) => l.startsWith('call ')),
+      isEmpty,
+      reason: 'a link is never called by itself',
+    );
+    await tester.tap(find.byKey(const Key('call')));
+    await tester.pumpAndSettle();
+    expect(phone.log, contains('call +15125550100'));
+  });
+
+  testWidgets('a link handed on during a call opens the keypad over it', (
+    tester,
+  ) async {
+    final (phone, shell) = await running(tester);
+    phone.ring('1002');
+    await tester.pumpAndSettle();
+    await phone.answer(1);
+    await tester.pumpAndSettle();
+    expect(find.byKey(const Key('target')), findsNothing);
+
+    shell.started(
+      const ShellEvent(ShellAction.dial, target: 'sip:bob@example.com'),
+    );
+    await tester.pumpAndSettle();
+    final keypad = tester.widget<TextField>(find.byKey(const Key('target')));
+    expect(keypad.controller!.text, 'sip:bob@example.com');
+    expect(find.byKey(const Key('backToCall')), findsOneWidget);
+  });
+
+  testWidgets('a second start shows the window', (tester) async {
+    final (_, shell) = await running(tester);
+    shell.log.clear();
+    shell.started(const ShellEvent(ShellAction.show));
+    await tester.pumpAndSettle();
+    expect(shell.log, ['show']);
+  });
+
+  testWidgets('the phone signs out when the session ends', (tester) async {
+    final (phone, shell) = await running(tester);
+    expect(shell.sessionEnds, isNotNull);
+    await shell.sessionEnds!();
+    expect(phone.log.last, 'stop phone');
   });
 }

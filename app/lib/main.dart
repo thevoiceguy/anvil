@@ -7,10 +7,10 @@ import 'src/phone/rust_phone.dart';
 import 'src/rust/frb_generated.dart';
 import 'src/update/rust_updates.dart';
 
-Future<void> main() async {
+Future<void> main(List<String> args) async {
   WidgetsFlutterBinding.ensureInitialized();
   await RustLib.init();
-  final shell = NativeShell.supported ? NativeShell() : null;
+  final shell = NativeShell.supported ? NativeShell(args: args) : null;
   await shell?.init(appName: 'Anvil');
   runApp(
     AnvilApp(

@@ -37,6 +37,10 @@ class PhoneModel extends ChangeNotifier {
   /// while the user consults on a second call.
   int? consulting;
 
+  /// A number for the keypad from outside the app (a tel: or sip: link);
+  /// the home screen takes it.
+  final dialRequest = ValueNotifier<String?>(null);
+
   StreamSubscription<PhoneEvent>? _events;
 
   /// A saved session starts the phone at once.
@@ -178,6 +182,7 @@ class PhoneModel extends ChangeNotifier {
   void dispose() {
     _disposed = true;
     _stopEvents();
+    dialRequest.dispose();
     super.dispose();
   }
 }

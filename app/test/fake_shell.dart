@@ -13,6 +13,12 @@ class FakeShell implements DesktopShell {
   final Map<int, IncomingNotice> notices = {};
   bool login = false;
 
+  /// What the app's start asked for, as the app takes it.
+  List<ShellEvent> start = [];
+
+  /// What signs the phone out when the session ends.
+  Future<void> Function()? sessionEnds;
+
   void click(ShellAction action, {int? call}) =>
       _events.add(ShellEvent(action, call: call));
 
@@ -21,6 +27,19 @@ class FakeShell implements DesktopShell {
 
   @override
   Stream<ShellEvent> get events => _events.stream;
+
+  /// A second start handed on, or a link opened.
+  void started(ShellEvent event) => _events.add(event);
+
+  @override
+  List<ShellEvent> takeStartEvents() {
+    final taken = start;
+    start = [];
+    return taken;
+  }
+
+  @override
+  void whenSessionEnds(Future<void> Function()? stop) => sessionEnds = stop;
 
   @override
   Future<void> setTray(TrayState state, String tooltip, TrayMenu menu) async {
