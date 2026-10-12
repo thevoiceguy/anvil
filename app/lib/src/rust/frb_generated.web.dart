@@ -102,6 +102,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   List<Recent> dco_decode_list_recent(dynamic raw);
 
   @protected
+  List<Ringtone> dco_decode_list_ringtone(dynamic raw);
+
+  @protected
   List<Voicemail> dco_decode_list_voicemail(dynamic raw);
 
   @protected
@@ -148,6 +151,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   Registration dco_decode_registration(dynamic raw);
+
+  @protected
+  Ringtone dco_decode_ringtone(dynamic raw);
 
   @protected
   SystemAudio dco_decode_system_audio(dynamic raw);
@@ -252,6 +258,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   List<Recent> sse_decode_list_recent(SseDeserializer deserializer);
 
   @protected
+  List<Ringtone> sse_decode_list_ringtone(SseDeserializer deserializer);
+
+  @protected
   List<Voicemail> sse_decode_list_voicemail(SseDeserializer deserializer);
 
   @protected
@@ -302,6 +311,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   Registration sse_decode_registration(SseDeserializer deserializer);
+
+  @protected
+  Ringtone sse_decode_ringtone(SseDeserializer deserializer);
 
   @protected
   SystemAudio sse_decode_system_audio(SseDeserializer deserializer);
@@ -424,6 +436,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   void sse_encode_list_recent(List<Recent> self, SseSerializer serializer);
 
   @protected
+  void sse_encode_list_ringtone(List<Ringtone> self, SseSerializer serializer);
+
+  @protected
   void sse_encode_list_voicemail(
     List<Voicemail> self,
     SseSerializer serializer,
@@ -488,6 +503,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   void sse_encode_registration(Registration self, SseSerializer serializer);
+
+  @protected
+  void sse_encode_ringtone(Ringtone self, SseSerializer serializer);
 
   @protected
   void sse_encode_system_audio(SystemAudio self, SseSerializer serializer);

@@ -347,6 +347,31 @@ Three PRs, the screens thin over the state as §3 has it:
   when it returns; checked every two seconds.
 - Not proved by a test: CI's runners have no audio devices to unplug.
 
+### W4c: a ringtone of the app's own
+- A call ringing in rings on the desktop, from the Rust core
+  (`anvil-app/src/ring.rs`), not from the notification's sound: on the
+  system's default device for sounds — on Windows the speakers, not the
+  headset calls use — or the one chosen under Settings → Ring on
+  (`audio ring <device>` from the CLI). A phone does not: its system call
+  screen rings (`PhoneConfig::ring`).
+- The ringtones are Anvil's two (a chime, `anvil`, and an electronic
+  phone's warble, `classic`) and the brand's (`docs/BRANDING.md`): WAV,
+  Ogg Vorbis or MP3 as FCP takes them, decoded once when the brand
+  arrives, the first 30 seconds kept; one that cannot be decoded is
+  logged and left out. Unchosen, the brand's default rings, else Anvil's.
+  Choosing one plays it once (not while a call is up); the choice and the
+  ring device are kept on this device.
+- A second call ringing in while one is up (or being dialled) does not
+  ring over it: two short beeps at 440 Hz every ten seconds in the call's
+  own speaker, as a desk phone's call waiting tone.
+- Ringing stops at once on answer, and when the call is declined,
+  cancelled or answered elsewhere. Decisions run one at a time, so one
+  made on an older state cannot start a ring after a newer one stopped it.
+- Proved by `anvil-app/tests/phone.rs` (a call rings on the ringing
+  speaker until answered, a second is a tone in the call until it goes,
+  the ringtone and device kept) and the decoders' tests on real Ogg and
+  MP3 files.
+
 ### U3: desktop distribution
 - Installers for the three desktops built on a tag, the auto-updater, signing
   as soon as the certificates exist.

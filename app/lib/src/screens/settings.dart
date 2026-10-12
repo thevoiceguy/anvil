@@ -113,6 +113,16 @@ class SettingsPage extends StatelessWidget {
             padding: const EdgeInsets.symmetric(horizontal: 16),
             child: Text(s.audioNote, style: theme.textTheme.bodySmall),
           ),
+          _DevicePicker(
+            key: const Key('ringDevice'),
+            label: s.ringOn,
+            icon: Icons.notifications_active,
+            devices: snap.outputs,
+            chosen: snap.ringDevice,
+            onChosen: (id) => model.run(() => model.api.chooseRingDevice(id)),
+          ),
+          if (snap.ringtones.isNotEmpty)
+            _RingtonePicker(snap: snap, model: model),
         ],
         if (DesktopScope.maybeOf(context) case final shell?
             when shell.canStartAtLogin) ...[
@@ -187,6 +197,43 @@ class _DevicePicker extends StatelessWidget {
         onSelected: (id) {
           if (id == null) return;
           onChosen(id == _system ? null : id);
+        },
+      ),
+    );
+  }
+}
+
+/// The ringtone: Anvil's own, or the brand's; choosing one plays it.
+class _RingtonePicker extends StatelessWidget {
+  const _RingtonePicker({required this.snap, required this.model});
+
+  final PhoneSnapshot snap;
+  final PhoneModel model;
+
+  @override
+  Widget build(BuildContext context) {
+    final s = Strings.of(context);
+    String name(Ringtone r) => switch (r.id) {
+      'anvil' => s.ringtoneAnvil,
+      'classic' => s.ringtoneClassic,
+      _ => r.name,
+    };
+    final known = snap.ringtones.any((r) => r.id == snap.ringtone);
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+      child: DropdownMenu<String>(
+        key: const Key('ringtone'),
+        expandedInsets: EdgeInsets.zero,
+        leadingIcon: const Icon(Icons.music_note),
+        label: Text(s.ringtone),
+        initialSelection: known ? snap.ringtone : null,
+        dropdownMenuEntries: [
+          for (final r in snap.ringtones)
+            DropdownMenuEntry(value: r.id, label: name(r)),
+        ],
+        onSelected: (id) {
+          if (id == null) return;
+          model.run(() => model.api.chooseRingtone(id));
         },
       ),
     );

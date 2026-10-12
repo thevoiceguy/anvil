@@ -340,6 +340,21 @@ class FakePhone implements PhoneApi {
   }
 
   @override
+  Future<void> chooseRingDevice(String? device) async {
+    log.add('ring on ${device ?? 'default'}');
+    set(
+      state.copyWith(ringDevice: device, clearRingDevice: device == null),
+      'audio',
+    );
+  }
+
+  @override
+  Future<void> chooseRingtone(String? id) async {
+    log.add('ringtone ${id ?? 'default'}');
+    set(state.copyWith(ringtone: id ?? 'anvil'), 'audio');
+  }
+
+  @override
   Future<void> refresh() async => log.add('refresh');
 }
 

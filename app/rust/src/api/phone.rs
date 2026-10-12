@@ -195,6 +195,8 @@ pub async fn start_phone(session_path: String) -> anyhow::Result<()> {
             fcp: Some(client),
             register: true,
             settings_path: Some(settings_path),
+            // A phone's system rings for it (CallKit, ConnectionService).
+            ring: !cfg!(any(target_os = "android", target_os = "ios")),
         })
         .await?;
         // The control socket is the desktop's (`anvil call 1002` from a
@@ -420,8 +422,19 @@ pub struct PhoneState {
     /// The devices chosen; `None` is the system's default.
     pub input: Option<String>,
     pub output: Option<String>,
+    /// The speaker chosen to ring on; `None` is the system's default.
+    pub ring_device: Option<String>,
+    /// Anvil's ringtones, then the brand's; the one that rings, by id.
+    pub ringtones: Vec<Ringtone>,
+    pub ringtone: String,
     /// The voicemail message playing.
     pub playing: Option<String>,
+}
+
+/// A ringtone to choose: `anvil`, `classic`, or `brand:` and its name.
+pub struct Ringtone {
+    pub id: String,
+    pub name: String,
 }
 
 fn direction(d: anvil_app::Direction) -> Direction {
@@ -550,6 +563,17 @@ pub fn phone_state() -> anyhow::Result<PhoneState> {
         outputs: devices(s.audio.outputs),
         input: s.audio.input,
         output: s.audio.output,
+        ring_device: s.audio.ring,
+        ringtones: s
+            .audio
+            .ringtones
+            .into_iter()
+            .map(|r| Ringtone {
+                id: r.id,
+                name: r.name,
+            })
+            .collect(),
+        ringtone: s.audio.ringtone,
         playing: s.playing,
     })
 }
@@ -783,6 +807,22 @@ pub async fn choose_audio(input: bool, device: Option<String>) -> anyhow::Result
         anvil_app::AudioKind::Output
     };
     execute(Command::Audio { kind, device }).await.map(|_| ())
+}
+
+/// Ring on this speaker by id, `None` for the system's default.
+pub async fn choose_ring_device(device: Option<String>) -> anyhow::Result<()> {
+    execute(Command::Audio {
+        kind: anvil_app::AudioKind::Ring,
+        device,
+    })
+    .await
+    .map(|_| ())
+}
+
+/// Ring with this ringtone by id, `None` for the brand's (else Anvil's);
+/// heard once now when no call is up.
+pub async fn choose_ringtone(id: Option<String>) -> anyhow::Result<()> {
+    execute(Command::Ringtone { id }).await.map(|_| ())
 }
 
 /// Read the user's data from FCP again.

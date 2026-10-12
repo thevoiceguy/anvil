@@ -358,6 +358,18 @@ class StringsEn extends Strings {
   String get audioNote => 'Applies from the next call';
 
   @override
+  String get ringOn => 'Ring on';
+
+  @override
+  String get ringtone => 'Ringtone';
+
+  @override
+  String get ringtoneAnvil => 'Anvil';
+
+  @override
+  String get ringtoneClassic => 'Classic';
+
+  @override
   String get settingsAccount => 'Account';
 
   @override

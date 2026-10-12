@@ -28,7 +28,9 @@ everything below lives in the platform-native wrapper that consumes `anvil-ffi`.
 
 - **Audio:** WASAPI via `cpal`; the default communications device through
   `IMMDeviceEnumerator` (`anvil-audio/src/comms.rs`); a default that changes
-  is noticed by checking every two seconds, not by events.
+  is noticed by checking every two seconds, not by events. Ringing uses the
+  default device for everything else (the speakers), not the one for
+  communications.
 - **Build:** `x86_64-pc-windows-msvc` target. MSVC toolchain (not MinGW).
 - **Packaging:** an Inno Setup installer for the user, without administrator
   rights (`app/packaging/windows.iss`; MSIX would need a certificate first).

@@ -240,7 +240,8 @@ pub struct Voicemail {
     pub received_at: String,
 }
 
-/// The microphones and speakers, and which are in use.
+/// The microphones and speakers, and which are in use; the ringtones, and
+/// which rings.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct AudioDevices {
     pub inputs: Vec<AudioDevice>,
@@ -248,6 +249,23 @@ pub struct AudioDevices {
     /// The chosen microphone's id; `None` is the system's default.
     pub input: Option<String>,
     pub output: Option<String>,
+    /// The speaker chosen to ring on; `None` is the system's default.
+    #[serde(default)]
+    pub ring: Option<String>,
+    /// Anvil's own ringtones, then the brand's.
+    #[serde(default)]
+    pub ringtones: Vec<Ringtone>,
+    /// The ringtone that rings, by id.
+    #[serde(default)]
+    pub ringtone: String,
+}
+
+/// A ringtone to choose: `anvil`, `classic`, or `brand:` and the brand's
+/// name for it.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Ringtone {
+    pub id: String,
+    pub name: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

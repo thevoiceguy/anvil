@@ -227,6 +227,16 @@ class AudioDevice {
   final bool isDefault;
 }
 
+/// A ringtone to choose: Anvil's own (`anvil`, `classic`) or the brand's
+/// (`brand:` and its name).
+class Ringtone {
+  const Ringtone({required this.id, required this.name});
+  final String id;
+  final String name;
+
+  bool get isBrand => id.startsWith('brand:');
+}
+
 /// The user's calling settings, as FCP has them.
 class CallingSettings {
   const CallingSettings({
@@ -304,6 +314,9 @@ class PhoneSnapshot {
     this.outputs = const [],
     this.input,
     this.output,
+    this.ringDevice,
+    this.ringtones = const [],
+    this.ringtone = '',
     this.playing,
   });
 
@@ -333,6 +346,13 @@ class PhoneSnapshot {
   /// The devices chosen; null is the system's default.
   final String? input;
   final String? output;
+
+  /// The speaker chosen to ring on; null is the system's default.
+  final String? ringDevice;
+
+  /// Anvil's ringtones, then the brand's; the one that rings, by id.
+  final List<Ringtone> ringtones;
+  final String ringtone;
 
   /// The voicemail message playing, by id.
   final String? playing;
@@ -376,6 +396,10 @@ class PhoneSnapshot {
     String? output,
     bool clearInput = false,
     bool clearOutput = false,
+    String? ringDevice,
+    bool clearRingDevice = false,
+    List<Ringtone>? ringtones,
+    String? ringtone,
     String? playing,
     bool clearPlaying = false,
   }) => PhoneSnapshot(
@@ -395,6 +419,9 @@ class PhoneSnapshot {
     outputs: outputs ?? this.outputs,
     input: clearInput ? null : input ?? this.input,
     output: clearOutput ? null : output ?? this.output,
+    ringDevice: clearRingDevice ? null : ringDevice ?? this.ringDevice,
+    ringtones: ringtones ?? this.ringtones,
+    ringtone: ringtone ?? this.ringtone,
     playing: clearPlaying ? null : playing ?? this.playing,
   );
 
@@ -476,5 +503,12 @@ abstract class PhoneApi {
   /// Use this microphone (`input`) or speaker by id, null for the system's
   /// default.
   Future<void> chooseAudio({required bool input, String? device});
+
+  /// Ring on this speaker by id, null for the system's default.
+  Future<void> chooseRingDevice(String? device);
+
+  /// Ring with this ringtone by id, null for the brand's (else Anvil's);
+  /// heard once now when no call is up.
+  Future<void> chooseRingtone(String? id);
   Future<void> refresh();
 }

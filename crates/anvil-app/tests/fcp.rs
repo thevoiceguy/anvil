@@ -122,6 +122,7 @@ async fn phone_with(fcp: Arc<FcpClient>, ip: &str, settings_path: Option<PathBuf
         fcp: Some(fcp),
         register: true,
         settings_path,
+        ring: false,
     })
     .await
     .expect("the phone starts and registers")

@@ -14,6 +14,7 @@ mod clip;
 mod command;
 pub mod control;
 mod data;
+mod ring;
 mod settings;
 mod state;
 #[cfg(windows)]
@@ -34,7 +35,7 @@ pub use clip::{decode_wav, Clip};
 pub use command::{AudioKind, Command, Response};
 pub use state::{
     AudioDevice, AudioDevices, Brand, CallState, CallView, Change, Direction, MessageWaiting,
-    Person, Push, Quality, Recent, Registration, State, Voicemail,
+    Person, Push, Quality, Recent, Registration, Ringtone, State, Voicemail,
 };
 
 use settings::LocalSettings;
@@ -60,6 +61,9 @@ pub struct PhoneConfig {
     /// Where this device's own settings are kept (favourites, the audio
     /// devices chosen); `None` keeps them only while the phone runs.
     pub settings_path: Option<PathBuf>,
+    /// Ring here for a call ringing in (a desktop); a phone whose system
+    /// rings for it (CallKit, ConnectionService) does not.
+    pub ring: bool,
 }
 
 /// The phone: cheap to clone, every clone the same phone.
@@ -85,6 +89,16 @@ struct Inner {
     features: Mutex<BTreeMap<String, String>>,
     /// The voicemail message playing: stopped by aborting it.
     playback: Mutex<Option<tokio::task::AbortHandle>>,
+    /// Whether this phone rings (`PhoneConfig::ring`).
+    ring: bool,
+    /// What is sounding: stopped by aborting it.
+    ringer: Mutex<Option<(ring::Sound, tokio::task::AbortHandle)>>,
+    /// Held while deciding what sounds, so a decision made on an older
+    /// state cannot start after a newer one.
+    sounding: tokio::sync::Mutex<()>,
+    /// The brand's ringtones that could be played: name, whether the
+    /// brand's default, the sound.
+    brand_ringtones: Mutex<Vec<(String, bool, ring::Tone)>>,
 }
 
 impl Phone {
@@ -101,6 +115,11 @@ impl Phone {
             .map(LocalSettings::load)
             .unwrap_or_default();
         let (anvil, events) = Anvil::start(cfg.anvil).await?;
+        if local.ring_output.is_some() {
+            if let Err(e) = anvil.choose_ring_device(local.ring_output.as_deref()) {
+                tracing::warn!(%e, "the speaker chosen to ring on is not here; using the default");
+            }
+        }
         if local.audio_input.is_some() || local.audio_output.is_some() {
             if let Err(e) = anvil
                 .choose_audio_devices(local.audio_input.as_deref(), local.audio_output.as_deref())
@@ -122,6 +141,10 @@ impl Phone {
             local: Mutex::new(local),
             features: Mutex::new(BTreeMap::new()),
             playback: Mutex::new(None),
+            ring: cfg.ring,
+            ringer: Mutex::new(None),
+            sounding: tokio::sync::Mutex::new(()),
+            brand_ringtones: Mutex::new(Vec::new()),
         });
         let follower = tokio::spawn(follow(Arc::downgrade(&inner), events));
         *inner.events.lock() = Some(follower);
@@ -192,8 +215,12 @@ impl Phone {
                 let id = self.pick(call, "no call to answer", |c| {
                     c.direction == Direction::Incoming && c.state == CallState::Ringing
                 })?;
+                // Quiet at once, not when the call is set up.
+                self.inner.stop_sound();
                 self.hold_the_others(Some(id)).await?;
-                self.anvil().await?.answer(CallId(id)).await.map(|_| ())?;
+                let answered = self.anvil().await?.answer(CallId(id)).await.map(|_| ());
+                self.inner.sound().await;
+                answered?;
                 Ok(Response::ok())
             }
             Command::Decline { call } => {
@@ -368,11 +395,36 @@ impl Phone {
                 self.inner.update_person_by_key(&key, |p| p.favourite = on);
                 Ok(Response::ok())
             }
+            Command::Audio {
+                kind: AudioKind::Ring,
+                device,
+            } => {
+                self.anvil().await?.choose_ring_device(device.as_deref())?;
+                self.inner.local.lock().ring_output = device;
+                self.inner.save_settings();
+                // Ringing now: on the new speaker.
+                self.inner.stop_sound();
+                self.inner.sound().await;
+                self.read_audio_devices().await;
+                Ok(Response::ok())
+            }
+            Command::Ringtone { id } => {
+                if let Some(id) = &id {
+                    if self.inner.tone(id).is_none() {
+                        return Err(PhoneError::Refused(format!("no ringtone {id:?}")));
+                    }
+                }
+                self.inner.local.lock().ringtone = id;
+                self.inner.save_settings();
+                self.read_audio_devices().await;
+                self.inner.preview().await;
+                Ok(Response::ok())
+            }
             Command::Audio { kind, device } => {
                 let (mut input, mut output) = self.anvil().await?.chosen_audio_devices();
                 match kind {
                     AudioKind::Input => input = device,
-                    AudioKind::Output => output = device,
+                    AudioKind::Output | AudioKind::Ring => output = device,
                 }
                 self.anvil()
                     .await?
@@ -430,6 +482,7 @@ impl Phone {
     /// Stop the phone: its calls end, it unregisters.
     pub async fn shutdown(&self) {
         self.stop_playing();
+        self.inner.stop_sound();
         if let Some(task) = self.inner.events.lock().take() {
             task.abort();
         }
@@ -550,6 +603,9 @@ impl Phone {
         let mut audio = AudioDevices {
             input,
             output,
+            ring: anvil.chosen_ring_device(),
+            ringtones: self.inner.ringtones(),
+            ringtone: self.inner.ringtone(),
             ..Default::default()
         };
         for d in anvil.audio_devices() {
@@ -578,6 +634,134 @@ impl Phone {
 }
 
 impl Inner {
+    /// The ringtones to choose from: Anvil's, then the brand's.
+    fn ringtones(&self) -> Vec<Ringtone> {
+        let own = ring::BUILT_IN.iter().map(|(id, name)| Ringtone {
+            id: id.to_string(),
+            name: name.to_string(),
+        });
+        let brand: Vec<Ringtone> = self
+            .brand_ringtones
+            .lock()
+            .iter()
+            .map(|(name, _, _)| Ringtone {
+                id: ring::brand_id(name),
+                name: name.clone(),
+            })
+            .collect();
+        own.chain(brand).collect()
+    }
+
+    /// The ringtone that rings: the one chosen while it is there, else the
+    /// brand's default, else Anvil's.
+    fn ringtone(&self) -> String {
+        let chosen = self.local.lock().ringtone.clone();
+        if let Some(id) = chosen.filter(|id| self.tone(id).is_some()) {
+            return id;
+        }
+        self.brand_ringtones
+            .lock()
+            .iter()
+            .find(|(_, default, _)| *default)
+            .map(|(name, _, _)| ring::brand_id(name))
+            .unwrap_or_else(|| ring::DEFAULT.to_string())
+    }
+
+    /// A ringtone's sound, by id.
+    fn tone(&self, id: &str) -> Option<ring::Tone> {
+        match id.strip_prefix("brand:") {
+            Some(name) => self
+                .brand_ringtones
+                .lock()
+                .iter()
+                .find(|(n, _, _)| n == name)
+                .map(|(_, _, tone)| tone.clone()),
+            None => ring::built_in(id),
+        }
+    }
+
+    /// Stop what is sounding.
+    fn stop_sound(&self) {
+        if let Some((_, task)) = self.ringer.lock().take() {
+            task.abort();
+        }
+    }
+
+    /// Sound what the calls want: a ring, the call waiting tone, or
+    /// nothing (a preview playing on unless a call rings).
+    async fn sound(&self) {
+        if !self.ring {
+            return;
+        }
+        let _deciding = self.sounding.lock().await;
+        let wanted = ring::wanted(&self.state.lock().calls);
+        let now = self.ringer.lock().as_ref().map(|(sound, _)| *sound);
+        if now == wanted || (wanted.is_none() && now == Some(ring::Sound::Preview)) {
+            return;
+        }
+        self.stop_sound();
+        let Some(sound) = wanted else { return };
+        let tone = match sound {
+            ring::Sound::Waiting => ring::waiting(),
+            _ => self
+                .tone(&self.ringtone())
+                .or_else(|| ring::built_in(ring::DEFAULT))
+                .expect("Anvil's own ringtone"),
+        };
+        let anvil = self.anvil.read().await;
+        let Some(anvil) = anvil.as_ref() else { return };
+        match anvil.ring(
+            tone.clip.samples,
+            tone.clip.sample_rate,
+            tone.gap,
+            sound == ring::Sound::Waiting,
+        ) {
+            Ok(task) => *self.ringer.lock() = Some((sound, task.abort_handle())),
+            Err(e) => tracing::warn!(%e, "not ringing"),
+        }
+    }
+
+    /// The ringtone just chosen, heard once on the ringing speaker; not
+    /// while a call is up or ringing.
+    async fn preview(&self) {
+        let _deciding = self.sounding.lock().await;
+        if !self.ring || !self.state.lock().calls.is_empty() {
+            return;
+        }
+        let Some(tone) = self.tone(&self.ringtone()) else {
+            return;
+        };
+        self.stop_sound();
+        let length = std::time::Duration::from_millis(
+            tone.clip.samples.len() as u64 * 1000 / tone.clip.sample_rate as u64,
+        );
+        let anvil = self.anvil.read().await;
+        let Some(anvil) = anvil.as_ref() else { return };
+        let task = match anvil.ring(
+            tone.clip.samples,
+            tone.clip.sample_rate,
+            std::time::Duration::from_millis(300),
+            false,
+        ) {
+            Ok(task) => task.abort_handle(),
+            Err(e) => {
+                tracing::warn!(%e, "the ringtone not played");
+                return;
+            }
+        };
+        *self.ringer.lock() = Some((ring::Sound::Preview, task.clone()));
+        // Once through, then quiet (a call ringing in meanwhile has
+        // already replaced it).
+        tokio::spawn(async move {
+            tokio::time::sleep(length + std::time::Duration::from_millis(300)).await;
+            task.abort();
+        });
+    }
+
+    fn set_brand_ringtones(&self, ringtones: &[anvil_core::brand::Ringtone]) {
+        *self.brand_ringtones.lock() = ring::from_brand(ringtones);
+    }
+
     fn set_dnd(&self, on: bool) {
         let changed = {
             let mut state = self.state.lock();
@@ -804,10 +988,22 @@ async fn follow(inner: std::sync::Weak<Inner>, mut events: EventStream) {
                 let app_name = Some(brand.app_name.clone());
                 inner.state.lock().brand = Some(brand);
                 let _ = inner.changes.send(Change::Brand { app_name });
+                inner.set_brand_ringtones(&profile.ringtones);
+                Phone {
+                    inner: Arc::clone(&inner),
+                }
+                .read_audio_devices()
+                .await;
             }
             Event::BrandCleared => {
                 inner.state.lock().brand = None;
                 let _ = inner.changes.send(Change::Brand { app_name: None });
+                inner.set_brand_ringtones(&[]);
+                Phone {
+                    inner: Arc::clone(&inner),
+                }
+                .read_audio_devices()
+                .await;
             }
             Event::TransferProgress { call, code, reason } => {
                 let _ = inner.changes.send(Change::TransferProgress {
@@ -818,6 +1014,8 @@ async fn follow(inner: std::sync::Weak<Inner>, mut events: EventStream) {
             }
             _ => {}
         }
+        // A call rang in, was answered or went: ring, or stop.
+        inner.sound().await;
     }
 }
 

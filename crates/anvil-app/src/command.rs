@@ -81,11 +81,17 @@ pub enum Command {
     /// Make someone in the directory a favourite, or not.
     Favourite { who: String, on: bool },
     /// Use this microphone or speaker (by id; `None` for the system's
-    /// default) for the calls set up from now on.
+    /// default) for the calls set up from now on, or ring on this speaker.
     Audio {
         kind: AudioKind,
         #[serde(default)]
         device: Option<String>,
+    },
+    /// Ring with this ringtone (by id; `None` for the brand's, else
+    /// Anvil's), heard once now when no call is up.
+    Ringtone {
+        #[serde(default)]
+        id: Option<String>,
     },
     /// Read the user's data from FCP again.
     Refresh,
@@ -104,6 +110,8 @@ pub enum Command {
 pub enum AudioKind {
     Input,
     Output,
+    /// The speaker calls ring on.
+    Ring,
 }
 
 /// What a command answered.
@@ -147,6 +155,7 @@ impl Command {
     /// `waiting off`, `heard <id>`, `delete <id>`, `play <id>`, `stop`,
     /// `favourite alice`,
     /// `unfavourite alice`, `audio in USB Headset`, `audio out default`,
+    /// `audio ring Speakers`, `ringtone classic`, `ringtone default`,
     /// `refresh`, `register`, `status`. A trailing number names the call.
     pub fn parse_line(line: &str) -> Result<Self, String> {
         let words: Vec<&str> = line.split_whitespace().collect();
@@ -251,12 +260,19 @@ impl Command {
                 let kind = match words.get(1).map(|w| w.to_ascii_lowercase()).as_deref() {
                     Some("in") | Some("input") | Some("mic") => AudioKind::Input,
                     Some("out") | Some("output") | Some("speaker") => AudioKind::Output,
-                    _ => return Err("audio needs in or out".into()),
+                    Some("ring") => AudioKind::Ring,
+                    _ => return Err("audio needs in, out or ring".into()),
                 };
                 let device = rest(&words, 2).ok_or("audio needs a device, or default")?;
                 Command::Audio {
                     kind,
                     device: (!device.eq_ignore_ascii_case("default")).then_some(device),
+                }
+            }
+            "ringtone" => {
+                let id = rest(&words, 1).ok_or("ringtone needs a ringtone, or default")?;
+                Command::Ringtone {
+                    id: (!id.eq_ignore_ascii_case("default")).then_some(id),
                 }
             }
             "refresh" => Command::Refresh,
@@ -327,6 +343,23 @@ mod tests {
                 kind: AudioKind::Input,
                 device: Some("USB Headset".into())
             }
+        );
+        assert_eq!(
+            Command::parse_line("audio ring Speakers").unwrap(),
+            Command::Audio {
+                kind: AudioKind::Ring,
+                device: Some("Speakers".into())
+            }
+        );
+        assert_eq!(
+            Command::parse_line("ringtone brand:Acme Default").unwrap(),
+            Command::Ringtone {
+                id: Some("brand:Acme Default".into())
+            }
+        );
+        assert_eq!(
+            Command::parse_line("ringtone default").unwrap(),
+            Command::Ringtone { id: None }
         );
         assert_eq!(
             Command::parse_line("audio out default").unwrap(),

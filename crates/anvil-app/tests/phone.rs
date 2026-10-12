@@ -62,6 +62,16 @@ async fn phone_with(
     audio: Box<dyn AudioHost>,
     settings_path: Option<PathBuf>,
 ) -> Phone {
+    start(user, ip, audio, settings_path, false).await
+}
+
+async fn start(
+    user: &str,
+    ip: &str,
+    audio: Box<dyn AudioHost>,
+    settings_path: Option<PathBuf>,
+    ring: bool,
+) -> Phone {
     Phone::start(PhoneConfig {
         anvil: AnvilConfig {
             account: AccountConfig {
@@ -87,6 +97,7 @@ async fn phone_with(
         fcp: None,
         register: false,
         settings_path,
+        ring,
     })
     .await
     .expect("the phone starts")
@@ -446,4 +457,204 @@ async fn answering_a_second_call_holds_the_first_and_resuming_swaps() {
     alice.shutdown().await;
     bob.shutdown().await;
     carol.shutdown().await;
+}
+
+/// What a ringing phone was heard to play: loud frames on
+/// the speaker it rings on and on the one calls use, and the speaker
+/// chosen to ring on.
+#[derive(Default)]
+struct Heard {
+    ringing: std::sync::atomic::AtomicUsize,
+    in_calls: std::sync::atomic::AtomicUsize,
+    ring_device: parking_lot::Mutex<Option<String>>,
+}
+
+impl Heard {
+    fn ringing(&self) -> usize {
+        self.ringing.load(std::sync::atomic::Ordering::SeqCst)
+    }
+    fn in_calls(&self) -> usize {
+        self.in_calls.load(std::sync::atomic::Ordering::SeqCst)
+    }
+}
+
+struct Listening(Arc<Heard>);
+struct CountingSink(Arc<Heard>, bool);
+
+#[async_trait]
+impl AudioSink for CountingSink {
+    async fn write_frame(&mut self, frame: &AudioFrame) -> Result<(), AnvilError> {
+        // Loud: a ringtone or a tone, not a quiet call's decoded silence.
+        if frame.samples.iter().any(|&s| s.unsigned_abs() > 2_000) {
+            let counter = if self.1 {
+                &self.0.ringing
+            } else {
+                &self.0.in_calls
+            };
+            counter.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        }
+        Ok(())
+    }
+}
+
+impl AudioHost for Listening {
+    fn make_capture(&self, cfg: AudioFormat) -> Result<Box<dyn AudioSource>, AnvilError> {
+        Quiet.make_capture(cfg)
+    }
+    fn make_playback(&self, _: AudioFormat) -> Result<Box<dyn AudioSink>, AnvilError> {
+        Ok(Box::new(CountingSink(Arc::clone(&self.0), false)))
+    }
+    fn make_ringer(&self, _: AudioFormat) -> Result<Box<dyn AudioSink>, AnvilError> {
+        Ok(Box::new(CountingSink(Arc::clone(&self.0), true)))
+    }
+    fn devices(&self) -> Vec<DeviceInfo> {
+        vec![DeviceInfo {
+            id: "Speakers".into(),
+            name: "Speakers".into(),
+            is_input: false,
+            is_default: true,
+        }]
+    }
+    fn choose_ring_device(&self, output: Option<&str>) -> Result<(), AnvilError> {
+        if output.is_some_and(|o| o != "Speakers") {
+            return Err(AnvilError::AudioDevice("no such speaker".into()));
+        }
+        *self.0.ring_device.lock() = output.map(String::from);
+        Ok(())
+    }
+    fn chosen_ring_device(&self) -> Option<String> {
+        self.0.ring_device.lock().clone()
+    }
+}
+
+/// Whether `count` goes up within `within`.
+async fn grows(count: impl Fn() -> usize, within: Duration) -> bool {
+    let before = count();
+    let deadline = tokio::time::Instant::now() + within;
+    while tokio::time::Instant::now() < deadline {
+        tokio::time::sleep(Duration::from_millis(50)).await;
+        if count() > before {
+            return true;
+        }
+    }
+    false
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_call_rings_until_answered_and_a_second_is_a_tone_in_the_call() {
+    log();
+    let dir = std::env::temp_dir().join(format!("anvil-app-ring-{}", std::process::id()));
+    let settings = dir.join("settings.json");
+    let _ = std::fs::remove_dir_all(&dir);
+    let heard = Arc::new(Heard::default());
+    let alice = start(
+        "alice",
+        "127.0.0.36",
+        Box::new(Listening(Arc::clone(&heard))),
+        Some(settings.clone()),
+        true,
+    )
+    .await;
+    let bob = phone("bob", "127.0.0.37").await;
+    let carol = phone("carol", "127.0.0.38").await;
+
+    // The ringtones: Anvil's two, the first ringing; one chosen is heard
+    // once and kept, one that is not there refused.
+    let audio = alice.state().audio;
+    let ids: Vec<&str> = audio.ringtones.iter().map(|r| r.id.as_str()).collect();
+    assert_eq!(ids, ["anvil", "classic"]);
+    assert_eq!(audio.ringtone, "anvil");
+    assert!(
+        alice
+            .execute(Command::Ringtone {
+                id: Some("classic".into())
+            })
+            .await
+            .unwrap()
+            .ok
+    );
+    assert_eq!(alice.state().audio.ringtone, "classic");
+    assert!(
+        grows(|| heard.ringing(), SOON).await,
+        "the ringtone previewed"
+    );
+    assert!(alice
+        .execute(Command::Ringtone {
+            id: Some("brand:Nope".into())
+        })
+        .await
+        .is_err());
+    assert!(
+        alice
+            .execute(Command::Audio {
+                kind: AudioKind::Ring,
+                device: Some("Speakers".into()),
+            })
+            .await
+            .unwrap()
+            .ok
+    );
+    assert_eq!(alice.state().audio.ring.as_deref(), Some("Speakers"));
+    // Quiet once the preview is over.
+    tokio::time::sleep(Duration::from_secs(2)).await;
+    assert!(!grows(|| heard.ringing(), Duration::from_millis(500)).await);
+
+    // Bob calls: Alice rings on the ringing speaker, not in a call.
+    let in_calls = heard.in_calls();
+    bob.execute(Command::Call {
+        target: format!("sip:alice@{}", alice.sip_address()),
+    })
+    .await
+    .unwrap();
+    until(&alice, "Bob rings at Alice", |s| {
+        s.calls.iter().any(|c| c.state == CallState::Ringing)
+    })
+    .await;
+    assert!(grows(|| heard.ringing(), SOON).await, "Alice rings");
+    assert_eq!(heard.in_calls(), in_calls, "nothing in a call");
+
+    // Answered: quiet.
+    assert!(
+        alice
+            .execute(Command::Answer { call: None })
+            .await
+            .unwrap()
+            .ok
+    );
+    until(&alice, "Alice and Bob talk", |s| {
+        s.calls.iter().any(|c| c.state == CallState::Connected)
+    })
+    .await;
+    tokio::time::sleep(Duration::from_millis(200)).await;
+    assert!(!grows(|| heard.ringing(), Duration::from_millis(500)).await);
+
+    // Carol calls while Alice talks: a tone in the call, no ringing.
+    carol
+        .execute(Command::Call {
+            target: format!("sip:alice@{}", alice.sip_address()),
+        })
+        .await
+        .unwrap();
+    until(&alice, "Carol rings at Alice", |s| {
+        s.calls.iter().any(|c| c.state == CallState::Ringing)
+    })
+    .await;
+    assert!(grows(|| heard.in_calls(), SOON).await, "the waiting tone");
+    assert!(!grows(|| heard.ringing(), Duration::from_millis(500)).await);
+
+    // Carol gives up: the tone stops.
+    carol.execute(Command::Hangup { call: None }).await.unwrap();
+    until(&alice, "Carol's call gone", |s| s.calls.len() == 1).await;
+    tokio::time::sleep(Duration::from_millis(200)).await;
+    assert!(!grows(|| heard.in_calls(), Duration::from_millis(500)).await);
+
+    alice.shutdown().await;
+    bob.shutdown().await;
+    carol.shutdown().await;
+
+    // The ringtone and its speaker are kept for the next start.
+    let kept = std::fs::read_to_string(&settings).unwrap();
+    assert!(kept.contains("\"ringtone\": \"classic\""), "{kept}");
+    assert!(kept.contains("\"ring_output\": \"Speakers\""), "{kept}");
+    let _ = std::fs::remove_dir_all(dir);
 }

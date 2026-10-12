@@ -741,6 +741,30 @@ abstract class Strings {
   /// **'Applies from the next call'**
   String get audioNote;
 
+  /// No description provided for @ringOn.
+  ///
+  /// In en, this message translates to:
+  /// **'Ring on'**
+  String get ringOn;
+
+  /// No description provided for @ringtone.
+  ///
+  /// In en, this message translates to:
+  /// **'Ringtone'**
+  String get ringtone;
+
+  /// No description provided for @ringtoneAnvil.
+  ///
+  /// In en, this message translates to:
+  /// **'Anvil'**
+  String get ringtoneAnvil;
+
+  /// No description provided for @ringtoneClassic.
+  ///
+  /// In en, this message translates to:
+  /// **'Classic'**
+  String get ringtoneClassic;
+
   /// No description provided for @settingsAccount.
   ///
   /// In en, this message translates to:
