@@ -175,9 +175,11 @@ live in FCP: `docs/SOFTPHONE.md` in `thevoiceguy/fcp`. Anvil's phases:
         its server checked, the CLI's session folder and browser on Windows
   - [x] **W3** Updates that land: the setup waits for the app to go, an
         upgrade over a running app proved in the release workflow
-  - [ ] **W4** Enterprise basics: the Windows certificate store, browser
-        and SSO sign-in in the app, the default communications device and a
-        device lost mid-call, a ringtone of the app's own
+  - [x] **W4a** Trust and sign-in: the system's certificates trusted on a
+        desktop beside the bundled ones, sign-in through the browser (SSO)
+        in the app
+  - [ ] **W4b** Audio: the default communications device, a device lost
+        mid-call, a ringtone of the app's own
   - [ ] **W5** Echo cancellation and noise suppression
 
 ---

@@ -23,6 +23,12 @@ dirs       = "5"
 [target.'cfg(windows)'.dependencies]
 windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_Security", "Win32_Security_Authorization", "Win32_System_Threading", "Win32_System_Pipes"] }
 
+
+# A desktop also trusts the system's own certificates: a company's
+# internal CA, a TLS-inspecting proxy (the phones keep the bundled ones).
+[target.'cfg(any(windows, target_os = "macos", target_os = "linux"))'.dependencies]
+reqwest = { version = "0.12", default-features = false, features = ["rustls-tls-native-roots"] }
+
 [dev-dependencies]
 async-trait = { workspace = true }
 tracing-subscriber = { workspace = true }

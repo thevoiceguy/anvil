@@ -30,6 +30,9 @@ class PhoneModel extends ChangeNotifier {
   PhoneSnapshot snapshot = PhoneSnapshot.empty;
   bool busy = false;
 
+  /// Waiting for the system browser to come back from a sign-in.
+  bool browserSignIn = false;
+
   /// The last thing to tell the user (a call ended, a command refused).
   Notice? notice;
 
@@ -72,6 +75,32 @@ class PhoneModel extends ChangeNotifier {
       notifyListeners();
     }
   }
+
+  /// Sign in through the system browser, as single sign-on does: `open`
+  /// shows the address (the system browser); the sign-in finishes when the
+  /// browser comes back, or fails when it is cancelled.
+  Future<void> signInWithBrowser({
+    required String place,
+    required Future<void> Function(String url) open,
+  }) async {
+    busy = true;
+    browserSignIn = true;
+    notice = null;
+    notifyListeners();
+    try {
+      final url = await api.startBrowserSignIn(place: place);
+      await open(url);
+      account = await api.finishBrowserSignIn();
+      await _start();
+    } finally {
+      busy = false;
+      browserSignIn = false;
+      notifyListeners();
+    }
+  }
+
+  /// Give up waiting for the browser.
+  Future<void> cancelBrowserSignIn() => api.cancelBrowserSignIn();
 
   Future<void> signOut() async {
     _stopEvents();

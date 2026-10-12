@@ -427,6 +427,20 @@ abstract class PhoneApi {
     required String password,
     String? code,
   });
+
+  /// Whether this platform signs in through the system browser (single
+  /// sign-on): a desktop, whose browser comes back to the app's loopback
+  /// listener.
+  bool get canSignInWithBrowser;
+
+  /// Start signing in through the browser: the address to open.
+  Future<String> startBrowserSignIn({required String place});
+
+  /// Wait for the browser to come back, and keep the session.
+  Future<SignedInAccount> finishBrowserSignIn();
+
+  /// Give up the browser sign-in under way.
+  Future<void> cancelBrowserSignIn();
   Future<void> start();
 
   /// Stop the phone (it unregisters); the session stays signed in.

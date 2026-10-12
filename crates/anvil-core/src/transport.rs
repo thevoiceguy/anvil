@@ -30,10 +30,10 @@ use sip_transport::pool::{TlsClientConfig, TlsPool};
 #[cfg(feature = "tls")]
 pub(crate) type TlsConfigArc = Arc<TlsClientConfig>;
 
-/// Build a TLS client config trusting the system root CAs (via
-/// `webpki-roots`). If `extra_ca_pem` is supplied, its certs are added to
-/// the trust store on top of the defaults — useful for self-signed PBX
-/// environments.
+/// Build a TLS client config trusting the public roots (`webpki-roots`)
+/// and, on a desktop, the system's own (a company's internal CA, a
+/// TLS-inspecting proxy). If `extra_ca_pem` is supplied, its certs are
+/// added on top — useful for self-signed PBX environments.
 #[cfg(feature = "tls")]
 pub(crate) fn build_tls_client_config(extra_ca_pem: Option<&[u8]>) -> Result<TlsConfigArc> {
     use rustls::{ClientConfig, RootCertStore};
@@ -45,6 +45,16 @@ pub(crate) fn build_tls_client_config(extra_ca_pem: Option<&[u8]>) -> Result<Tls
 
     let mut roots = RootCertStore::empty();
     roots.extend(webpki_roots::TLS_SERVER_ROOTS.iter().cloned());
+    #[cfg(any(windows, target_os = "macos", target_os = "linux"))]
+    {
+        // What the system trusts; one it cannot read is left out, not fatal.
+        let native = rustls_native_certs::load_native_certs();
+        for e in &native.errors {
+            tracing::debug!(error = %e, "a system certificate store was not read");
+        }
+        let (added, ignored) = roots.add_parsable_certificates(native.certs);
+        tracing::debug!(added, ignored, "the system's certificates are trusted");
+    }
 
     if let Some(pem) = extra_ca_pem {
         let mut cursor = std::io::BufReader::new(pem);

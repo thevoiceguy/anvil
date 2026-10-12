@@ -55,6 +55,13 @@ tokio-rustls   = { version = "0.26", default-features = false, features = ["ring
 webpki-roots   = { version = "0.26", optional = true }
 rustls-pemfile = { version = "2",    optional = true }
 
+
+# A desktop also trusts the system's own certificates: a company's
+# internal CA, a TLS-inspecting proxy (the phones keep the bundled ones).
+[target.'cfg(any(windows, target_os = "macos", target_os = "linux"))'.dependencies]
+reqwest = { version = "0.12", default-features = false, features = ["rustls-tls-native-roots"] }
+rustls-native-certs = "0.8"
+
 [dev-dependencies]
 tokio = { workspace = true, features = ["test-util"] }
 tracing-subscriber = { workspace = true }

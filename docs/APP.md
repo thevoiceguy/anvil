@@ -320,6 +320,20 @@ Three PRs, the screens thin over the state as §3 has it:
   setup; the release workflow updates over a running app the same way and
   sees the app started again.
 
+### W4a: trust and sign-in (every desktop)
+- A desktop trusts the system's certificates as well as the bundled
+  public roots: a company's own CA, or a proxy that inspects TLS, no
+  longer fails every connection — FCP's API, its events, branding,
+  updates, and SIP over TLS (`rustls-native-certs` beside `webpki-roots`;
+  a store that cannot be read is skipped). Android and iOS keep the
+  bundled roots.
+- The app signs in through the system browser (`Sign in with your
+  browser`), as `anvil-cli login` already did: whatever the server's
+  sign-in page asks — single sign-on, a second factor — with PKCE and a
+  loopback listener (`docs/APP_SIGN_IN.md` in FCP); waiting can be given
+  up. Desktop only: a phone's app may be suspended while its browser is
+  in front, so the loopback would not answer.
+
 ### U3: desktop distribution
 - Installers for the three desktops built on a tag, the auto-updater, signing
   as soon as the certificates exist.

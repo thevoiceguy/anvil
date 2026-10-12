@@ -141,6 +141,24 @@ abstract class Strings {
   /// **'Sign in'**
   String get signInButton;
 
+  /// No description provided for @signInBrowserButton.
+  ///
+  /// In en, this message translates to:
+  /// **'Sign in with your browser'**
+  String get signInBrowserButton;
+
+  /// No description provided for @signInBrowserWaiting.
+  ///
+  /// In en, this message translates to:
+  /// **'Finish signing in in your browser.'**
+  String get signInBrowserWaiting;
+
+  /// No description provided for @signInServerNeeded.
+  ///
+  /// In en, this message translates to:
+  /// **'Enter your server or email address first.'**
+  String get signInServerNeeded;
+
   /// No description provided for @signInFailed.
   ///
   /// In en, this message translates to:

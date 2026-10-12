@@ -82,17 +82,8 @@ pub async fn sign_in(
 ) -> anyhow::Result<Account> {
     on_runtime(async move {
         let store = FileTokenStore::new(session_path);
-        let install = store
-            .load()
-            .ok()
-            .flatten()
-            .map(|s| s.client.install_id)
-            .unwrap_or_else(anvil_fcp::AppClient::new_install_id);
+        let client = this_install(&store);
         let server = anvil_fcp::discover(&place).await?;
-        let mut client = anvil_fcp::AppClient::this_machine(install);
-        if let Some(model) = crate::device::phone_model() {
-            client.client_name = format!("Anvil on {model}");
-        }
         let session =
             anvil_fcp::password_sign_in(server, client, &username, &password, totp.as_deref())
                 .await?;
@@ -103,6 +94,71 @@ pub async fn sign_in(
         })
     })
     .await
+}
+
+/// This install as FCP knows it: the same install signing in again keeps
+/// its device.
+fn this_install(store: &FileTokenStore) -> anvil_fcp::AppClient {
+    let install = store
+        .load()
+        .ok()
+        .flatten()
+        .map(|s| s.client.install_id)
+        .unwrap_or_else(anvil_fcp::AppClient::new_install_id);
+    let mut client = anvil_fcp::AppClient::this_machine(install);
+    if let Some(model) = crate::device::phone_model() {
+        client.client_name = format!("Anvil on {model}");
+    }
+    client
+}
+
+/// A sign-in through the browser, started and not yet finished.
+static BROWSER_SIGN_IN: parking_lot::Mutex<Option<anvil_fcp::BrowserSignIn>> =
+    parking_lot::Mutex::new(None);
+/// Giving up the browser sign-in under way.
+static BROWSER_CANCELLED: tokio::sync::Notify = tokio::sync::Notify::const_new();
+
+/// Start signing in through the system browser, the way single sign-on
+/// works (`place` is the server or an email address): the address the app
+/// opens. [`finish_browser_sign_in`] then waits for the browser to come
+/// back.
+pub async fn start_browser_sign_in(place: String, session_path: String) -> anyhow::Result<String> {
+    on_runtime(async move {
+        let client = this_install(&FileTokenStore::new(session_path));
+        let server = anvil_fcp::discover(&place).await?;
+        let sign_in = anvil_fcp::BrowserSignIn::start(server, client).await?;
+        let url = sign_in.authorize_url().to_string();
+        *BROWSER_SIGN_IN.lock() = Some(sign_in);
+        Ok(url)
+    })
+    .await
+}
+
+/// Wait for the browser sign-in started (up to ten minutes) and keep its
+/// session at `session_path`.
+pub async fn finish_browser_sign_in(session_path: String) -> anyhow::Result<Account> {
+    on_runtime(async move {
+        let sign_in = BROWSER_SIGN_IN
+            .lock()
+            .take()
+            .ok_or_else(|| anyhow::anyhow!("no sign-in through the browser was started"))?;
+        let session = tokio::select! {
+            session = sign_in.finish(std::time::Duration::from_secs(600)) => session?,
+            _ = BROWSER_CANCELLED.notified() => anyhow::bail!("the sign-in was cancelled"),
+        };
+        FileTokenStore::new(session_path).save(&session)?;
+        Ok(Account {
+            username: session.username,
+            server: session.server.public_url,
+        })
+    })
+    .await
+}
+
+/// Give up the browser sign-in under way.
+pub fn cancel_browser_sign_in() {
+    BROWSER_SIGN_IN.lock().take();
+    BROWSER_CANCELLED.notify_waiters();
 }
 
 /// Start the phone from the session at `session_path`: registered, ringing,

@@ -7,7 +7,7 @@ import '../frb_generated.dart';
 
 import 'package:flutter_rust_bridge/flutter_rust_bridge_for_generated.dart';
 
-// These functions are ignored because they are not marked as `pub`: `act`, `devices`, `direction`, `execute`, `kind_only`, `on_runtime_pub`, `on_runtime`, `phone`, `runtime`, `set_push`, `wake`
+// These functions are ignored because they are not marked as `pub`: `act`, `devices`, `direction`, `execute`, `kind_only`, `on_runtime_pub`, `on_runtime`, `phone`, `runtime`, `set_push`, `this_install`, `wake`
 
 /// The session kept at `session_path`, if there is one.
 Future<Account?> savedAccount({required String sessionPath}) =>
@@ -28,6 +28,29 @@ Future<Account> signIn({
   totp: totp,
   sessionPath: sessionPath,
 );
+
+/// Start signing in through the system browser, the way single sign-on
+/// works (`place` is the server or an email address): the address the app
+/// opens. [`finish_browser_sign_in`] then waits for the browser to come
+/// back.
+Future<String> startBrowserSignIn({
+  required String place,
+  required String sessionPath,
+}) => RustLib.instance.api.crateApiPhoneStartBrowserSignIn(
+  place: place,
+  sessionPath: sessionPath,
+);
+
+/// Wait for the browser sign-in started (up to ten minutes) and keep its
+/// session at `session_path`.
+Future<Account> finishBrowserSignIn({required String sessionPath}) => RustLib
+    .instance
+    .api
+    .crateApiPhoneFinishBrowserSignIn(sessionPath: sessionPath);
+
+/// Give up the browser sign-in under way.
+Future<void> cancelBrowserSignIn() =>
+    RustLib.instance.api.crateApiPhoneCancelBrowserSignIn();
 
 /// Start the phone from the session at `session_path`: registered, ringing,
 /// and serving the control socket so `anvil-cli` can drive the app.
