@@ -922,6 +922,19 @@ impl Anvil {
         self.audio.chosen_ring_device()
     }
 
+    /// Clean the microphone with `processing` (echo cancellation, noise
+    /// suppression), in the calls up and those to come. A host that does
+    /// none of its own refuses.
+    pub fn set_audio_processing(&self, processing: audio::Processing) -> Result<(), AnvilError> {
+        self.audio.set_processing(processing)
+    }
+
+    /// What the host does to the microphone; `None` when it does nothing of
+    /// its own.
+    pub fn audio_processing(&self) -> Option<audio::Processing> {
+        self.audio.processing()
+    }
+
     /// The microphones and speakers the audio host offers.
     pub fn audio_devices(&self) -> Vec<audio::DeviceInfo> {
         self.audio.devices()

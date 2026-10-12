@@ -73,6 +73,38 @@ pub trait AudioHost: Send + Sync {
     fn chosen_ring_device(&self) -> Option<String> {
         None
     }
+    /// Clean the microphone with `processing`, from now on and in the calls
+    /// already up. A host that cannot (or whose platform does it, as iOS's
+    /// voice processing does) refuses.
+    fn set_processing(&self, processing: Processing) -> Result<(), AnvilError> {
+        let _ = processing;
+        Err(AnvilError::AudioDevice(
+            "this audio host does no processing of its own".into(),
+        ))
+    }
+    /// What the host does to the microphone; `None` when it does nothing of
+    /// its own.
+    fn processing(&self) -> Option<Processing> {
+        None
+    }
+}
+
+/// What a host does to the microphone before it is sent.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Processing {
+    /// Take out what the speaker plays that the microphone hears.
+    pub echo_cancellation: bool,
+    /// Take out steady noise: fans, hum, the room.
+    pub noise_suppression: bool,
+}
+
+impl Default for Processing {
+    fn default() -> Self {
+        Self {
+            echo_cancellation: true,
+            noise_suppression: true,
+        }
+    }
 }
 
 /// Microphone-side stream. Produces one frame per call.
@@ -94,12 +126,8 @@ pub trait AudioSink: Send {
 /// place. Implementations must keep the frame length and sample rate
 /// unchanged.
 ///
-/// AEC traditionally needs both a capture and a render stream — the
-/// capture frame here is one half. Real echo cancellation requires
-/// either a platform-native pipeline (AVAudioEngine voice-processing
-/// IO on iOS, Oboe + AcousticEchoCanceler on Android) or wiring
-/// webrtc-audio-processing's render-stream API to the playback path.
-/// `AudioProcessor` covers the simpler half (NS / AGC) cleanly.
+/// Echo cancellation needs the speaker's audio too, so it is the host's
+/// (`anvil-audio`'s `echo.rs`, set through [`AudioHost::set_processing`]).
 pub trait AudioProcessor: Send {
     /// Process one frame in place. Default is a no-op pass-through.
     fn process_capture(&mut self, _frame: &mut AudioFrame) {}

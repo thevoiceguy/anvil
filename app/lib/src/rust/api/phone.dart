@@ -148,6 +148,16 @@ Future<void> chooseRingDevice({String? device}) =>
 Future<void> chooseRingtone({String? id}) =>
     RustLib.instance.api.crateApiPhoneChooseRingtone(id: id);
 
+/// Turn echo cancellation or noise suppression on or off (`None` leaves it
+/// as it is), in the call that is up too.
+Future<void> setAudioProcessing({
+  bool? echoCancellation,
+  bool? noiseSuppression,
+}) => RustLib.instance.api.crateApiPhoneSetAudioProcessing(
+  echoCancellation: echoCancellation,
+  noiseSuppression: noiseSuppression,
+);
+
 /// Read the user's data from FCP again.
 Future<void> refresh() => RustLib.instance.api.crateApiPhoneRefresh();
 
@@ -474,6 +484,11 @@ class PhoneState {
   final List<Ringtone> ringtones;
   final String ringtone;
 
+  /// Echo cancellation and noise suppression on or off; `None` when the
+  /// phone's audio does none of its own.
+  final bool? echoCancellation;
+  final bool? noiseSuppression;
+
   /// The voicemail message playing.
   final String? playing;
 
@@ -497,6 +512,8 @@ class PhoneState {
     this.ringDevice,
     required this.ringtones,
     required this.ringtone,
+    this.echoCancellation,
+    this.noiseSuppression,
     this.playing,
   });
 
@@ -521,6 +538,8 @@ class PhoneState {
       ringDevice.hashCode ^
       ringtones.hashCode ^
       ringtone.hashCode ^
+      echoCancellation.hashCode ^
+      noiseSuppression.hashCode ^
       playing.hashCode;
 
   @override
@@ -547,6 +566,8 @@ class PhoneState {
           ringDevice == other.ringDevice &&
           ringtones == other.ringtones &&
           ringtone == other.ringtone &&
+          echoCancellation == other.echoCancellation &&
+          noiseSuppression == other.noiseSuppression &&
           playing == other.playing;
 }
 

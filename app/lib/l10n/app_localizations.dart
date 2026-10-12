@@ -765,6 +765,30 @@ abstract class Strings {
   /// **'Classic'**
   String get ringtoneClassic;
 
+  /// No description provided for @echoCancellation.
+  ///
+  /// In en, this message translates to:
+  /// **'Echo cancellation'**
+  String get echoCancellation;
+
+  /// No description provided for @echoCancellationNote.
+  ///
+  /// In en, this message translates to:
+  /// **'Stops the other person hearing themselves through your speakers. Turn it off only with a headset, if your voice sounds clipped.'**
+  String get echoCancellationNote;
+
+  /// No description provided for @noiseSuppression.
+  ///
+  /// In en, this message translates to:
+  /// **'Noise suppression'**
+  String get noiseSuppression;
+
+  /// No description provided for @noiseSuppressionNote.
+  ///
+  /// In en, this message translates to:
+  /// **'Turns down steady noise around you, such as fans and hum.'**
+  String get noiseSuppressionNote;
+
   /// No description provided for @settingsAccount.
   ///
   /// In en, this message translates to:

@@ -427,6 +427,10 @@ pub struct PhoneState {
     /// Anvil's ringtones, then the brand's; the one that rings, by id.
     pub ringtones: Vec<Ringtone>,
     pub ringtone: String,
+    /// Echo cancellation and noise suppression on or off; `None` when the
+    /// phone's audio does none of its own.
+    pub echo_cancellation: Option<bool>,
+    pub noise_suppression: Option<bool>,
     /// The voicemail message playing.
     pub playing: Option<String>,
 }
@@ -574,6 +578,8 @@ pub fn phone_state() -> anyhow::Result<PhoneState> {
             })
             .collect(),
         ringtone: s.audio.ringtone,
+        echo_cancellation: s.audio.processing.map(|p| p.echo_cancellation),
+        noise_suppression: s.audio.processing.map(|p| p.noise_suppression),
         playing: s.playing,
     })
 }
@@ -823,6 +829,20 @@ pub async fn choose_ring_device(device: Option<String>) -> anyhow::Result<()> {
 /// heard once now when no call is up.
 pub async fn choose_ringtone(id: Option<String>) -> anyhow::Result<()> {
     execute(Command::Ringtone { id }).await.map(|_| ())
+}
+
+/// Turn echo cancellation or noise suppression on or off (`None` leaves it
+/// as it is), in the call that is up too.
+pub async fn set_audio_processing(
+    echo_cancellation: Option<bool>,
+    noise_suppression: Option<bool>,
+) -> anyhow::Result<()> {
+    execute(Command::Processing {
+        echo_cancellation,
+        noise_suppression,
+    })
+    .await
+    .map(|_| ())
 }
 
 /// Read the user's data from FCP again.

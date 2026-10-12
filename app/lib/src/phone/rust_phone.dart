@@ -172,6 +172,8 @@ class RustPhone implements PhoneApi {
         for (final r in s.ringtones) Ringtone(id: r.id, name: r.name),
       ],
       ringtone: s.ringtone,
+      echoCancellation: s.echoCancellation,
+      noiseSuppression: s.noiseSuppression,
       playing: s.playing,
     );
   }
@@ -287,6 +289,15 @@ class RustPhone implements PhoneApi {
 
   @override
   Future<void> chooseRingtone(String? id) => rust.chooseRingtone(id: id);
+
+  @override
+  Future<void> setAudioProcessing({
+    bool? echoCancellation,
+    bool? noiseSuppression,
+  }) => rust.setAudioProcessing(
+    echoCancellation: echoCancellation,
+    noiseSuppression: noiseSuppression,
+  );
 
   @override
   Future<void> refresh() => rust.refresh();

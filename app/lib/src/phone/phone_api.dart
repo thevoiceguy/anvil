@@ -317,6 +317,8 @@ class PhoneSnapshot {
     this.ringDevice,
     this.ringtones = const [],
     this.ringtone = '',
+    this.echoCancellation,
+    this.noiseSuppression,
     this.playing,
   });
 
@@ -353,6 +355,11 @@ class PhoneSnapshot {
   /// Anvil's ringtones, then the brand's; the one that rings, by id.
   final List<Ringtone> ringtones;
   final String ringtone;
+
+  /// Echo cancellation and noise suppression on or off; null when the
+  /// phone's audio does none of its own.
+  final bool? echoCancellation;
+  final bool? noiseSuppression;
 
   /// The voicemail message playing, by id.
   final String? playing;
@@ -400,6 +407,8 @@ class PhoneSnapshot {
     bool clearRingDevice = false,
     List<Ringtone>? ringtones,
     String? ringtone,
+    bool? echoCancellation,
+    bool? noiseSuppression,
     String? playing,
     bool clearPlaying = false,
   }) => PhoneSnapshot(
@@ -422,6 +431,8 @@ class PhoneSnapshot {
     ringDevice: clearRingDevice ? null : ringDevice ?? this.ringDevice,
     ringtones: ringtones ?? this.ringtones,
     ringtone: ringtone ?? this.ringtone,
+    echoCancellation: echoCancellation ?? this.echoCancellation,
+    noiseSuppression: noiseSuppression ?? this.noiseSuppression,
     playing: clearPlaying ? null : playing ?? this.playing,
   );
 
@@ -510,5 +521,12 @@ abstract class PhoneApi {
   /// Ring with this ringtone by id, null for the brand's (else Anvil's);
   /// heard once now when no call is up.
   Future<void> chooseRingtone(String? id);
+
+  /// Turn echo cancellation or noise suppression on or off (null leaves it
+  /// as it is), in the call that is up too.
+  Future<void> setAudioProcessing({
+    bool? echoCancellation,
+    bool? noiseSuppression,
+  });
   Future<void> refresh();
 }

@@ -87,6 +87,14 @@ pub enum Command {
         #[serde(default)]
         device: Option<String>,
     },
+    /// Turn echo cancellation or noise suppression on or off (what is not
+    /// named stays as it is), in the call that is up too.
+    Processing {
+        #[serde(default)]
+        echo_cancellation: Option<bool>,
+        #[serde(default)]
+        noise_suppression: Option<bool>,
+    },
     /// Ring with this ringtone (by id; `None` for the brand's, else
     /// Anvil's), heard once now when no call is up.
     Ringtone {
@@ -155,7 +163,8 @@ impl Command {
     /// `waiting off`, `heard <id>`, `delete <id>`, `play <id>`, `stop`,
     /// `favourite alice`,
     /// `unfavourite alice`, `audio in USB Headset`, `audio out default`,
-    /// `audio ring Speakers`, `ringtone classic`, `ringtone default`,
+    /// `audio ring Speakers`, `audio echo off`, `audio noise on`,
+    /// `ringtone classic`, `ringtone default`,
     /// `refresh`, `register`, `status`. A trailing number names the call.
     pub fn parse_line(line: &str) -> Result<Self, String> {
         let words: Vec<&str> = line.split_whitespace().collect();
@@ -256,12 +265,25 @@ impl Command {
                 who: rest(&words, 1).ok_or_else(|| format!("{verb} needs a name"))?,
                 on: !verb.to_ascii_lowercase().starts_with("un"),
             },
+            "audio"
+                if matches!(
+                    words.get(1).map(|w| w.to_ascii_lowercase()).as_deref(),
+                    Some("echo") | Some("noise")
+                ) =>
+            {
+                let on = on_off(words.get(2)).ok_or("audio echo or noise needs on or off")?;
+                let echo = words[1].eq_ignore_ascii_case("echo");
+                Command::Processing {
+                    echo_cancellation: echo.then_some(on),
+                    noise_suppression: (!echo).then_some(on),
+                }
+            }
             "audio" => {
                 let kind = match words.get(1).map(|w| w.to_ascii_lowercase()).as_deref() {
                     Some("in") | Some("input") | Some("mic") => AudioKind::Input,
                     Some("out") | Some("output") | Some("speaker") => AudioKind::Output,
                     Some("ring") => AudioKind::Ring,
-                    _ => return Err("audio needs in, out or ring".into()),
+                    _ => return Err("audio needs in, out, ring, echo or noise".into()),
                 };
                 let device = rest(&words, 2).ok_or("audio needs a device, or default")?;
                 Command::Audio {
@@ -361,6 +383,21 @@ mod tests {
             Command::parse_line("ringtone default").unwrap(),
             Command::Ringtone { id: None }
         );
+        assert_eq!(
+            Command::parse_line("audio echo off").unwrap(),
+            Command::Processing {
+                echo_cancellation: Some(false),
+                noise_suppression: None
+            }
+        );
+        assert_eq!(
+            Command::parse_line("audio Noise on").unwrap(),
+            Command::Processing {
+                echo_cancellation: None,
+                noise_suppression: Some(true)
+            }
+        );
+        assert!(Command::parse_line("audio echo").is_err());
         assert_eq!(
             Command::parse_line("audio out default").unwrap(),
             Command::Audio {

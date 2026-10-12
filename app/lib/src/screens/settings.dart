@@ -123,6 +123,28 @@ class SettingsPage extends StatelessWidget {
           ),
           if (snap.ringtones.isNotEmpty)
             _RingtonePicker(snap: snap, model: model),
+          if (snap.echoCancellation case final on?)
+            SwitchListTile(
+              key: const Key('echoCancellation'),
+              secondary: const Icon(Icons.surround_sound),
+              title: Text(s.echoCancellation),
+              subtitle: Text(s.echoCancellationNote),
+              value: on,
+              onChanged: (on) => model.run(
+                () => model.api.setAudioProcessing(echoCancellation: on),
+              ),
+            ),
+          if (snap.noiseSuppression case final on?)
+            SwitchListTile(
+              key: const Key('noiseSuppression'),
+              secondary: const Icon(Icons.noise_aware),
+              title: Text(s.noiseSuppression),
+              subtitle: Text(s.noiseSuppressionNote),
+              value: on,
+              onChanged: (on) => model.run(
+                () => model.api.setAudioProcessing(noiseSuppression: on),
+              ),
+            ),
         ],
         if (DesktopScope.maybeOf(context) case final shell?
             when shell.canStartAtLogin) ...[

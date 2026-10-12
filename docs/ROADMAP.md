@@ -183,7 +183,10 @@ live in FCP: `docs/SOFTPHONE.md` in `thevoiceguy/fcp`. Anvil's phases:
   - [x] **W4c** A ringtone of the app's own: on the speakers (not the
         headset) or the device chosen, Anvil's two and the brand's (WAV,
         Ogg Vorbis, MP3), a call waiting tone in a call instead
-  - [ ] **W5** Echo cancellation and noise suppression
+  - [x] **W5** Echo cancellation and noise suppression: WebRTC's AEC3
+        and noise suppressor in Rust (`sonora`), the speakers' audio as
+        the reference at the microphone's pace, both on unless turned off
+        and changed in the call that is up
 
 ---
 

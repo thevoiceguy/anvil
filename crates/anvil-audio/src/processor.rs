@@ -1,11 +1,8 @@
 //! Pure-Rust capture-side audio processors.
 //!
-//! M8b ships one: a peak-following Automatic Gain Control. AEC and
-//! noise suppression are deferred — real AEC needs platform-native
-//! voice-processing audio units (iOS / Android) or
-//! webrtc-audio-processing's render-stream API; both are larger lifts
-//! than fits in this milestone. The `AudioProcessor` trait in
-//! `anvil-core::audio` is the slot they plug into when implemented.
+//! M8b ships one: a peak-following Automatic Gain Control. Echo
+//! cancellation and noise suppression are `echo.rs`, which needs the
+//! speaker's audio as well and runs before this.
 
 use anvil_core::audio::{AudioFrame, AudioProcessor};
 

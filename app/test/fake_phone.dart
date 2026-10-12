@@ -355,6 +355,22 @@ class FakePhone implements PhoneApi {
   }
 
   @override
+  Future<void> setAudioProcessing({
+    bool? echoCancellation,
+    bool? noiseSuppression,
+  }) async {
+    if (echoCancellation != null) log.add('echo $echoCancellation');
+    if (noiseSuppression != null) log.add('noise $noiseSuppression');
+    set(
+      state.copyWith(
+        echoCancellation: echoCancellation,
+        noiseSuppression: noiseSuppression,
+      ),
+      'audio',
+    );
+  }
+
+  @override
   Future<void> refresh() async => log.add('refresh');
 }
 

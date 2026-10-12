@@ -70,7 +70,7 @@ class RustLib extends BaseEntrypoint<RustLibApi, RustLibApiImpl, RustLibWire> {
   String get codegenVersion => '2.13.0';
 
   @override
-  int get rustContentHash => 798836506;
+  int get rustContentHash => 930759801;
 
   static const kDefaultExternalLibraryLoaderConfig =
       ExternalLibraryLoaderConfig(
@@ -135,6 +135,11 @@ abstract class RustLibApi extends BaseApi {
   Future<Account?> crateApiPhoneSavedAccount({required String sessionPath});
 
   Future<void> crateApiPhoneSendDigits({BigInt? call, required String digits});
+
+  Future<void> crateApiPhoneSetAudioProcessing({
+    bool? echoCancellation,
+    bool? noiseSuppression,
+  });
 
   Future<void> crateApiPhoneSetCalling({required CallingChange change});
 
@@ -916,6 +921,41 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   );
 
   @override
+  Future<void> crateApiPhoneSetAudioProcessing({
+    bool? echoCancellation,
+    bool? noiseSuppression,
+  }) {
+    return handler.executeNormal(
+      NormalTask(
+        callFfi: (port_) {
+          final serializer = SseSerializer(generalizedFrbRustBinding);
+          sse_encode_opt_box_autoadd_bool(echoCancellation, serializer);
+          sse_encode_opt_box_autoadd_bool(noiseSuppression, serializer);
+          pdeCallFfi(
+            generalizedFrbRustBinding,
+            serializer,
+            funcId: 27,
+            port: port_,
+          );
+        },
+        codec: SseCodec(
+          decodeSuccessData: sse_decode_unit,
+          decodeErrorData: sse_decode_AnyhowException,
+        ),
+        constMeta: kCrateApiPhoneSetAudioProcessingConstMeta,
+        argValues: [echoCancellation, noiseSuppression],
+        apiImpl: this,
+      ),
+    );
+  }
+
+  TaskConstMeta get kCrateApiPhoneSetAudioProcessingConstMeta =>
+      const TaskConstMeta(
+        debugName: "set_audio_processing",
+        argNames: ["echoCancellation", "noiseSuppression"],
+      );
+
+  @override
   Future<void> crateApiPhoneSetCalling({required CallingChange change}) {
     return handler.executeNormal(
       NormalTask(
@@ -925,7 +965,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 27,
+            funcId: 28,
             port: port_,
           );
         },
@@ -953,7 +993,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 28,
+            funcId: 29,
             port: port_,
           );
         },
@@ -991,7 +1031,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 29,
+            funcId: 30,
             port: port_,
           );
         },
@@ -1021,7 +1061,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 30,
+            funcId: 31,
             port: port_,
           );
         },
@@ -1053,7 +1093,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 31,
+            funcId: 32,
             port: port_,
           );
         },
@@ -1084,7 +1124,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 32,
+            funcId: 33,
             port: port_,
           );
         },
@@ -1111,7 +1151,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 33,
+            funcId: 34,
             port: port_,
           );
         },
@@ -1138,7 +1178,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 34,
+            funcId: 35,
             port: port_,
           );
         },
@@ -1165,7 +1205,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 35,
+            funcId: 36,
             port: port_,
           );
         },
@@ -1194,7 +1234,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 36,
+            funcId: 37,
             port: port_,
           );
         },
@@ -1226,7 +1266,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 37,
+            funcId: 38,
             port: port_,
           );
         },
@@ -1550,8 +1590,8 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   PhoneState dco_decode_phone_state(dynamic raw) {
     // Codec=Dco (DartCObject based), see doc to use other codecs
     final arr = raw as List<dynamic>;
-    if (arr.length != 20)
-      throw Exception('unexpected arr length: expect 20 but see ${arr.length}');
+    if (arr.length != 22)
+      throw Exception('unexpected arr length: expect 22 but see ${arr.length}');
     return PhoneState(
       aor: dco_decode_String(arr[0]),
       registration: dco_decode_registration(arr[1]),
@@ -1572,7 +1612,9 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       ringDevice: dco_decode_opt_String(arr[16]),
       ringtones: dco_decode_list_ringtone(arr[17]),
       ringtone: dco_decode_String(arr[18]),
-      playing: dco_decode_opt_String(arr[19]),
+      echoCancellation: dco_decode_opt_box_autoadd_bool(arr[19]),
+      noiseSuppression: dco_decode_opt_box_autoadd_bool(arr[20]),
+      playing: dco_decode_opt_String(arr[21]),
     );
   }
 
@@ -2117,6 +2159,8 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     var var_ringDevice = sse_decode_opt_String(deserializer);
     var var_ringtones = sse_decode_list_ringtone(deserializer);
     var var_ringtone = sse_decode_String(deserializer);
+    var var_echoCancellation = sse_decode_opt_box_autoadd_bool(deserializer);
+    var var_noiseSuppression = sse_decode_opt_box_autoadd_bool(deserializer);
     var var_playing = sse_decode_opt_String(deserializer);
     return PhoneState(
       aor: var_aor,
@@ -2138,6 +2182,8 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       ringDevice: var_ringDevice,
       ringtones: var_ringtones,
       ringtone: var_ringtone,
+      echoCancellation: var_echoCancellation,
+      noiseSuppression: var_noiseSuppression,
       playing: var_playing,
     );
   }
@@ -2651,6 +2697,8 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     sse_encode_opt_String(self.ringDevice, serializer);
     sse_encode_list_ringtone(self.ringtones, serializer);
     sse_encode_String(self.ringtone, serializer);
+    sse_encode_opt_box_autoadd_bool(self.echoCancellation, serializer);
+    sse_encode_opt_box_autoadd_bool(self.noiseSuppression, serializer);
     sse_encode_opt_String(self.playing, serializer);
   }
 

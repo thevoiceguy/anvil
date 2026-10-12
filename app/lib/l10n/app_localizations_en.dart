@@ -370,6 +370,20 @@ class StringsEn extends Strings {
   String get ringtoneClassic => 'Classic';
 
   @override
+  String get echoCancellation => 'Echo cancellation';
+
+  @override
+  String get echoCancellationNote =>
+      'Stops the other person hearing themselves through your speakers. Turn it off only with a headset, if your voice sounds clipped.';
+
+  @override
+  String get noiseSuppression => 'Noise suppression';
+
+  @override
+  String get noiseSuppressionNote =>
+      'Turns down steady noise around you, such as fans and hum.';
+
+  @override
   String get settingsAccount => 'Account';
 
   @override

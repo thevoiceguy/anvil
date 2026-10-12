@@ -10,11 +10,11 @@ repository.workspace   = true
 homepage.workspace     = true
 
 [features]
-default = ["cpal-default"]
+default = ["cpal-default", "apm"]
 cpal-default = ["dep:cpal", "dep:forge-resampler"]
-# Link webrtc-audio-processing for AEC / NS / AGC. Off by default because
-# it's a C++ build; turn it on for desktop / Linux where it's reliable.
-apm = []
+# Echo cancellation and noise suppression: WebRTC's audio processing as
+# sonora ports it to Rust (no C++ to build).
+apm = ["dep:sonora"]
 # Tone-generator audio host, handy for headless end-to-end tests.
 tone = []
 
@@ -28,6 +28,7 @@ parking_lot = { workspace = true }
 cpal        = { workspace = true, optional = true }
 # Resampling from device rate (typically 48 kHz) to G.711 8 kHz.
 forge-resampler = { workspace = true, optional = true }
+sonora          = { version = "0.2.0", optional = true }
 
 # The default device for calls (`comms.rs`), through the windows crate
 # cpal already uses.
