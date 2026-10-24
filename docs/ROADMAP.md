@@ -97,7 +97,7 @@ live in FCP: `docs/SOFTPHONE.md` in `thevoiceguy/fcp`. Anvil's phases:
 Designed 2026-10-24 (`docs/MANAGED_INSTALLS.md`), agreed the same day on
 every recommendation:
 
-- [ ] **M1** The profile and policy: server (locked), login domain, sign-in
+- [x] **M1** The profile and policy: server (locked), login domain, sign-in
       mode, username from the system, updates; the profile's brand before
       sign-in
 - [ ] **M2** The Windows installer taking a profile, shortcuts named from it

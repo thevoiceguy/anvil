@@ -46,6 +46,15 @@ class PhoneModel extends ChangeNotifier {
 
   StreamSubscription<PhoneEvent>? _events;
 
+  /// What this install was set up with.
+  Managed get managed => api.managed;
+
+  /// The brand: FCP's once signed in (the phone falls back to the
+  /// installed profile's), else the profile's.
+  String? get brandName => snapshot.brandName ?? managed.brandName;
+  int? get brandPrimary => snapshot.brandPrimary ?? managed.brandPrimary;
+  Uint8List? get brandLogo => snapshot.brandLogo ?? managed.brandLogo;
+
   /// A saved session starts the phone at once.
   Future<void> boot() async {
     account = await api.savedAccount();

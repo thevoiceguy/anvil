@@ -91,7 +91,7 @@ class _DesktopBridgeState extends State<DesktopBridge> {
       TrayState.ringing => s.incomingCall,
       TrayState.inCall => s.callConnected,
     };
-    final app = snap.brandName ?? s.appName;
+    final app = model.brandName ?? s.appName;
     final tray = (
       state,
       '$app — $status',

@@ -172,13 +172,14 @@ dependencies = [
 
 [[package]]
 name = "anvil-app"
-version = "0.2.4"
+version = "0.2.6"
 dependencies = [
  "anvil-core",
  "anvil-fcp",
  "async-trait",
  "dirs",
  "parking_lot",
+ "plist",
  "rand 0.8.6",
  "reqwest",
  "serde",
@@ -194,7 +195,7 @@ dependencies = [
 
 [[package]]
 name = "anvil-audio"
-version = "0.2.4"
+version = "0.2.6"
 dependencies = [
  "anvil-core",
  "async-trait",
@@ -210,7 +211,7 @@ dependencies = [
 
 [[package]]
 name = "anvil-brand"
-version = "0.2.4"
+version = "0.2.6"
 dependencies = [
  "anvil-core",
  "async-trait",
@@ -228,7 +229,7 @@ dependencies = [
 
 [[package]]
 name = "anvil-cli"
-version = "0.2.4"
+version = "0.2.6"
 dependencies = [
  "anvil-app",
  "anvil-audio",
@@ -244,7 +245,7 @@ dependencies = [
 
 [[package]]
 name = "anvil-codec"
-version = "0.2.4"
+version = "0.2.6"
 dependencies = [
  "anvil-core",
  "opus",
@@ -253,11 +254,11 @@ dependencies = [
 
 [[package]]
 name = "anvil-core"
-version = "0.2.4"
+version = "0.2.6"
 dependencies = [
  "anyhow",
  "async-trait",
- "base64",
+ "base64 0.22.1",
  "bytes",
  "dashmap",
  "forge-codecs",
@@ -293,12 +294,12 @@ dependencies = [
 
 [[package]]
 name = "anvil-fcp"
-version = "0.2.4"
+version = "0.2.6"
 dependencies = [
  "anvil-brand",
  "anvil-core",
  "async-trait",
- "base64",
+ "base64 0.22.1",
  "futures-util",
  "rand 0.8.6",
  "reqwest",
@@ -316,7 +317,7 @@ dependencies = [
 
 [[package]]
 name = "anvil-ffi"
-version = "0.2.4"
+version = "0.2.6"
 dependencies = [
  "anvil-core",
  "anvil-fcp",
@@ -333,7 +334,7 @@ dependencies = [
 
 [[package]]
 name = "anvil-update"
-version = "0.2.4"
+version = "0.2.6"
 dependencies = [
  "futures",
  "reqwest",
@@ -348,7 +349,7 @@ dependencies = [
 
 [[package]]
 name = "anvil_bridge"
-version = "0.2.4"
+version = "0.2.6"
 dependencies = [
  "anvil-app",
  "anvil-audio",
@@ -510,6 +511,12 @@ name = "base64"
 version = "0.22.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "72b3254f16251a8381aa12e40e3c4d2f0199f8c6508fbecb9d91f575e0fbb8c6"
+
+[[package]]
+name = "base64"
+version = "0.23.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "ac07cdecf99051d9a5238b80f35af32cdeba5b336e55d957b318b50137e18da5"
 
 [[package]]
 name = "bindgen"
@@ -1799,7 +1806,7 @@ version = "0.1.20"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "96547c2556ec9d12fb1578c4eaf448b04993e7fb79cbaad930a656880a6bdfa0"
 dependencies = [
- "base64",
+ "base64 0.22.1",
  "bytes",
  "futures-channel",
  "futures-util",
@@ -2591,6 +2598,19 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "19f132c84eca552bf34cab8ec81f1c1dcc229b811638f9d283dceabe58c5569e"
 
 [[package]]
+name = "plist"
+version = "1.10.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "327a4cb2ad49dc48adfdc9da89e22c64d488b508c67a044d71ba729e4521a285"
+dependencies = [
+ "base64 0.23.1",
+ "indexmap",
+ "quick-xml",
+ "serde",
+ "time",
+]
+
+[[package]]
 name = "polyval"
 version = "0.7.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2613,7 +2633,7 @@ version = "0.6.12"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "08808e3c483c46e999108051c78334f473d5adb59d78bb80a1268c7e6aa6c514"
 dependencies = [
- "base64",
+ "base64 0.22.1",
  "byteorder",
  "bytes",
  "fallible-iterator",
@@ -2697,6 +2717,15 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "8fd00f0bb2e90d81d1044c2b32617f68fcb9fa3bb7640c23e9c748e53fb30934"
 dependencies = [
  "unicode-ident",
+]
+
+[[package]]
+name = "quick-xml"
+version = "0.42.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "41b1177fdf999d2321d3fb46ff47159d9c1fb9ad66a4879f8c50a0b504615e9b"
+dependencies = [
+ "memchr",
 ]
 
 [[package]]
@@ -2915,7 +2944,7 @@ version = "0.12.28"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "eddd3ca559203180a307f12d114c268abf583f59b03cb906fd0b3ff8646c1147"
 dependencies = [
- "base64",
+ "base64 0.22.1",
  "bytes",
  "futures-core",
  "futures-util",

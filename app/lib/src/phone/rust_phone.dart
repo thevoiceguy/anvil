@@ -103,6 +103,25 @@ class RustPhone implements PhoneApi {
   }
 
   @override
+  late final Managed managed = _managed();
+
+  static Managed _managed() {
+    final m = rust.managedSettings();
+    return Managed(
+      server: m.server,
+      lockServer: m.lockServer,
+      loginDomain: m.loginDomain,
+      signIn: ManagedSignIn.values.byName(m.signIn),
+      username: m.username,
+      updates: ManagedUpdates.values.byName(m.updates),
+      brandName: m.brandName,
+      brandPrimary: PhoneSnapshot.colorFromHex(m.brandPrimary),
+      brandLogo: m.brandLogo,
+      sources: m.sources,
+    );
+  }
+
+  @override
   bool get canSignInWithBrowser =>
       Platform.isWindows || Platform.isMacOS || Platform.isLinux;
 

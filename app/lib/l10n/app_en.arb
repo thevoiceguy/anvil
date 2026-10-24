@@ -271,6 +271,9 @@
     }
   },
   "settingsTroubleshooting": "Troubleshooting",
+  "signInServerLocked": "Set by your organisation",
+  "managedBy": "Set up by your organisation",
+  "updateManaged": "Your organisation installs updates to this app.",
   "logFile": "Log file",
   "logFileCopy": "Copy the path",
   "logFileCopied": "Path copied",

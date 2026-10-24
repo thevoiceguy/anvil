@@ -12,7 +12,8 @@ import 'package:flutter_rust_bridge/flutter_rust_bridge_for_generated.dart';
 /// This copy's version.
 String appVersion() => RustLib.instance.api.crateApiUpdateAppVersion();
 
-/// The latest release, when it is newer than this copy.
+/// The latest release, when it is newer than this copy. A managed install
+/// may never look (`updates: off`) or only tell (`notify`).
 Future<UpdateInfo?> checkForUpdate() =>
     RustLib.instance.api.crateApiUpdateCheckForUpdate();
 

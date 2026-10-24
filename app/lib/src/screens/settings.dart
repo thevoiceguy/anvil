@@ -159,9 +159,16 @@ class SettingsPage extends StatelessWidget {
           header(s.settingsUpdates),
           _Updates(scope: update, model: model),
         ],
-        if (model.api.logPath case final log?) ...[
+        if (model.api.logPath != null || model.managed.isManaged) ...[
           header(s.settingsTroubleshooting),
-          _LogFile(path: log),
+          if (model.api.logPath case final log?) _LogFile(path: log),
+          if (model.managed.isManaged)
+            ListTile(
+              key: const Key('managedBy'),
+              leading: const Icon(Icons.business),
+              title: Text(s.managedBy),
+              subtitle: Text(model.managed.sources.join('\n')),
+            ),
         ],
         header(s.settingsAccount),
         ListTile(

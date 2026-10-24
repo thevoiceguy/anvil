@@ -7,6 +7,7 @@ import 'package:flutter/material.dart';
 import 'package:url_launcher/url_launcher.dart';
 
 import '../../l10n/app_localizations.dart';
+import '../phone/phone_api.dart';
 import '../phone/phone_model.dart';
 import 'updates.dart';
 
@@ -60,7 +61,11 @@ class UpdateBanner extends StatelessWidget {
                         ? s.updateDownloading
                         : updates.status == UpdateStatus.failed
                         ? s.updateFailed(updates.error ?? '')
-                        : s.updateAvailable(info.version),
+                        : [
+                            s.updateAvailable(info.version),
+                            if (phone.managed.updates == ManagedUpdates.notify)
+                              s.updateManaged,
+                          ].join(' '),
                   ),
                 ),
                 if (!downloading) ...[

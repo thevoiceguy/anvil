@@ -44,7 +44,11 @@ class AnvilApp extends StatefulWidget {
 
 class _AnvilAppState extends State<AnvilApp> {
   late final PhoneModel model = PhoneModel(widget.phone, mobile: widget.mobile);
-  late final UpdateModel? updates = widget.updates == null
+  // A managed install may never look for updates: the company installs
+  // them.
+  late final UpdateModel? updates =
+      widget.updates == null ||
+          widget.phone.managed.updates == ManagedUpdates.off
       ? null
       : UpdateModel(widget.updates!);
 
@@ -77,7 +81,7 @@ class _AnvilAppState extends State<AnvilApp> {
     return ListenableBuilder(
       listenable: model,
       builder: (context, _) {
-        final brand = model.snapshot.brandPrimary;
+        final brand = model.brandPrimary;
         final color = brand == null ? null : Color(brand);
         return _app(color);
       },
@@ -88,7 +92,7 @@ class _AnvilAppState extends State<AnvilApp> {
     return MaterialApp(
       debugShowCheckedModeBanner: false,
       onGenerateTitle: (context) =>
-          model.snapshot.brandName ?? Strings.of(context).appName,
+          model.brandName ?? Strings.of(context).appName,
       theme: AnvilTheme.light(brand: brand),
       darkTheme: AnvilTheme.dark(brand: brand),
       localizationsDelegates: const [

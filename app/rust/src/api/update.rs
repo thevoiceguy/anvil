@@ -39,8 +39,14 @@ pub struct UpdateInfo {
     pub download: Option<String>,
 }
 
-/// The latest release, when it is newer than this copy.
+/// The latest release, when it is newer than this copy. A managed install
+/// may never look (`updates: off`) or only tell (`notify`).
 pub async fn check_for_update() -> anyhow::Result<Option<UpdateInfo>> {
+    use anvil_app::managed::UpdatesMode;
+    let mode = super::phone::managed().updates;
+    if mode == UpdatesMode::Off {
+        return Ok(None);
+    }
     let updater = updater()?;
     let available = super::phone::on_runtime_pub(async move { Ok(updater.check().await?) }).await?;
     let info = available.as_ref().map(|a| {
@@ -55,6 +61,15 @@ pub async fn check_for_update() -> anyhow::Result<Option<UpdateInfo>> {
             ),
             _ => (None, None),
         };
+        if mode == UpdatesMode::Notify {
+            return UpdateInfo {
+                version: a.manifest.version.clone(),
+                notes: a.manifest.notes.clone(),
+                can_install: false,
+                reason: Some("Your organisation installs updates to this app.".into()),
+                download: None,
+            };
+        }
         UpdateInfo {
             version: a.manifest.version.clone(),
             notes: a.manifest.notes.clone(),
@@ -69,6 +84,9 @@ pub async fn check_for_update() -> anyhow::Result<Option<UpdateInfo>> {
 
 /// Fetch the update found, checked against its manifest.
 pub async fn download_update() -> anyhow::Result<()> {
+    if super::phone::managed().updates != anvil_app::managed::UpdatesMode::Auto {
+        anyhow::bail!("your organisation installs updates to this app");
+    }
     let updater = updater()?;
     let available = AVAILABLE
         .lock()

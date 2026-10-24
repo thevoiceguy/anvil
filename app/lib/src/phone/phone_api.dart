@@ -473,6 +473,63 @@ class PhoneEvent {
   final String? reason;
 }
 
+/// How a managed install's sign-in goes on (`docs/MANAGED_INSTALLS.md`).
+enum ManagedSignIn { auto, sso, password }
+
+/// Whether a managed install updates itself.
+enum ManagedUpdates { auto, notify, off }
+
+/// What the company set this install up with: IT's policy over the
+/// profile installed with the app. An ordinary install's is [none].
+class Managed {
+  const Managed({
+    this.server,
+    this.lockServer = false,
+    this.loginDomain,
+    this.signIn = ManagedSignIn.auto,
+    this.username,
+    this.updates = ManagedUpdates.auto,
+    this.brandName,
+    this.brandPrimary,
+    this.brandLogo,
+    this.sources = const [],
+  });
+
+  static const none = Managed();
+
+  /// What the server field holds.
+  final String? server;
+
+  /// The server field cannot be changed.
+  final bool lockServer;
+
+  /// Put after a bare username: `james` signs in as `james@acme.example`.
+  final String? loginDomain;
+  final ManagedSignIn signIn;
+
+  /// The username to fill in, from the system.
+  final String? username;
+  final ManagedUpdates updates;
+
+  /// The installed profile's brand, the app's before FCP's.
+  final String? brandName;
+  final int? brandPrimary;
+  final Uint8List? brandLogo;
+
+  /// Where the settings came from.
+  final List<String> sources;
+
+  bool get isManaged => sources.isNotEmpty;
+
+  /// The username to sign in with: [loginDomain] after a bare one.
+  String login(String username) {
+    final user = username.trim();
+    final domain = loginDomain;
+    if (domain == null || user.isEmpty || user.contains('@')) return user;
+    return '$user@$domain';
+  }
+}
+
 class SignedInAccount {
   const SignedInAccount(this.username, this.server);
   final String username;
@@ -512,6 +569,9 @@ abstract class PhoneApi {
 
   /// The last sign-in, remembered across signing out.
   Future<RememberedSignIn?> lastSignIn();
+
+  /// What this install was set up with; [Managed.none] for an ordinary one.
+  Managed get managed;
 
   /// Ask the server how `username` signs in (`place` is the server or an
   /// email address; empty when the username is an email address).
