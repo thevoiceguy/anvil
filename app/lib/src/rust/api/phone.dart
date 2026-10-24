@@ -7,37 +7,64 @@ import '../frb_generated.dart';
 
 import 'package:flutter_rust_bridge/flutter_rust_bridge_for_generated.dart';
 
-// These functions are ignored because they are not marked as `pub`: `act`, `devices`, `direction`, `execute`, `kind_only`, `on_runtime_pub`, `on_runtime`, `phone`, `runtime`, `set_push`, `this_install`, `wake`
+// These functions are ignored because they are not marked as `pub`: `act`, `devices`, `direction`, `execute`, `kind_only`, `on_runtime_pub`, `on_runtime`, `phone`, `place_of`, `remember`, `runtime`, `set_push`, `this_install`, `wake`
 
 /// The session kept at `session_path`, if there is one.
 Future<Account?> savedAccount({required String sessionPath}) =>
     RustLib.instance.api.crateApiPhoneSavedAccount(sessionPath: sessionPath);
 
+/// The last sign-in remembered beside the session at `session_path`; it
+/// outlives signing out. Never a password.
+Future<RememberedSignIn?> lastSignIn({required String sessionPath}) =>
+    RustLib.instance.api.crateApiPhoneLastSignIn(sessionPath: sessionPath);
+
+/// Ask the server how `username` signs in (`place` is the server or an
+/// email address).
+Future<SignInMethods> signInMethods({
+  required String place,
+  required String username,
+}) => RustLib.instance.api.crateApiPhoneSignInMethods(
+  place: place,
+  username: username,
+);
+
 /// Sign in with a username and password (`place` is the server or an email
-/// address), keeping the session at `session_path`.
-Future<Account> signIn({
+/// address), keeping the session at `session_path`. `None`: the password
+/// was right and FCP wants a one-time code next, which
+/// [`sign_in_with_code`] takes.
+Future<Account?> signIn({
   required String place,
   required String username,
   required String password,
-  String? totp,
   required String sessionPath,
 }) => RustLib.instance.api.crateApiPhoneSignIn(
   place: place,
   username: username,
   password: password,
-  totp: totp,
+  sessionPath: sessionPath,
+);
+
+/// Finish a password sign-in with the one-time code it was asked for. A
+/// wrong code may be tried again.
+Future<Account> signInWithCode({
+  required String code,
+  required String sessionPath,
+}) => RustLib.instance.api.crateApiPhoneSignInWithCode(
+  code: code,
   sessionPath: sessionPath,
 );
 
 /// Start signing in through the system browser, the way single sign-on
-/// works (`place` is the server or an email address): the address the app
-/// opens. [`finish_browser_sign_in`] then waits for the browser to come
-/// back.
+/// works (`place` is the server or an email address, `username` what the
+/// person typed, if anything): the address the app opens.
+/// [`finish_browser_sign_in`] then waits for the browser to come back.
 Future<String> startBrowserSignIn({
   required String place,
+  required String username,
   required String sessionPath,
 }) => RustLib.instance.api.crateApiPhoneStartBrowserSignIn(
   place: place,
+  username: username,
   sessionPath: sessionPath,
 );
 
@@ -646,6 +673,26 @@ class Recent {
 /// Whether the account is registered.
 enum Registration { unregistered, registering, registered, failed }
 
+/// What the sign-in screen comes back filled in with: the last server (or
+/// email address) and username signed in with.
+class RememberedSignIn {
+  final String place;
+  final String username;
+
+  const RememberedSignIn({required this.place, required this.username});
+
+  @override
+  int get hashCode => place.hashCode ^ username.hashCode;
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is RememberedSignIn &&
+          runtimeType == other.runtimeType &&
+          place == other.place &&
+          username == other.username;
+}
+
 /// A ringtone to choose: `anvil`, `classic`, or `brand:` and its name.
 class Ringtone {
   final String id;
@@ -663,6 +710,33 @@ class Ringtone {
           runtimeType == other.runtimeType &&
           id == other.id &&
           name == other.name;
+}
+
+/// How a person signs in on a server (`POST /auth/discover`).
+class SignInMethods {
+  /// The server said (an older FCP has no discover route: both ways are
+  /// offered).
+  final bool known;
+  final bool password;
+  final bool sso;
+
+  const SignInMethods({
+    required this.known,
+    required this.password,
+    required this.sso,
+  });
+
+  @override
+  int get hashCode => known.hashCode ^ password.hashCode ^ sso.hashCode;
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is SignInMethods &&
+          runtimeType == other.runtimeType &&
+          known == other.known &&
+          password == other.password &&
+          sso == other.sso;
 }
 
 /// The system's microphones and speakers.

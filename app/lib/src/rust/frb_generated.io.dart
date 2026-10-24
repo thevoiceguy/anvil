@@ -58,6 +58,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   Quality dco_decode_box_autoadd_quality(dynamic raw);
 
   @protected
+  RememberedSignIn dco_decode_box_autoadd_remembered_sign_in(dynamic raw);
+
+  @protected
   int dco_decode_box_autoadd_u_32(dynamic raw);
 
   @protected
@@ -121,6 +124,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   Quality? dco_decode_opt_box_autoadd_quality(dynamic raw);
 
   @protected
+  RememberedSignIn? dco_decode_opt_box_autoadd_remembered_sign_in(dynamic raw);
+
+  @protected
   int? dco_decode_opt_box_autoadd_u_32(dynamic raw);
 
   @protected
@@ -151,7 +157,13 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   Registration dco_decode_registration(dynamic raw);
 
   @protected
+  RememberedSignIn dco_decode_remembered_sign_in(dynamic raw);
+
+  @protected
   Ringtone dco_decode_ringtone(dynamic raw);
+
+  @protected
+  SignInMethods dco_decode_sign_in_methods(dynamic raw);
 
   @protected
   SystemAudio dco_decode_system_audio(dynamic raw);
@@ -212,6 +224,11 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   Quality sse_decode_box_autoadd_quality(SseDeserializer deserializer);
+
+  @protected
+  RememberedSignIn sse_decode_box_autoadd_remembered_sign_in(
+    SseDeserializer deserializer,
+  );
 
   @protected
   int sse_decode_box_autoadd_u_32(SseDeserializer deserializer);
@@ -279,6 +296,11 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   Quality? sse_decode_opt_box_autoadd_quality(SseDeserializer deserializer);
 
   @protected
+  RememberedSignIn? sse_decode_opt_box_autoadd_remembered_sign_in(
+    SseDeserializer deserializer,
+  );
+
+  @protected
   int? sse_decode_opt_box_autoadd_u_32(SseDeserializer deserializer);
 
   @protected
@@ -311,7 +333,13 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   Registration sse_decode_registration(SseDeserializer deserializer);
 
   @protected
+  RememberedSignIn sse_decode_remembered_sign_in(SseDeserializer deserializer);
+
+  @protected
   Ringtone sse_decode_ringtone(SseDeserializer deserializer);
+
+  @protected
+  SignInMethods sse_decode_sign_in_methods(SseDeserializer deserializer);
 
   @protected
   SystemAudio sse_decode_system_audio(SseDeserializer deserializer);
@@ -378,6 +406,12 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   void sse_encode_box_autoadd_quality(Quality self, SseSerializer serializer);
+
+  @protected
+  void sse_encode_box_autoadd_remembered_sign_in(
+    RememberedSignIn self,
+    SseSerializer serializer,
+  );
 
   @protected
   void sse_encode_box_autoadd_u_32(int self, SseSerializer serializer);
@@ -467,6 +501,12 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   );
 
   @protected
+  void sse_encode_opt_box_autoadd_remembered_sign_in(
+    RememberedSignIn? self,
+    SseSerializer serializer,
+  );
+
+  @protected
   void sse_encode_opt_box_autoadd_u_32(int? self, SseSerializer serializer);
 
   @protected
@@ -503,7 +543,16 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   void sse_encode_registration(Registration self, SseSerializer serializer);
 
   @protected
+  void sse_encode_remembered_sign_in(
+    RememberedSignIn self,
+    SseSerializer serializer,
+  );
+
+  @protected
   void sse_encode_ringtone(Ringtone self, SseSerializer serializer);
+
+  @protected
+  void sse_encode_sign_in_methods(SignInMethods self, SseSerializer serializer);
 
   @protected
   void sse_encode_system_audio(SystemAudio self, SseSerializer serializer);

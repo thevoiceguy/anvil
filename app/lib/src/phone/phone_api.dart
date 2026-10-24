@@ -456,15 +456,58 @@ class SignedInAccount {
   final String server;
 }
 
+/// The last server (or email address) and username signed in with, which
+/// the sign-in screen comes back filled in with. Never a password.
+class RememberedSignIn {
+  const RememberedSignIn(this.place, this.username);
+  final String place;
+  final String username;
+}
+
+/// How a person signs in, as the server says (`POST /auth/discover`).
+class SignInMethods {
+  const SignInMethods({
+    required this.password,
+    required this.sso,
+    this.known = true,
+  });
+
+  /// A password is taken.
+  final bool password;
+
+  /// Single sign-on through the browser is offered.
+  final bool sso;
+
+  /// The server said; an older server has no way to ask, and both ways are
+  /// offered.
+  final bool known;
+}
+
 /// Everything the app asks of the phone.
 abstract class PhoneApi {
   Future<SignedInAccount?> savedAccount();
-  Future<SignedInAccount> signIn({
+
+  /// The last sign-in, remembered across signing out.
+  Future<RememberedSignIn?> lastSignIn();
+
+  /// Ask the server how `username` signs in (`place` is the server or an
+  /// email address; empty when the username is an email address).
+  Future<SignInMethods> signInMethods({
+    required String place,
+    required String username,
+  });
+
+  /// Sign in with a password. Null: the password was right and the server
+  /// wants a one-time code next ([signInWithCode]).
+  Future<SignedInAccount?> signIn({
     required String place,
     required String username,
     required String password,
-    String? code,
   });
+
+  /// Finish a password sign-in with its one-time code; a wrong code may be
+  /// tried again.
+  Future<SignedInAccount> signInWithCode(String code);
 
   /// Whether this platform signs in through the system browser (single
   /// sign-on): a desktop, whose browser comes back to the app's loopback
@@ -472,7 +515,10 @@ abstract class PhoneApi {
   bool get canSignInWithBrowser;
 
   /// Start signing in through the browser: the address to open.
-  Future<String> startBrowserSignIn({required String place});
+  Future<String> startBrowserSignIn({
+    required String place,
+    String username = '',
+  });
 
   /// Wait for the browser to come back, and keep the session.
   Future<SignedInAccount> finishBrowserSignIn();

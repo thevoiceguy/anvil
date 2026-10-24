@@ -119,9 +119,16 @@ only where users would notice them missing: window controls and the menu bar
 on desktop, the system call screen (CallKit, ConnectionService) on mobile, the
 share sheet.
 
-- **Sign in.** Server address or email address (FCP's discovery), the system
-  browser for SSO or a password, a one-time code when asked. The install
-  becomes a device of the user's, as it does today.
+- **Sign in.** Server address or email address (FCP's discovery) and the
+  username first; FCP's `/auth/discover` then says how that person signs
+  in: a password (with a small "Use single sign-on" link when the tenant
+  has an identity provider too), or straight to the system browser when
+  the tenant signs in only by single sign-on. An FCP without the route gets
+  the password and the link. A one-time code is a second step, shown only
+  when FCP asks for one. The last server and username are remembered
+  beside the session (`last_sign_in.json`, never a password) and fill the
+  form in after signing out. The install becomes a device of the user's,
+  as it does today.
 - **Keypad.** Dial a number, an extension or a name.
 - **In a call.** Mute, hold, keypad (DTMF), speaker or headset, blind and
   attended transfer, park, add a second call and swap, end. Call quality and
@@ -129,7 +136,7 @@ share sheet.
 - **Incoming.** Answer, decline, send to voicemail, the caller's name from the
   directory. A second call while one is up.
 - **Recents.** History, missed calls marked, call back.
-- **People.** The tenant's directory with presence, searchable, busy lamps for
+- **Contacts.** The tenant's directory with presence, searchable, busy lamps for
   favourites.
 - **Voicemail.** Messages with transcription, play, mark heard, delete, the
   count on the tab.

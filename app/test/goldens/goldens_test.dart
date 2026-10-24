@@ -218,8 +218,8 @@ void main() {
     testWidgets('recents, $theme', (tester) async {
       await shot(tester, 'recents', (_) => page(tester, 'Recents'));
     });
-    testWidgets('people, $theme', (tester) async {
-      await shot(tester, 'people', (_) => page(tester, 'People'));
+    testWidgets('contacts, $theme', (tester) async {
+      await shot(tester, 'contacts', (_) => page(tester, 'Contacts'));
     });
     testWidgets('voicemail, $theme', (tester) async {
       await shot(tester, 'voicemail', (_) => page(tester, 'Voicemail'));

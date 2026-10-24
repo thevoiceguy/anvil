@@ -164,42 +164,107 @@ impl BrowserSignIn {
     }
 }
 
-/// Sign in without a browser (`anvil-cli`, tests): the password — and the
-/// one-time code when FCP asks for one — as the web sign-in takes them,
-/// then a session of the app's own from that fresh sign-in.
-pub async fn password_sign_in(
+/// Where a password sign-in stands after the password.
+#[derive(Debug)]
+pub enum PasswordStep {
+    /// Signed in: the app's session.
+    SignedIn(Session),
+    /// The password was right; FCP wants a one-time code next.
+    CodeNeeded(SecondFactor),
+}
+
+/// A password sign-in waiting for its one-time code: FCP's ticket for
+/// `/auth/login/totp`, good for five minutes and for another try after a
+/// wrong code.
+#[derive(Debug, Clone)]
+pub struct SecondFactor {
+    server: Server,
+    client: AppClient,
+    mfa_token: String,
+}
+
+impl SecondFactor {
+    /// Sign in with the one-time code from the user's authenticator app.
+    pub async fn finish(&self, code: &str) -> Result<Session, FcpError> {
+        let response = http()
+            .post(format!("{}/auth/login/totp", self.server.api_url))
+            .json(&serde_json::json!({ "mfa_token": self.mfa_token, "code": code.trim() }))
+            .send()
+            .await?;
+        if !response.status().is_success() {
+            return Err(refused_at_sign_in(response).await);
+        }
+        let login: serde_json::Value = response.json().await?;
+        app_session(self.server.clone(), self.client.clone(), &login).await
+    }
+}
+
+/// A refusal while signing in: a 401 is a wrong password or code (FCP says
+/// which), not a session that ended.
+async fn refused_at_sign_in(response: reqwest::Response) -> FcpError {
+    if response.status() == reqwest::StatusCode::UNAUTHORIZED {
+        let body: serde_json::Value = response.json().await.unwrap_or_default();
+        let message = body["details"]
+            .as_str()
+            .or_else(|| body["error"].as_str())
+            .filter(|m| !m.is_empty())
+            .unwrap_or("the username or password is not right");
+        return FcpError::Rejected(message.to_string());
+    }
+    refused(response).await
+}
+
+/// The first step of a sign-in without a browser: the password, as the web
+/// sign-in takes it. FCP answers a session, or asks for a one-time code.
+pub async fn begin_password_sign_in(
     server: Server,
     client: AppClient,
     username: &str,
     password: &str,
-    totp: Option<&str>,
-) -> Result<Session, FcpError> {
-    let http = http();
-    let response = http
+) -> Result<PasswordStep, FcpError> {
+    let response = http()
         .post(format!("{}/auth/login", server.api_url))
         .json(&serde_json::json!({ "username": username, "password": password }))
         .send()
         .await?;
     if !response.status().is_success() {
-        return Err(refused(response).await);
+        return Err(refused_at_sign_in(response).await);
     }
-    let mut login: serde_json::Value = response.json().await?;
-    if login["mfa_required"].is_string() {
-        let code = totp.ok_or(FcpError::TotpRequired)?;
-        let response = http
-            .post(format!("{}/auth/login/totp", server.api_url))
-            .json(&serde_json::json!({ "mfa_token": login["mfa_token"], "code": code }))
-            .send()
-            .await?;
-        if !response.status().is_success() {
-            return Err(refused(response).await);
+    let login: serde_json::Value = response.json().await?;
+    match login["mfa_required"].as_str() {
+        None => Ok(PasswordStep::SignedIn(
+            app_session(server, client, &login).await?,
+        )),
+        Some("totp") => {
+            let mfa_token = login["mfa_token"]
+                .as_str()
+                .ok_or_else(|| FcpError::Invalid("no mfa_token in the sign-in's answer".into()))?
+                .to_string();
+            Ok(PasswordStep::CodeNeeded(SecondFactor {
+                server,
+                client,
+                mfa_token,
+            }))
         }
-        login = response.json().await?;
+        // `totp_enrollment`: a second factor the tenant requires and the
+        // user has not set up, which only the web sign-in sets up.
+        Some(_) => Err(FcpError::SecondFactorSetup),
+    }
+}
+
+/// A session of the app's own from a web sign-in's answer.
+async fn app_session(
+    server: Server,
+    client: AppClient,
+    login: &serde_json::Value,
+) -> Result<Session, FcpError> {
+    if login["password_expired"].as_bool() == Some(true) {
+        return Err(FcpError::PasswordExpired);
     }
     let web = login["token"]
         .as_str()
         .ok_or_else(|| FcpError::Invalid("no token in the sign-in's answer".into()))?;
-    let response = http
+    let response = http()
         .post(format!("{}/auth/app/sessions", server.api_url))
         .bearer_auth(web)
         .json(&client)
@@ -210,4 +275,22 @@ pub async fn password_sign_in(
     }
     let tokens: serde_json::Value = response.json().await?;
     Session::from_tokens(server, client, &tokens, None)
+}
+
+/// Sign in without a browser (`anvil-cli`, tests): the password — and the
+/// one-time code when FCP asks for one — as the web sign-in takes them,
+/// then a session of the app's own from that fresh sign-in.
+pub async fn password_sign_in(
+    server: Server,
+    client: AppClient,
+    username: &str,
+    password: &str,
+    totp: Option<&str>,
+) -> Result<Session, FcpError> {
+    match begin_password_sign_in(server, client, username, password).await? {
+        PasswordStep::SignedIn(session) => Ok(session),
+        PasswordStep::CodeNeeded(second) => {
+            second.finish(totp.ok_or(FcpError::TotpRequired)?).await
+        }
+    }
 }

@@ -32,7 +32,7 @@ void main() {
       AnvilApp(phone: RustPhone(), mobile: NativeMobile()),
     );
     await tester.pumpAndSettle();
-    expect(find.byKey(const Key('signIn')), findsOneWidget);
+    expect(find.byKey(const Key('continue')), findsOneWidget);
   });
 
   // As the app does before the phone starts: on iOS the microphone is an

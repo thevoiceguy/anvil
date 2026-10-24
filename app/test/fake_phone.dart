@@ -92,16 +92,54 @@ class FakePhone implements PhoneApi {
   @override
   Future<SignedInAccount?> savedAccount() async => saved;
 
+  /// The last sign-in, as the app remembers it.
+  RememberedSignIn? remembered;
+
+  /// How the server says a person signs in; a server that cannot be found
+  /// when `discoverError` is set.
+  SignInMethods methods = const SignInMethods(password: true, sso: false);
+  String? discoverError;
+
+  /// The server asks for a one-time code (`123456`) after the password.
+  bool wantsCode = false;
+  String? _pending;
+
   @override
-  Future<SignedInAccount> signIn({
+  Future<RememberedSignIn?> lastSignIn() async => remembered;
+
+  @override
+  Future<SignInMethods> signInMethods({
+    required String place,
+    required String username,
+  }) async {
+    log.add('methods $place $username');
+    if (discoverError != null) throw Exception(discoverError);
+    return methods;
+  }
+
+  @override
+  Future<SignedInAccount?> signIn({
     required String place,
     required String username,
     required String password,
-    String? code,
   }) async {
     log.add('signIn $place $username');
     if (password != 'right') throw Exception('wrong password');
+    if (wantsCode) {
+      _pending = place;
+      return null;
+    }
+    remembered = RememberedSignIn(place, username);
     return saved = SignedInAccount(username, place);
+  }
+
+  @override
+  Future<SignedInAccount> signInWithCode(String code) async {
+    log.add('code $code');
+    if (_pending == null) throw Exception('sign in with your password first');
+    if (code != '123456') throw Exception('The code is not right');
+    remembered = RememberedSignIn(_pending!, 'alice');
+    return saved = SignedInAccount('alice', _pending!);
   }
 
   @override
@@ -111,7 +149,10 @@ class FakePhone implements PhoneApi {
   final browser = Completer<SignedInAccount>();
 
   @override
-  Future<String> startBrowserSignIn({required String place}) async {
+  Future<String> startBrowserSignIn({
+    required String place,
+    String username = '',
+  }) async {
     log.add('browser $place');
     return 'https://$place/auth/app/authorize?state=x';
   }

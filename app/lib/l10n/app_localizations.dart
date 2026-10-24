@@ -141,10 +141,28 @@ abstract class Strings {
   /// **'Sign in'**
   String get signInButton;
 
+  /// No description provided for @signInContinue.
+  ///
+  /// In en, this message translates to:
+  /// **'Continue'**
+  String get signInContinue;
+
+  /// No description provided for @signInChange.
+  ///
+  /// In en, this message translates to:
+  /// **'Change'**
+  String get signInChange;
+
+  /// No description provided for @signInUseSso.
+  ///
+  /// In en, this message translates to:
+  /// **'Use single sign-on'**
+  String get signInUseSso;
+
   /// No description provided for @signInBrowserButton.
   ///
   /// In en, this message translates to:
-  /// **'Sign in with your browser'**
+  /// **'Continue in your browser'**
   String get signInBrowserButton;
 
   /// No description provided for @signInBrowserWaiting.
@@ -153,11 +171,35 @@ abstract class Strings {
   /// **'Finish signing in in your browser.'**
   String get signInBrowserWaiting;
 
+  /// No description provided for @signInSsoUnavailable.
+  ///
+  /// In en, this message translates to:
+  /// **'This account signs in with single sign-on, which Anvil cannot do on this device yet.'**
+  String get signInSsoUnavailable;
+
+  /// No description provided for @signInCodePrompt.
+  ///
+  /// In en, this message translates to:
+  /// **'Enter the one-time code from your authenticator app.'**
+  String get signInCodePrompt;
+
+  /// No description provided for @signInVerify.
+  ///
+  /// In en, this message translates to:
+  /// **'Verify'**
+  String get signInVerify;
+
   /// No description provided for @signInServerNeeded.
   ///
   /// In en, this message translates to:
   /// **'Enter your server or email address first.'**
   String get signInServerNeeded;
+
+  /// No description provided for @signInUsernameNeeded.
+  ///
+  /// In en, this message translates to:
+  /// **'Enter your username.'**
+  String get signInUsernameNeeded;
 
   /// No description provided for @signInFailed.
   ///
@@ -336,7 +378,7 @@ abstract class Strings {
   /// No description provided for @navPeople.
   ///
   /// In en, this message translates to:
-  /// **'People'**
+  /// **'Contacts'**
   String get navPeople;
 
   /// No description provided for @navVoicemail.
@@ -486,13 +528,13 @@ abstract class Strings {
   /// No description provided for @peopleSearch.
   ///
   /// In en, this message translates to:
-  /// **'Search people'**
+  /// **'Search contacts'**
   String get peopleSearch;
 
   /// No description provided for @peopleEmpty.
   ///
   /// In en, this message translates to:
-  /// **'Nobody to show'**
+  /// **'No contacts to show'**
   String get peopleEmpty;
 
   /// No description provided for @favourites.
