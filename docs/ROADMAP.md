@@ -94,7 +94,8 @@ live in FCP: `docs/SOFTPHONE.md` in `thevoiceguy/fcp`. Anvil's phases:
 
 ## Managed installs and branded builds
 
-Designed 2026-10-24 (`docs/MANAGED_INSTALLS.md`), questions open:
+Designed 2026-10-24 (`docs/MANAGED_INSTALLS.md`), agreed the same day on
+every recommendation:
 
 - [ ] **M1** The profile and policy: server (locked), login domain, sign-in
       mode, username from the system, updates; the profile's brand before

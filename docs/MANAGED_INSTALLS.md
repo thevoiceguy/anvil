@@ -1,7 +1,8 @@
 # Anvil — managed installs and branded builds
 
 Designed 2026-10-24 from D8's findings on FCP (`thevoiceguy/fcp`,
-`docs/DEEP_TESTING.md`). The questions are in §7; nothing is agreed yet.
+`docs/DEEP_TESTING.md`) and agreed the same day on every recommendation
+in §7.
 The findings this answers:
 
 - **8c.** The server address should be set without the user, so the app
