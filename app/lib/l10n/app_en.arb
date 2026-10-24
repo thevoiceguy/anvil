@@ -229,5 +229,43 @@
       }
     }
   },
-  "checkForUpdates": "Check for updates"
+  "checkForUpdates": "Check for updates",
+  "qualityPackets": "{received} packets received, {played} played, {dropped} dropped",
+  "@qualityPackets": {
+    "placeholders": {
+      "received": {
+        "type": "int"
+      },
+      "played": {
+        "type": "int"
+      },
+      "dropped": {
+        "type": "int"
+      }
+    }
+  },
+  "qualityUnexpectedPt": "Payload type {pt} arrived; this call's codec is {expected}",
+  "@qualityUnexpectedPt": {
+    "placeholders": {
+      "pt": {
+        "type": "int"
+      },
+      "expected": {
+        "type": "int"
+      }
+    }
+  },
+  "qualityFrom": "From {source}",
+  "@qualityFrom": {
+    "placeholders": {
+      "source": {
+        "type": "String"
+      }
+    }
+  },
+  "settingsTroubleshooting": "Troubleshooting",
+  "logFile": "Log file",
+  "logFileCopy": "Copy the path",
+  "logFileCopied": "Path copied",
+  "logFileOpenFolder": "Open the folder"
 }

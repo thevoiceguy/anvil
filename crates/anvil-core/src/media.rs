@@ -26,6 +26,7 @@ use tokio::task::JoinHandle;
 use crate::audio::{AudioFormat, AudioFrame, AudioSink, AudioSource};
 use crate::config::Codec;
 use crate::error::AnvilError;
+use crate::event::ReceiveCounts;
 
 /// Handles to the three tasks driving a single call's media (send, receive,
 /// stats sampler). Dropped (and aborted)
@@ -43,6 +44,10 @@ pub(crate) struct MediaPipeline {
     /// The microphone muted: silence is sent in its place, so the far end
     /// keeps receiving RTP and does not take the call for dead.
     pub(crate) muted: Arc<AtomicBool>,
+    /// The call's counters, for the receive summary when it ends.
+    pub(crate) metrics: Arc<MediaMetrics>,
+    /// The call the pipeline is for, when it is one (not in unit tests).
+    call: Option<u64>,
 }
 
 impl MediaPipeline {
@@ -56,6 +61,23 @@ impl MediaPipeline {
 impl Drop for MediaPipeline {
     fn drop(&mut self) {
         self.abort();
+        // One line per call that says what the far end's media did: when a
+        // call is heard one way only, this is where to look first.
+        let rx = self.metrics.receive_counts();
+        tracing::info!(
+            call = ?self.call,
+            received = rx.received,
+            played = rx.played,
+            dropped_payload_type = rx.dropped_payload_type,
+            last_unexpected_pt = ?rx.last_unexpected_pt,
+            expected_pt = rx.expected_pt,
+            dropped_srtp = rx.dropped_srtp,
+            dropped_malformed = rx.dropped_malformed,
+            refused = rx.refused,
+            last_source = ?rx.last_source,
+            sent = self.metrics.packets_tx.load(Ordering::Relaxed),
+            "rtp: receive summary"
+        );
     }
 }
 
@@ -77,6 +99,19 @@ pub(crate) struct MediaMetrics {
     /// Audio clock, used to convert the jitter accumulator from RTP units
     /// to milliseconds when reporting.
     rtp_clock_rate: u32,
+    /// Every datagram received and what became of it.
+    rx: Mutex<ReceiveCounts>,
+}
+
+/// Why a received datagram was not played.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum RxDrop {
+    /// Not the call's codec nor telephone-event: the payload type.
+    PayloadType(u8),
+    /// Did not authenticate under the far end's SRTP key.
+    Srtp,
+    /// Not an RTP packet.
+    Malformed,
 }
 
 impl MediaMetrics {
@@ -89,7 +124,48 @@ impl MediaMetrics {
             jitter: Mutex::new(JitterState::default()),
             seq: Mutex::new(SeqState::default()),
             rtp_clock_rate,
+            rx: Mutex::new(ReceiveCounts::default()),
         })
+    }
+
+    /// The receive counters as they stand.
+    pub(crate) fn receive_counts(&self) -> ReceiveCounts {
+        *self.rx.lock()
+    }
+
+    /// A datagram read from `from`; true for the call's first.
+    fn on_datagram(&self, from: SocketAddr) -> bool {
+        let mut rx = self.rx.lock();
+        rx.received += 1;
+        rx.last_source = Some(from);
+        rx.received == 1
+    }
+
+    /// A datagram dropped; true for the call's first dropped for that reason.
+    fn on_drop(&self, why: RxDrop) -> bool {
+        let mut rx = self.rx.lock();
+        let count = match why {
+            RxDrop::PayloadType(pt) => {
+                rx.last_unexpected_pt = Some(pt);
+                &mut rx.dropped_payload_type
+            }
+            RxDrop::Srtp => &mut rx.dropped_srtp,
+            RxDrop::Malformed => &mut rx.dropped_malformed,
+        };
+        *count += 1;
+        *count == 1
+    }
+
+    /// A frame handed to the speaker.
+    fn on_played(&self) {
+        self.rx.lock().played += 1;
+    }
+
+    /// A receive reported an earlier datagram refused; true for the first.
+    fn on_refused(&self) -> bool {
+        let mut rx = self.rx.lock();
+        rx.refused += 1;
+        rx.refused == 1
     }
 
     fn on_rtp_rx(&self, seq: u16, rtp_ts: u32, bytes: usize, arrival: Instant) {
@@ -688,6 +764,8 @@ pub(crate) fn start_pipeline(
     let payload_type = send_spec.payload_type;
 
     let metrics = MediaMetrics::new(send_spec.rtp_clock_rate);
+    metrics.rx.lock().expected_pt = recv_spec.payload_type;
+    let call = stats_sink.as_ref().map(|s| s.call.0);
     let hold = HoldState::new(MediaDirection::Sendrecv);
 
     // Channel for outbound DTMF requests. Keep a modest buffer — humans type
@@ -807,14 +885,17 @@ pub(crate) fn start_pipeline(
         let mut dtmf_dedup = DtmfDeduplicator::new();
         let mut buf = vec![0u8; 2048];
         loop {
-            let (len, _peer) = match recv_rtp(&sock_recv, &mut buf).await {
+            let (len, from) = match recv_rtp(&sock_recv, &mut buf, &metrics_recv, call).await {
                 Ok(x) => x,
                 Err(e) => {
-                    tracing::warn!(%e, "rtp recv failed");
+                    tracing::warn!(?call, %e, "rtp recv failed");
                     break;
                 }
             };
             let arrival = Instant::now();
+            if metrics_recv.on_datagram(from) {
+                tracing::info!(?call, %from, len, "rtp: first packet received");
+            }
 
             let data = match &srtp_recv {
                 // Anything that does not authenticate under their key is
@@ -822,7 +903,17 @@ pub(crate) fn start_pipeline(
                 Some(ctx) => match ctx.lock().unprotect_rtp(&buf[..len]) {
                     Ok(plain) => Bytes::from(plain),
                     Err(e) => {
-                        tracing::debug!(%e, "srtp unprotect failed; dropping");
+                        if metrics_recv.on_drop(RxDrop::Srtp) {
+                            tracing::info!(
+                                ?call,
+                                %from,
+                                %e,
+                                "rtp: dropping packets that do not authenticate \
+                                 under the far end's SRTP key"
+                            );
+                        } else {
+                            tracing::debug!(%e, "srtp unprotect failed; dropping");
+                        }
                         continue;
                     }
                 },
@@ -831,7 +922,11 @@ pub(crate) fn start_pipeline(
             let packet = match RtpPacket::parse(data) {
                 Ok(p) => p,
                 Err(e) => {
-                    tracing::debug!(%e, "rtp parse failed; ignoring");
+                    if metrics_recv.on_drop(RxDrop::Malformed) {
+                        tracing::info!(?call, %from, len, %e, "rtp: dropping datagrams that are not RTP");
+                    } else {
+                        tracing::debug!(%e, "rtp parse failed; ignoring");
+                    }
                     continue;
                 }
             };
@@ -849,7 +944,17 @@ pub(crate) fn start_pipeline(
             }
 
             if pt != recv_pt {
-                tracing::debug!(pt, want = recv_pt, "unexpected payload type; ignoring");
+                if metrics_recv.on_drop(RxDrop::PayloadType(pt)) {
+                    tracing::info!(
+                        ?call,
+                        %from,
+                        pt,
+                        expected = recv_pt,
+                        "rtp: dropping packets of a payload type not the call's codec"
+                    );
+                } else {
+                    tracing::debug!(pt, want = recv_pt, "unexpected payload type; ignoring");
+                }
                 continue;
             }
 
@@ -875,9 +980,10 @@ pub(crate) fn start_pipeline(
             };
 
             if let Err(e) = playback.write_frame(&frame).await {
-                tracing::warn!(%e, "playback write failed");
+                tracing::warn!(?call, %e, "playback write failed");
                 break;
             }
+            metrics_recv.on_played();
         }
     });
 
@@ -943,6 +1049,7 @@ pub(crate) fn start_pipeline(
                     rtt_ms: None, // RTT needs RTCP — Phase 2 later milestone.
                     recv_kbps,
                     send_kbps,
+                    receive: metrics.receive_counts(),
                 };
                 // Drop silently if the event stream is full; stats are
                 // strictly advisory.
@@ -964,6 +1071,8 @@ pub(crate) fn start_pipeline(
         dtmf_tx,
         hold,
         muted,
+        metrics,
+        call,
     })
 }
 
@@ -1109,15 +1218,22 @@ pub(crate) fn extract_remote_rtp_addr(body: &[u8]) -> Option<SocketAddr> {
 /// The next datagram on a call's RTP socket. On Windows a datagram the
 /// other end's port refused (ICMP port unreachable, say after it hung up
 /// or before it opened) surfaces as `ConnectionReset` on the next receive;
-/// that is not this socket failing, so the receive goes on.
+/// that is not this socket failing, so the receive goes on (counted: what
+/// we send is not reaching a listener).
 async fn recv_rtp(
     socket: &tokio::net::UdpSocket,
     buf: &mut [u8],
+    metrics: &MediaMetrics,
+    call: Option<u64>,
 ) -> std::io::Result<(usize, std::net::SocketAddr)> {
     loop {
         match socket.recv_from(buf).await {
             Err(e) if e.kind() == std::io::ErrorKind::ConnectionReset => {
-                tracing::debug!(%e, "rtp: an earlier datagram was refused");
+                if metrics.on_refused() {
+                    tracing::info!(?call, %e, "rtp: an earlier datagram of ours was refused");
+                } else {
+                    tracing::debug!(%e, "rtp: an earlier datagram was refused");
+                }
             }
             other => return other,
         }
@@ -1492,6 +1608,159 @@ mod tests {
         round_trip_for(Codec::Opus, 48000).await;
     }
 
+    /// A pipeline receiving from a test socket that sends whatever it is
+    /// given: the pipeline, the frames it played, the sender, and where to.
+    async fn receiver(
+        codec: Codec,
+        srtp: Option<forge_rtp::srtp::SrtpContext>,
+    ) -> (MediaPipeline, Arc<AtomicU64>, UdpSocket, SocketAddr) {
+        let loopback = IpAddr::V4(Ipv4Addr::LOCALHOST);
+        let sock = Arc::new(UdpSocket::bind(SocketAddr::new(loopback, 0)).await.unwrap());
+        let to = sock.local_addr().unwrap();
+        // What the pipeline sends goes nowhere anyone reads.
+        let discard = UdpSocket::bind(SocketAddr::new(loopback, 0)).await.unwrap();
+        let frames = Arc::new(AtomicU64::new(0));
+        let spec = CodecSpec::for_codec(codec);
+        let pipe = start_pipeline(
+            codec,
+            sock,
+            discard.local_addr().unwrap(),
+            Box::new(ToneSource::new_at(440.0, spec.sample_rate)),
+            Box::new(RmsSink {
+                frames: Arc::clone(&frames),
+                peak_rms_q: Arc::new(AtomicU64::new(0)),
+            }),
+            None,
+            srtp,
+        )
+        .unwrap();
+        let peer = UdpSocket::bind(SocketAddr::new(loopback, 0)).await.unwrap();
+        (pipe, frames, peer, to)
+    }
+
+    fn rtp(pt: u8, seq: u16) -> Bytes {
+        RtpPacket::build(
+            pt,
+            seq,
+            u32::from(seq) * 160,
+            0x1234_5678,
+            Bytes::from(vec![0xffu8; 160]),
+            false,
+        )
+        .to_bytes()
+        .freeze()
+    }
+
+    /// Wait until the pipeline has read `n` datagrams.
+    async fn until_received(pipe: &MediaPipeline, n: u64) -> ReceiveCounts {
+        let deadline = tokio::time::Instant::now() + Duration::from_secs(5);
+        loop {
+            let rx = pipe.metrics.receive_counts();
+            if rx.received >= n || tokio::time::Instant::now() > deadline {
+                // Let the last one through the decoder and the speaker.
+                tokio::time::sleep(Duration::from_millis(50)).await;
+                return pipe.metrics.receive_counts();
+            }
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+    }
+
+    /// The call's codec is played; another payload type and what is not RTP
+    /// are counted, with the offending payload type and the sender, and not
+    /// played.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+    async fn the_receive_counts_what_it_plays_and_what_it_drops() {
+        let (pipe, frames, peer, to) = receiver(Codec::Pcmu, None).await;
+        for seq in 0..5 {
+            peer.send_to(&rtp(0, seq), to).await.unwrap();
+        }
+        for seq in 5..8 {
+            peer.send_to(&rtp(111, seq), to).await.unwrap();
+        }
+        peer.send_to(b"not rtp", to).await.unwrap();
+        peer.send_to(&[0u8; 4], to).await.unwrap();
+
+        let rx = until_received(&pipe, 10).await;
+        // The pipeline also sends, to a port nobody listens on: Windows
+        // reports that as refused datagrams on this socket, Linux does not.
+        assert_eq!(
+            ReceiveCounts { refused: 0, ..rx },
+            ReceiveCounts {
+                received: 10,
+                played: 5,
+                dropped_payload_type: 3,
+                last_unexpected_pt: Some(111),
+                expected_pt: 0,
+                dropped_srtp: 0,
+                dropped_malformed: 2,
+                refused: 0,
+                last_source: Some(peer.local_addr().unwrap()),
+            }
+        );
+        assert_eq!(rx.dropped(), 5);
+        assert_eq!(frames.load(Ordering::Relaxed), 5, "only PCMU was played");
+    }
+
+    /// Plain RTP to an SRTP call does not authenticate: counted, not played.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+    async fn the_receive_counts_what_fails_srtp() {
+        let (offer, answer) = sdes_pair();
+        let ctx = crate::srtp::context(&answer, &offer).unwrap();
+        let (pipe, frames, peer, to) = receiver(Codec::Pcmu, Some(ctx)).await;
+        for seq in 0..4 {
+            peer.send_to(&rtp(0, seq), to).await.unwrap();
+        }
+        let rx = until_received(&pipe, 4).await;
+        assert_eq!((rx.received, rx.dropped_srtp, rx.played), (4, 4, 0));
+        assert_eq!(frames.load(Ordering::Relaxed), 0);
+    }
+
+    /// The counters reach the app in `MediaStats`.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+    async fn media_stats_carry_the_receive_counts() {
+        let loopback = IpAddr::V4(Ipv4Addr::LOCALHOST);
+        let sock = Arc::new(UdpSocket::bind(SocketAddr::new(loopback, 0)).await.unwrap());
+        let to = sock.local_addr().unwrap();
+        let discard = UdpSocket::bind(SocketAddr::new(loopback, 0)).await.unwrap();
+        let (events, mut stream) = mpsc::channel(16);
+        let pipe = start_pipeline(
+            Codec::Pcmu,
+            sock,
+            discard.local_addr().unwrap(),
+            Box::new(ToneSource::new_at(440.0, 8000)),
+            Box::new(RmsSink {
+                frames: Arc::new(AtomicU64::new(0)),
+                peak_rms_q: Arc::new(AtomicU64::new(0)),
+            }),
+            Some(StatsSink {
+                call: crate::CallId(7),
+                codec: Codec::Pcmu,
+                interval: Duration::from_millis(200),
+                events,
+            }),
+            None,
+        )
+        .unwrap();
+        let peer = UdpSocket::bind(SocketAddr::new(loopback, 0)).await.unwrap();
+        peer.send_to(&rtp(8, 1), to).await.unwrap();
+        until_received(&pipe, 1).await;
+        let stats = tokio::time::timeout(Duration::from_secs(2), async {
+            loop {
+                if let Some(crate::event::Event::MediaStats { call, stats }) = stream.recv().await {
+                    assert_eq!(call, crate::CallId(7));
+                    break stats;
+                }
+            }
+        })
+        .await
+        .expect("a MediaStats event");
+        assert_eq!(stats.receive.received, 1);
+        assert_eq!(stats.receive.dropped_payload_type, 1);
+        assert_eq!(stats.receive.last_unexpected_pt, Some(8));
+        assert_eq!(stats.receive.expected_pt, 0);
+        drop(pipe);
+    }
+
     #[tokio::test]
     async fn a_refused_datagram_does_not_end_the_rtp_receive() {
         let socket = tokio::net::UdpSocket::bind("127.0.0.1:0").await.unwrap();
@@ -1510,7 +1779,7 @@ mod tests {
         let mut buf = [0u8; 16];
         let (n, from) = tokio::time::timeout(
             std::time::Duration::from_secs(2),
-            recv_rtp(&socket, &mut buf),
+            recv_rtp(&socket, &mut buf, &MediaMetrics::new(8000), None),
         )
         .await
         .expect("the packet arrives")

@@ -34,7 +34,7 @@ pub use config::{
     AccountConfig, AnvilConfig, BrandConfig, MediaConfig, PushAddress, PushProvider, Transport,
 };
 pub use error::AnvilError;
-pub use event::{EndReason, Event, EventStream, MediaStats, PushState, RegState};
+pub use event::{EndReason, Event, EventStream, MediaStats, PushState, ReceiveCounts, RegState};
 
 use std::net::IpAddr;
 use std::sync::Arc;

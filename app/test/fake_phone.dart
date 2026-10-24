@@ -16,6 +16,9 @@ class FakePhone implements PhoneApi {
   int _next = 1;
   String? refuseWith;
 
+  @override
+  String? logPath;
+
   /// The user's data the phone starts with.
   PhoneSnapshot Function(PhoneSnapshot)? seed;
 
