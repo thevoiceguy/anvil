@@ -70,7 +70,7 @@ class RustLib extends BaseEntrypoint<RustLibApi, RustLibApiImpl, RustLibWire> {
   String get codegenVersion => '2.13.0';
 
   @override
-  int get rustContentHash => 1448125064;
+  int get rustContentHash => 2032393620;
 
   static const kDefaultExternalLibraryLoaderConfig =
       ExternalLibraryLoaderConfig(
@@ -116,6 +116,10 @@ abstract class RustLibApi extends BaseApi {
 
   Future<void> crateApiUpdateInstallUpdate();
 
+  Future<RememberedSignIn?> crateApiPhoneLastSignIn({
+    required String sessionPath,
+  });
+
   String? crateApiPhoneLogPath();
 
   Future<void> crateApiPhoneMarkHeard({required String id});
@@ -147,11 +151,20 @@ abstract class RustLibApi extends BaseApi {
 
   Future<void> crateApiPhoneSetDnd({required bool on_});
 
-  Future<Account> crateApiPhoneSignIn({
+  Future<Account?> crateApiPhoneSignIn({
     required String place,
     required String username,
     required String password,
-    String? totp,
+    required String sessionPath,
+  });
+
+  Future<SignInMethods> crateApiPhoneSignInMethods({
+    required String place,
+    required String username,
+  });
+
+  Future<Account> crateApiPhoneSignInWithCode({
+    required String code,
     required String sessionPath,
   });
 
@@ -159,6 +172,7 @@ abstract class RustLibApi extends BaseApi {
 
   Future<String> crateApiPhoneStartBrowserSignIn({
     required String place,
+    required String username,
     required String sessionPath,
   });
 
@@ -642,12 +656,42 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       const TaskConstMeta(debugName: "install_update", argNames: []);
 
   @override
+  Future<RememberedSignIn?> crateApiPhoneLastSignIn({
+    required String sessionPath,
+  }) {
+    return handler.executeNormal(
+      NormalTask(
+        callFfi: (port_) {
+          final serializer = SseSerializer(generalizedFrbRustBinding);
+          sse_encode_String(sessionPath, serializer);
+          pdeCallFfi(
+            generalizedFrbRustBinding,
+            serializer,
+            funcId: 17,
+            port: port_,
+          );
+        },
+        codec: SseCodec(
+          decodeSuccessData: sse_decode_opt_box_autoadd_remembered_sign_in,
+          decodeErrorData: sse_decode_AnyhowException,
+        ),
+        constMeta: kCrateApiPhoneLastSignInConstMeta,
+        argValues: [sessionPath],
+        apiImpl: this,
+      ),
+    );
+  }
+
+  TaskConstMeta get kCrateApiPhoneLastSignInConstMeta =>
+      const TaskConstMeta(debugName: "last_sign_in", argNames: ["sessionPath"]);
+
+  @override
   String? crateApiPhoneLogPath() {
     return handler.executeSync(
       SyncTask(
         callFfi: () {
           final serializer = SseSerializer(generalizedFrbRustBinding);
-          return pdeCallFfi(generalizedFrbRustBinding, serializer, funcId: 17)!;
+          return pdeCallFfi(generalizedFrbRustBinding, serializer, funcId: 18)!;
         },
         codec: SseCodec(
           decodeSuccessData: sse_decode_opt_String,
@@ -673,7 +717,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 18,
+            funcId: 19,
             port: port_,
           );
         },
@@ -702,7 +746,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 19,
+            funcId: 20,
             port: port_,
           );
         },
@@ -730,7 +774,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 20,
+            funcId: 21,
             port: port_,
           );
         },
@@ -760,7 +804,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
             pdeCallFfi(
               generalizedFrbRustBinding,
               serializer,
-              funcId: 21,
+              funcId: 22,
               port: port_,
             );
           },
@@ -786,7 +830,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       SyncTask(
         callFfi: () {
           final serializer = SseSerializer(generalizedFrbRustBinding);
-          return pdeCallFfi(generalizedFrbRustBinding, serializer, funcId: 22)!;
+          return pdeCallFfi(generalizedFrbRustBinding, serializer, funcId: 23)!;
         },
         codec: SseCodec(
           decodeSuccessData: sse_decode_phone_state,
@@ -812,7 +856,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 23,
+            funcId: 24,
             port: port_,
           );
         },
@@ -840,7 +884,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 24,
+            funcId: 25,
             port: port_,
           );
         },
@@ -867,7 +911,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 25,
+            funcId: 26,
             port: port_,
           );
         },
@@ -895,7 +939,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 26,
+            funcId: 27,
             port: port_,
           );
         },
@@ -926,7 +970,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 27,
+            funcId: 28,
             port: port_,
           );
         },
@@ -960,7 +1004,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 28,
+            funcId: 29,
             port: port_,
           );
         },
@@ -991,7 +1035,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 29,
+            funcId: 30,
             port: port_,
           );
         },
@@ -1019,7 +1063,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 30,
+            funcId: 31,
             port: port_,
           );
         },
@@ -1038,11 +1082,10 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       const TaskConstMeta(debugName: "set_dnd", argNames: ["on_"]);
 
   @override
-  Future<Account> crateApiPhoneSignIn({
+  Future<Account?> crateApiPhoneSignIn({
     required String place,
     required String username,
     required String password,
-    String? totp,
     required String sessionPath,
   }) {
     return handler.executeNormal(
@@ -1052,21 +1095,20 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           sse_encode_String(place, serializer);
           sse_encode_String(username, serializer);
           sse_encode_String(password, serializer);
-          sse_encode_opt_String(totp, serializer);
           sse_encode_String(sessionPath, serializer);
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 31,
+            funcId: 32,
             port: port_,
           );
         },
         codec: SseCodec(
-          decodeSuccessData: sse_decode_account,
+          decodeSuccessData: sse_decode_opt_box_autoadd_account,
           decodeErrorData: sse_decode_AnyhowException,
         ),
         constMeta: kCrateApiPhoneSignInConstMeta,
-        argValues: [place, username, password, totp, sessionPath],
+        argValues: [place, username, password, sessionPath],
         apiImpl: this,
       ),
     );
@@ -1074,8 +1116,77 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
 
   TaskConstMeta get kCrateApiPhoneSignInConstMeta => const TaskConstMeta(
     debugName: "sign_in",
-    argNames: ["place", "username", "password", "totp", "sessionPath"],
+    argNames: ["place", "username", "password", "sessionPath"],
   );
+
+  @override
+  Future<SignInMethods> crateApiPhoneSignInMethods({
+    required String place,
+    required String username,
+  }) {
+    return handler.executeNormal(
+      NormalTask(
+        callFfi: (port_) {
+          final serializer = SseSerializer(generalizedFrbRustBinding);
+          sse_encode_String(place, serializer);
+          sse_encode_String(username, serializer);
+          pdeCallFfi(
+            generalizedFrbRustBinding,
+            serializer,
+            funcId: 33,
+            port: port_,
+          );
+        },
+        codec: SseCodec(
+          decodeSuccessData: sse_decode_sign_in_methods,
+          decodeErrorData: sse_decode_AnyhowException,
+        ),
+        constMeta: kCrateApiPhoneSignInMethodsConstMeta,
+        argValues: [place, username],
+        apiImpl: this,
+      ),
+    );
+  }
+
+  TaskConstMeta get kCrateApiPhoneSignInMethodsConstMeta => const TaskConstMeta(
+    debugName: "sign_in_methods",
+    argNames: ["place", "username"],
+  );
+
+  @override
+  Future<Account> crateApiPhoneSignInWithCode({
+    required String code,
+    required String sessionPath,
+  }) {
+    return handler.executeNormal(
+      NormalTask(
+        callFfi: (port_) {
+          final serializer = SseSerializer(generalizedFrbRustBinding);
+          sse_encode_String(code, serializer);
+          sse_encode_String(sessionPath, serializer);
+          pdeCallFfi(
+            generalizedFrbRustBinding,
+            serializer,
+            funcId: 34,
+            port: port_,
+          );
+        },
+        codec: SseCodec(
+          decodeSuccessData: sse_decode_account,
+          decodeErrorData: sse_decode_AnyhowException,
+        ),
+        constMeta: kCrateApiPhoneSignInWithCodeConstMeta,
+        argValues: [code, sessionPath],
+        apiImpl: this,
+      ),
+    );
+  }
+
+  TaskConstMeta get kCrateApiPhoneSignInWithCodeConstMeta =>
+      const TaskConstMeta(
+        debugName: "sign_in_with_code",
+        argNames: ["code", "sessionPath"],
+      );
 
   @override
   Future<void> crateApiPhoneSignOut({required String sessionPath}) {
@@ -1087,7 +1198,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 32,
+            funcId: 35,
             port: port_,
           );
         },
@@ -1108,6 +1219,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   @override
   Future<String> crateApiPhoneStartBrowserSignIn({
     required String place,
+    required String username,
     required String sessionPath,
   }) {
     return handler.executeNormal(
@@ -1115,11 +1227,12 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
         callFfi: (port_) {
           final serializer = SseSerializer(generalizedFrbRustBinding);
           sse_encode_String(place, serializer);
+          sse_encode_String(username, serializer);
           sse_encode_String(sessionPath, serializer);
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 33,
+            funcId: 36,
             port: port_,
           );
         },
@@ -1128,7 +1241,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           decodeErrorData: sse_decode_AnyhowException,
         ),
         constMeta: kCrateApiPhoneStartBrowserSignInConstMeta,
-        argValues: [place, sessionPath],
+        argValues: [place, username, sessionPath],
         apiImpl: this,
       ),
     );
@@ -1137,7 +1250,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   TaskConstMeta get kCrateApiPhoneStartBrowserSignInConstMeta =>
       const TaskConstMeta(
         debugName: "start_browser_sign_in",
-        argNames: ["place", "sessionPath"],
+        argNames: ["place", "username", "sessionPath"],
       );
 
   @override
@@ -1147,7 +1260,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
         callFfi: () {
           final serializer = SseSerializer(generalizedFrbRustBinding);
           sse_encode_String(dir, serializer);
-          return pdeCallFfi(generalizedFrbRustBinding, serializer, funcId: 34)!;
+          return pdeCallFfi(generalizedFrbRustBinding, serializer, funcId: 37)!;
         },
         codec: SseCodec(
           decodeSuccessData: sse_decode_String,
@@ -1173,7 +1286,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 35,
+            funcId: 38,
             port: port_,
           );
         },
@@ -1200,7 +1313,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 36,
+            funcId: 39,
             port: port_,
           );
         },
@@ -1227,7 +1340,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 37,
+            funcId: 40,
             port: port_,
           );
         },
@@ -1254,7 +1367,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 38,
+            funcId: 41,
             port: port_,
           );
         },
@@ -1283,7 +1396,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 39,
+            funcId: 42,
             port: port_,
           );
         },
@@ -1315,7 +1428,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 40,
+            funcId: 43,
             port: port_,
           );
         },
@@ -1415,6 +1528,12 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   Quality dco_decode_box_autoadd_quality(dynamic raw) {
     // Codec=Dco (DartCObject based), see doc to use other codecs
     return dco_decode_quality(raw);
+  }
+
+  @protected
+  RememberedSignIn dco_decode_box_autoadd_remembered_sign_in(dynamic raw) {
+    // Codec=Dco (DartCObject based), see doc to use other codecs
+    return dco_decode_remembered_sign_in(raw);
   }
 
   @protected
@@ -1586,6 +1705,12 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   }
 
   @protected
+  RememberedSignIn? dco_decode_opt_box_autoadd_remembered_sign_in(dynamic raw) {
+    // Codec=Dco (DartCObject based), see doc to use other codecs
+    return raw == null ? null : dco_decode_box_autoadd_remembered_sign_in(raw);
+  }
+
+  @protected
   int? dco_decode_opt_box_autoadd_u_32(dynamic raw) {
     // Codec=Dco (DartCObject based), see doc to use other codecs
     return raw == null ? null : dco_decode_box_autoadd_u_32(raw);
@@ -1722,6 +1847,18 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   }
 
   @protected
+  RememberedSignIn dco_decode_remembered_sign_in(dynamic raw) {
+    // Codec=Dco (DartCObject based), see doc to use other codecs
+    final arr = raw as List<dynamic>;
+    if (arr.length != 2)
+      throw Exception('unexpected arr length: expect 2 but see ${arr.length}');
+    return RememberedSignIn(
+      place: dco_decode_String(arr[0]),
+      username: dco_decode_String(arr[1]),
+    );
+  }
+
+  @protected
   Ringtone dco_decode_ringtone(dynamic raw) {
     // Codec=Dco (DartCObject based), see doc to use other codecs
     final arr = raw as List<dynamic>;
@@ -1730,6 +1867,19 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     return Ringtone(
       id: dco_decode_String(arr[0]),
       name: dco_decode_String(arr[1]),
+    );
+  }
+
+  @protected
+  SignInMethods dco_decode_sign_in_methods(dynamic raw) {
+    // Codec=Dco (DartCObject based), see doc to use other codecs
+    final arr = raw as List<dynamic>;
+    if (arr.length != 3)
+      throw Exception('unexpected arr length: expect 3 but see ${arr.length}');
+    return SignInMethods(
+      known: dco_decode_bool(arr[0]),
+      password: dco_decode_bool(arr[1]),
+      sso: dco_decode_bool(arr[2]),
     );
   }
 
@@ -1879,6 +2029,14 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   Quality sse_decode_box_autoadd_quality(SseDeserializer deserializer) {
     // Codec=Sse (Serialization based), see doc to use other codecs
     return (sse_decode_quality(deserializer));
+  }
+
+  @protected
+  RememberedSignIn sse_decode_box_autoadd_remembered_sign_in(
+    SseDeserializer deserializer,
+  ) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    return (sse_decode_remembered_sign_in(deserializer));
   }
 
   @protected
@@ -2131,6 +2289,19 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   }
 
   @protected
+  RememberedSignIn? sse_decode_opt_box_autoadd_remembered_sign_in(
+    SseDeserializer deserializer,
+  ) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+
+    if (sse_decode_bool(deserializer)) {
+      return (sse_decode_box_autoadd_remembered_sign_in(deserializer));
+    } else {
+      return null;
+    }
+  }
+
+  @protected
   int? sse_decode_opt_box_autoadd_u_32(SseDeserializer deserializer) {
     // Codec=Sse (Serialization based), see doc to use other codecs
 
@@ -2326,11 +2497,32 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   }
 
   @protected
+  RememberedSignIn sse_decode_remembered_sign_in(SseDeserializer deserializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    var var_place = sse_decode_String(deserializer);
+    var var_username = sse_decode_String(deserializer);
+    return RememberedSignIn(place: var_place, username: var_username);
+  }
+
+  @protected
   Ringtone sse_decode_ringtone(SseDeserializer deserializer) {
     // Codec=Sse (Serialization based), see doc to use other codecs
     var var_id = sse_decode_String(deserializer);
     var var_name = sse_decode_String(deserializer);
     return Ringtone(id: var_id, name: var_name);
+  }
+
+  @protected
+  SignInMethods sse_decode_sign_in_methods(SseDeserializer deserializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    var var_known = sse_decode_bool(deserializer);
+    var var_password = sse_decode_bool(deserializer);
+    var var_sso = sse_decode_bool(deserializer);
+    return SignInMethods(
+      known: var_known,
+      password: var_password,
+      sso: var_sso,
+    );
   }
 
   @protected
@@ -2491,6 +2683,15 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   void sse_encode_box_autoadd_quality(Quality self, SseSerializer serializer) {
     // Codec=Sse (Serialization based), see doc to use other codecs
     sse_encode_quality(self, serializer);
+  }
+
+  @protected
+  void sse_encode_box_autoadd_remembered_sign_in(
+    RememberedSignIn self,
+    SseSerializer serializer,
+  ) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    sse_encode_remembered_sign_in(self, serializer);
   }
 
   @protected
@@ -2710,6 +2911,19 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   }
 
   @protected
+  void sse_encode_opt_box_autoadd_remembered_sign_in(
+    RememberedSignIn? self,
+    SseSerializer serializer,
+  ) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+
+    sse_encode_bool(self != null, serializer);
+    if (self != null) {
+      sse_encode_box_autoadd_remembered_sign_in(self, serializer);
+    }
+  }
+
+  @protected
   void sse_encode_opt_box_autoadd_u_32(int? self, SseSerializer serializer) {
     // Codec=Sse (Serialization based), see doc to use other codecs
 
@@ -2847,10 +3061,31 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   }
 
   @protected
+  void sse_encode_remembered_sign_in(
+    RememberedSignIn self,
+    SseSerializer serializer,
+  ) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    sse_encode_String(self.place, serializer);
+    sse_encode_String(self.username, serializer);
+  }
+
+  @protected
   void sse_encode_ringtone(Ringtone self, SseSerializer serializer) {
     // Codec=Sse (Serialization based), see doc to use other codecs
     sse_encode_String(self.id, serializer);
     sse_encode_String(self.name, serializer);
+  }
+
+  @protected
+  void sse_encode_sign_in_methods(
+    SignInMethods self,
+    SseSerializer serializer,
+  ) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    sse_encode_bool(self.known, serializer);
+    sse_encode_bool(self.password, serializer);
+    sse_encode_bool(self.sso, serializer);
   }
 
   @protected

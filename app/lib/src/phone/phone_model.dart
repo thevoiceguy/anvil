@@ -53,22 +53,53 @@ class PhoneModel extends ChangeNotifier {
     notifyListeners();
   }
 
-  Future<void> signIn({
+  /// How `username` signs in on the server (`place`).
+  Future<SignInMethods> signInMethods({
+    required String place,
+    required String username,
+  }) async {
+    busy = true;
+    notifyListeners();
+    try {
+      return await api.signInMethods(place: place, username: username);
+    } finally {
+      busy = false;
+      notifyListeners();
+    }
+  }
+
+  /// Sign in with a password: true when signed in, false when the server
+  /// wants a one-time code next ([signInWithCode]).
+  Future<bool> signIn({
     required String place,
     required String username,
     required String password,
-    String? code,
   }) async {
     busy = true;
     notice = null;
     notifyListeners();
     try {
-      account = await api.signIn(
+      final signedIn = await api.signIn(
         place: place,
         username: username,
         password: password,
-        code: code,
       );
+      if (signedIn == null) return false;
+      account = signedIn;
+      await _start();
+      return true;
+    } finally {
+      busy = false;
+      notifyListeners();
+    }
+  }
+
+  /// Finish a password sign-in with the one-time code it asked for.
+  Future<void> signInWithCode(String code) async {
+    busy = true;
+    notifyListeners();
+    try {
+      account = await api.signInWithCode(code);
       await _start();
     } finally {
       busy = false;
@@ -81,6 +112,7 @@ class PhoneModel extends ChangeNotifier {
   /// browser comes back, or fails when it is cancelled.
   Future<void> signInWithBrowser({
     required String place,
+    String username = '',
     required Future<void> Function(String url) open,
   }) async {
     busy = true;
@@ -88,7 +120,10 @@ class PhoneModel extends ChangeNotifier {
     notice = null;
     notifyListeners();
     try {
-      final url = await api.startBrowserSignIn(place: place);
+      final url = await api.startBrowserSignIn(
+        place: place,
+        username: username,
+      );
       await open(url);
       account = await api.finishBrowserSignIn();
       await _start();
@@ -188,6 +223,9 @@ class PhoneModel extends ChangeNotifier {
     notice = null;
     notifyListeners();
   }
+
+  /// What an error says, without the wrapping a Dart or Rust error adds.
+  static String reason(Object e) => _reason(e);
 
   static String _reason(Object e) {
     final s = e.toString();

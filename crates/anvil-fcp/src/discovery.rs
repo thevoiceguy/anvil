@@ -70,3 +70,117 @@ impl Server {
         }
     }
 }
+
+/// An identity provider a tenant signs in through.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SsoProvider {
+    pub id: String,
+    pub name: String,
+}
+
+/// How a person signs in, as FCP's `POST /auth/discover` says.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SignInMethods {
+    /// A password is taken.
+    pub password: bool,
+    /// The tenant has identity providers to sign in through (the browser).
+    pub sso: bool,
+    pub tenant_name: Option<String>,
+    pub providers: Vec<SsoProvider>,
+}
+
+impl SignInMethods {
+    /// From the discover route's answer (`{methods, tenant_name, providers}`).
+    pub fn from_answer(answer: &serde_json::Value) -> Self {
+        let methods: Vec<&str> = answer["methods"]
+            .as_array()
+            .map(|m| m.iter().filter_map(|m| m.as_str()).collect())
+            .unwrap_or_default();
+        let providers: Vec<SsoProvider> = answer["providers"]
+            .as_array()
+            .map(|list| {
+                list.iter()
+                    .filter_map(|p| serde_json::from_value(p.clone()).ok())
+                    .collect()
+            })
+            .unwrap_or_default();
+        Self {
+            password: methods.contains(&"password"),
+            sso: methods.contains(&"sso") || !providers.is_empty(),
+            tenant_name: answer["tenant_name"].as_str().map(String::from),
+            providers,
+        }
+    }
+}
+
+/// What to ask FCP's discover route about: an email address, since FCP
+/// finds a tenant by its email domain — the username when it is one, else
+/// the server field when that is one, else the username.
+pub fn discovery_login(place: &str, username: &str) -> String {
+    let (place, username) = (place.trim(), username.trim());
+    if username.contains('@') {
+        return username.to_string();
+    }
+    if place.contains('@') && !place.contains("://") {
+        return place.to_string();
+    }
+    username.to_string()
+}
+
+/// How `login` signs in on `server`. `None` when the server has no
+/// discover route (an FCP from before it): the caller offers both ways.
+pub async fn sign_in_methods(
+    server: &Server,
+    login: &str,
+) -> Result<Option<SignInMethods>, FcpError> {
+    let response = http()
+        .post(format!("{}/auth/discover", server.api_url))
+        .json(&serde_json::json!({ "login": login.trim() }))
+        .send()
+        .await?;
+    let status = response.status();
+    if status == reqwest::StatusCode::NOT_FOUND || status == reqwest::StatusCode::METHOD_NOT_ALLOWED
+    {
+        return Ok(None);
+    }
+    if !status.is_success() {
+        return Err(refused(response).await);
+    }
+    let answer: serde_json::Value = response
+        .json()
+        .await
+        .map_err(|e| FcpError::Invalid(format!("/auth/discover: {e}")))?;
+    Ok(Some(SignInMethods::from_answer(&answer)))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn the_email_is_what_fcp_is_asked_about() {
+        assert_eq!(
+            discovery_login("pbx.example.com", "ann@example.com"),
+            "ann@example.com"
+        );
+        assert_eq!(discovery_login("ann@example.com", "ann"), "ann@example.com");
+        assert_eq!(discovery_login("https://pbx.example.com", "ann"), "ann");
+        assert_eq!(discovery_login(" pbx ", " ann "), "ann");
+    }
+
+    #[test]
+    fn the_ways_in_are_read() {
+        let m = SignInMethods::from_answer(&serde_json::json!({
+            "tenant_id": "tenant-1", "tenant_name": "Acme",
+            "methods": ["sso"],
+            "providers": [{"id": "p1", "name": "Okta"}]
+        }));
+        assert!(!m.password && m.sso);
+        assert_eq!(m.tenant_name.as_deref(), Some("Acme"));
+        assert_eq!(m.providers[0].name, "Okta");
+
+        let m = SignInMethods::from_answer(&serde_json::json!({"methods": ["password"]}));
+        assert!(m.password && !m.sso);
+        assert!(m.providers.is_empty());
+    }
+}

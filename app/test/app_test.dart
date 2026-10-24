@@ -31,10 +31,12 @@ void main() {
     final phone = FakePhone();
     await tester.pumpWidget(AnvilApp(phone: phone));
     await tester.pumpAndSettle();
-    expect(find.byKey(const Key('signIn')), findsOneWidget);
+    expect(find.byKey(const Key('continue')), findsOneWidget);
 
     await tester.enterText(find.byKey(const Key('server')), 'pbx.example.com');
     await tester.enterText(find.byKey(const Key('username')), 'alice');
+    await tester.tap(find.byKey(const Key('continue')));
+    await tester.pumpAndSettle();
     await tester.enterText(find.byKey(const Key('password')), 'wrong');
     await tester.tap(find.byKey(const Key('signIn')));
     await tester.pumpAndSettle();

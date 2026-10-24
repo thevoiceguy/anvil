@@ -298,7 +298,7 @@ void main() {
     phone.ring('1002');
     await tester.pumpAndSettle();
     await tapKey(tester, 'answer');
-    await go(tester, 'People');
+    await go(tester, 'Contacts');
     expect(find.byKey(const Key('callBar')), findsOneWidget);
     await tapKey(tester, 'callBar');
     expect(find.byKey(const Key('hangup')), findsOneWidget);
@@ -323,11 +323,12 @@ void main() {
     );
   });
 
-  testWidgets('people are searched, lit, made favourites and called', (
+  testWidgets('contacts are searched, lit, made favourites and called', (
     tester,
   ) async {
     final phone = await signedIn(tester);
-    await go(tester, 'People');
+    expect(find.text('People'), findsNothing, reason: 'the tab is Contacts');
+    await go(tester, 'Contacts');
     expect(find.text('Favourites'), findsOneWidget);
     expect(find.byKey(const Key('lamp-bob')), findsOneWidget);
     expect(find.byKey(const Key('dot-ann')), findsOneWidget);
@@ -422,7 +423,7 @@ void main() {
 
       await tapKey(tester, 'signOut');
       expect(phone.log, contains('signOut'));
-      expect(find.byKey(const Key('signIn')), findsOneWidget);
+      expect(find.byKey(const Key('continue')), findsOneWidget);
     },
   );
 

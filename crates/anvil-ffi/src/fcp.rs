@@ -48,7 +48,7 @@ fn runtime() -> Result<Runtime, AnvilStatus> {
 fn status_of(e: &FcpError) -> AnvilStatus {
     match e {
         FcpError::Unreachable(_) => AnvilStatus::Transport,
-        FcpError::SignedOut => AnvilStatus::AuthRejected,
+        FcpError::SignedOut | FcpError::Rejected(_) => AnvilStatus::AuthRejected,
         FcpError::TotpRequired => AnvilStatus::TotpRequired,
         FcpError::Refused {
             status: 401 | 403, ..

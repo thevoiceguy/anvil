@@ -1,6 +1,8 @@
 //! Anvil as FCP's client (`docs/SOFTPHONE.md` in thevoiceguy/fcp):
 //!
-//! - [`discover`] finds FCP from a server address or an email address;
+//! - [`discover`] finds FCP from a server address or an email address, and
+//!   [`sign_in_methods`] asks it how a person signs in (password, single
+//!   sign-on);
 //! - [`BrowserSignIn`] signs a person in through the system browser
 //!   (OAuth 2.0 for native apps with PKCE: a loopback listener catches the
 //!   code), and [`password_sign_in`] does it without a browser;
@@ -24,6 +26,7 @@ mod discovery;
 #[allow(unsafe_code)]
 mod dpapi;
 mod me;
+mod remember;
 mod session;
 mod signin;
 
@@ -31,13 +34,18 @@ pub use brand::{brand_config, FcpBrandProvider};
 pub use client::{
     CallingSettings, CallingUpdate, FcpClient, SoftphoneAccount, SoftphoneConfig, SoftphoneMedia,
 };
-pub use discovery::{discover, Server};
+pub use discovery::{
+    discover, discovery_login, sign_in_methods, Server, SignInMethods, SsoProvider,
+};
 pub use me::{
     CallQuery, CallRecord, DirectoryEntry, MailboxStats, Page, UserEvent, UserEvents,
     VoicemailMessage,
 };
+pub use remember::LastSignIn;
 pub use session::{AppClient, DeviceCredentials, FileTokenStore, Session, TokenStore};
-pub use signin::{password_sign_in, BrowserSignIn};
+pub use signin::{
+    begin_password_sign_in, password_sign_in, BrowserSignIn, PasswordStep, SecondFactor,
+};
 
 /// What can go wrong talking to FCP.
 #[derive(Debug, thiserror::Error)]
@@ -48,6 +56,13 @@ pub enum FcpError {
     Refused { status: u16, message: String },
     #[error("signing in needs a one-time code (TOTP)")]
     TotpRequired,
+    /// A wrong password or one-time code, in FCP's words.
+    #[error("{0}")]
+    Rejected(String),
+    #[error("your organisation requires a one-time code you have not set up: sign in with your browser to set it up")]
+    SecondFactorSetup,
+    #[error("your password has expired: sign in with your browser to change it")]
+    PasswordExpired,
     #[error("the session has ended: sign in again")]
     SignedOut,
     #[error("the browser sign-in failed: {0}")]

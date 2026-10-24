@@ -71,23 +71,141 @@ pub async fn saved_account(session_path: String) -> anyhow::Result<Option<Accoun
     .await
 }
 
+/// What the sign-in screen comes back filled in with: the last server (or
+/// email address) and username signed in with.
+pub struct RememberedSignIn {
+    pub place: String,
+    pub username: String,
+}
+
+/// The last sign-in remembered beside the session at `session_path`; it
+/// outlives signing out. Never a password.
+pub async fn last_sign_in(session_path: String) -> anyhow::Result<Option<RememberedSignIn>> {
+    on_runtime(async move {
+        let path = std::path::PathBuf::from(&session_path);
+        let remembered =
+            anvil_fcp::LastSignIn::load(&anvil_fcp::LastSignIn::path_beside(&path))
+                // Signed in by a version that did not remember: the session says.
+                .or_else(|| {
+                    FileTokenStore::new(&path).load().ok().flatten().map(|s| {
+                        anvil_fcp::LastSignIn {
+                            place: s.server.public_url,
+                            username: s.username,
+                        }
+                    })
+                });
+        Ok(remembered.map(|l| RememberedSignIn {
+            place: l.place,
+            username: l.username,
+        }))
+    })
+    .await
+}
+
+/// Remember a sign-in beside the session: what the person typed for the
+/// server, and who signed in.
+fn remember(session_path: &str, place: &str, username: &str) {
+    let path = anvil_fcp::LastSignIn::path_beside(std::path::Path::new(session_path));
+    let last = anvil_fcp::LastSignIn {
+        place: place.trim().to_string(),
+        username: username.trim().to_string(),
+    };
+    if let Err(e) = last.save(&path) {
+        tracing::warn!(%e, "the sign-in was not remembered");
+    }
+}
+
+/// The server to find from what the person typed: the server field, or the
+/// username when that is an email address and the server field is empty.
+fn place_of(place: &str, username: &str) -> String {
+    if place.trim().is_empty() && username.contains('@') {
+        username.trim().to_string()
+    } else {
+        place.trim().to_string()
+    }
+}
+
+/// How a person signs in on a server (`POST /auth/discover`).
+pub struct SignInMethods {
+    /// The server said (an older FCP has no discover route: both ways are
+    /// offered).
+    pub known: bool,
+    pub password: bool,
+    pub sso: bool,
+}
+
+/// Ask the server how `username` signs in (`place` is the server or an
+/// email address).
+pub async fn sign_in_methods(place: String, username: String) -> anyhow::Result<SignInMethods> {
+    on_runtime(async move {
+        let server = anvil_fcp::discover(&place_of(&place, &username)).await?;
+        let login = anvil_fcp::discovery_login(&place, &username);
+        Ok(match anvil_fcp::sign_in_methods(&server, &login).await? {
+            Some(m) => SignInMethods {
+                known: true,
+                password: m.password,
+                sso: m.sso,
+            },
+            None => SignInMethods {
+                known: false,
+                password: true,
+                sso: true,
+            },
+        })
+    })
+    .await
+}
+
+/// A password sign-in waiting for its one-time code, and what to remember
+/// once it is in.
+static SECOND_FACTOR: parking_lot::Mutex<Option<(anvil_fcp::SecondFactor, String)>> =
+    parking_lot::Mutex::new(None);
+
 /// Sign in with a username and password (`place` is the server or an email
-/// address), keeping the session at `session_path`.
+/// address), keeping the session at `session_path`. `None`: the password
+/// was right and FCP wants a one-time code next, which
+/// [`sign_in_with_code`] takes.
 pub async fn sign_in(
     place: String,
     username: String,
     password: String,
-    totp: Option<String>,
     session_path: String,
-) -> anyhow::Result<Account> {
+) -> anyhow::Result<Option<Account>> {
     on_runtime(async move {
-        let store = FileTokenStore::new(session_path);
+        let store = FileTokenStore::new(&session_path);
         let client = this_install(&store);
-        let server = anvil_fcp::discover(&place).await?;
-        let session =
-            anvil_fcp::password_sign_in(server, client, &username, &password, totp.as_deref())
-                .await?;
-        store.save(&session)?;
+        let server = anvil_fcp::discover(&place_of(&place, &username)).await?;
+        SECOND_FACTOR.lock().take();
+        match anvil_fcp::begin_password_sign_in(server, client, username.trim(), &password).await? {
+            anvil_fcp::PasswordStep::SignedIn(session) => {
+                store.save(&session)?;
+                remember(&session_path, &place, &username);
+                Ok(Some(Account {
+                    username: session.username,
+                    server: session.server.public_url,
+                }))
+            }
+            anvil_fcp::PasswordStep::CodeNeeded(second) => {
+                *SECOND_FACTOR.lock() = Some((second, place));
+                Ok(None)
+            }
+        }
+    })
+    .await
+}
+
+/// Finish a password sign-in with the one-time code it was asked for. A
+/// wrong code may be tried again.
+pub async fn sign_in_with_code(code: String, session_path: String) -> anyhow::Result<Account> {
+    on_runtime(async move {
+        let (second, place) = SECOND_FACTOR
+            .lock()
+            .clone()
+            .ok_or_else(|| anyhow::anyhow!("sign in with your password first"))?;
+        let session = second.finish(&code).await?;
+        SECOND_FACTOR.lock().take();
+        FileTokenStore::new(&session_path).save(&session)?;
+        remember(&session_path, &place, &session.username);
         Ok(Account {
             username: session.username,
             server: session.server.public_url,
@@ -112,23 +230,29 @@ fn this_install(store: &FileTokenStore) -> anvil_fcp::AppClient {
     client
 }
 
-/// A sign-in through the browser, started and not yet finished.
-static BROWSER_SIGN_IN: parking_lot::Mutex<Option<anvil_fcp::BrowserSignIn>> =
+/// A sign-in through the browser, started and not yet finished, and what
+/// the person typed for the server.
+static BROWSER_SIGN_IN: parking_lot::Mutex<Option<(anvil_fcp::BrowserSignIn, String)>> =
     parking_lot::Mutex::new(None);
 /// Giving up the browser sign-in under way.
 static BROWSER_CANCELLED: tokio::sync::Notify = tokio::sync::Notify::const_new();
 
 /// Start signing in through the system browser, the way single sign-on
-/// works (`place` is the server or an email address): the address the app
-/// opens. [`finish_browser_sign_in`] then waits for the browser to come
-/// back.
-pub async fn start_browser_sign_in(place: String, session_path: String) -> anyhow::Result<String> {
+/// works (`place` is the server or an email address, `username` what the
+/// person typed, if anything): the address the app opens.
+/// [`finish_browser_sign_in`] then waits for the browser to come back.
+pub async fn start_browser_sign_in(
+    place: String,
+    username: String,
+    session_path: String,
+) -> anyhow::Result<String> {
     on_runtime(async move {
         let client = this_install(&FileTokenStore::new(session_path));
+        let place = place_of(&place, &username);
         let server = anvil_fcp::discover(&place).await?;
         let sign_in = anvil_fcp::BrowserSignIn::start(server, client).await?;
         let url = sign_in.authorize_url().to_string();
-        *BROWSER_SIGN_IN.lock() = Some(sign_in);
+        *BROWSER_SIGN_IN.lock() = Some((sign_in, place));
         Ok(url)
     })
     .await
@@ -138,7 +262,7 @@ pub async fn start_browser_sign_in(place: String, session_path: String) -> anyho
 /// session at `session_path`.
 pub async fn finish_browser_sign_in(session_path: String) -> anyhow::Result<Account> {
     on_runtime(async move {
-        let sign_in = BROWSER_SIGN_IN
+        let (sign_in, place) = BROWSER_SIGN_IN
             .lock()
             .take()
             .ok_or_else(|| anyhow::anyhow!("no sign-in through the browser was started"))?;
@@ -146,7 +270,8 @@ pub async fn finish_browser_sign_in(session_path: String) -> anyhow::Result<Acco
             session = sign_in.finish(std::time::Duration::from_secs(600)) => session?,
             _ = BROWSER_CANCELLED.notified() => anyhow::bail!("the sign-in was cancelled"),
         };
-        FileTokenStore::new(session_path).save(&session)?;
+        FileTokenStore::new(&session_path).save(&session)?;
+        remember(&session_path, &place, &session.username);
         Ok(Account {
             username: session.username,
             server: session.server.public_url,
@@ -245,8 +370,14 @@ pub async fn stop_phone() -> anyhow::Result<()> {
 pub async fn sign_out(session_path: String) -> anyhow::Result<()> {
     stop_phone().await?;
     on_runtime(async move {
-        let store = Arc::new(FileTokenStore::new(session_path));
+        let store = Arc::new(FileTokenStore::new(&session_path));
         if let Some(session) = store.load()? {
+            // Signed in by a version that did not remember: remembered now,
+            // before the session goes.
+            let last = anvil_fcp::LastSignIn::path_beside(std::path::Path::new(&session_path));
+            if anvil_fcp::LastSignIn::load(&last).is_none() {
+                remember(&session_path, &session.server.public_url, &session.username);
+            }
             FcpClient::new(session, Some(store as Arc<dyn TokenStore>))
                 .sign_out()
                 .await?;
@@ -885,4 +1016,40 @@ pub fn log_path() -> Option<String> {
 #[frb(init)]
 pub fn init_app() {
     flutter_rust_bridge::setup_default_user_utils();
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn an_email_username_finds_the_server_when_none_is_typed() {
+        assert_eq!(place_of("", "ann@example.com"), "ann@example.com");
+        assert_eq!(
+            place_of(" pbx.example.com ", "ann@example.com"),
+            "pbx.example.com"
+        );
+        assert_eq!(place_of("", "ann"), "");
+    }
+
+    #[test]
+    fn a_sign_in_is_remembered_beside_the_session() {
+        let dir = std::env::temp_dir().join(format!(
+            "anvil-bridge-last-{}-{}",
+            std::process::id(),
+            anvil_fcp::AppClient::new_install_id()
+        ));
+        let session = dir.join("session.json");
+        let session_path = session.to_string_lossy().into_owned();
+        let last = |p: &str| runtime().block_on(last_sign_in(p.to_string())).unwrap();
+        assert!(last(&session_path).is_none());
+
+        remember(&session_path, " pbx.example.com ", "ann");
+        let r = last(&session_path).unwrap();
+        assert_eq!(
+            (r.place.as_str(), r.username.as_str()),
+            ("pbx.example.com", "ann")
+        );
+        std::fs::remove_dir_all(dir).unwrap();
+    }
 }

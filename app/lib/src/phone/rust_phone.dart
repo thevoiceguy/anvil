@@ -64,17 +64,39 @@ class RustPhone implements PhoneApi {
   }
 
   @override
-  Future<SignedInAccount> signIn({
+  Future<RememberedSignIn?> lastSignIn() async {
+    final r = await rust.lastSignIn(sessionPath: await _session());
+    return r == null ? null : RememberedSignIn(r.place, r.username);
+  }
+
+  @override
+  Future<SignInMethods> signInMethods({
+    required String place,
+    required String username,
+  }) async {
+    final m = await rust.signInMethods(place: place, username: username);
+    return SignInMethods(password: m.password, sso: m.sso, known: m.known);
+  }
+
+  @override
+  Future<SignedInAccount?> signIn({
     required String place,
     required String username,
     required String password,
-    String? code,
   }) async {
     final a = await rust.signIn(
       place: place,
       username: username,
       password: password,
-      totp: code,
+      sessionPath: await _session(),
+    );
+    return a == null ? null : SignedInAccount(a.username, a.server);
+  }
+
+  @override
+  Future<SignedInAccount> signInWithCode(String code) async {
+    final a = await rust.signInWithCode(
+      code: code,
       sessionPath: await _session(),
     );
     return SignedInAccount(a.username, a.server);
@@ -85,8 +107,14 @@ class RustPhone implements PhoneApi {
       Platform.isWindows || Platform.isMacOS || Platform.isLinux;
 
   @override
-  Future<String> startBrowserSignIn({required String place}) async =>
-      rust.startBrowserSignIn(place: place, sessionPath: await _session());
+  Future<String> startBrowserSignIn({
+    required String place,
+    String username = '',
+  }) async => rust.startBrowserSignIn(
+    place: place,
+    username: username,
+    sessionPath: await _session(),
+  );
 
   @override
   Future<SignedInAccount> finishBrowserSignIn() async {

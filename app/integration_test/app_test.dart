@@ -23,7 +23,7 @@ void main() {
   ) async {
     await tester.pumpWidget(AnvilApp(phone: RustPhone()));
     await tester.pumpAndSettle();
-    expect(find.byKey(const Key('signIn')), findsOneWidget);
+    expect(find.byKey(const Key('continue')), findsOneWidget);
     // The updater knows this copy's version (the workspace's).
     expect(RustUpdates().version(), matches(RegExp(r'^\d+\.\d+\.\d+$')));
   });
@@ -59,6 +59,6 @@ void main() {
     await shell.startsAtLogin();
     await tester.pumpWidget(AnvilApp(phone: RustPhone(), shell: shell));
     await tester.pumpAndSettle();
-    expect(find.byKey(const Key('signIn')), findsOneWidget);
+    expect(find.byKey(const Key('continue')), findsOneWidget);
   });
 }

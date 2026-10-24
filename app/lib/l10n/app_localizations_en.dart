@@ -34,13 +34,36 @@ class StringsEn extends Strings {
   String get signInButton => 'Sign in';
 
   @override
-  String get signInBrowserButton => 'Sign in with your browser';
+  String get signInContinue => 'Continue';
+
+  @override
+  String get signInChange => 'Change';
+
+  @override
+  String get signInUseSso => 'Use single sign-on';
+
+  @override
+  String get signInBrowserButton => 'Continue in your browser';
 
   @override
   String get signInBrowserWaiting => 'Finish signing in in your browser.';
 
   @override
+  String get signInSsoUnavailable =>
+      'This account signs in with single sign-on, which Anvil cannot do on this device yet.';
+
+  @override
+  String get signInCodePrompt =>
+      'Enter the one-time code from your authenticator app.';
+
+  @override
+  String get signInVerify => 'Verify';
+
+  @override
   String get signInServerNeeded => 'Enter your server or email address first.';
+
+  @override
+  String get signInUsernameNeeded => 'Enter your username.';
 
   @override
   String signInFailed(String reason) {
@@ -146,7 +169,7 @@ class StringsEn extends Strings {
   String get navRecents => 'Recents';
 
   @override
-  String get navPeople => 'People';
+  String get navPeople => 'Contacts';
 
   @override
   String get navVoicemail => 'Voicemail';
@@ -225,10 +248,10 @@ class StringsEn extends Strings {
   String get yesterday => 'Yesterday';
 
   @override
-  String get peopleSearch => 'Search people';
+  String get peopleSearch => 'Search contacts';
 
   @override
-  String get peopleEmpty => 'Nobody to show';
+  String get peopleEmpty => 'No contacts to show';
 
   @override
   String get favourites => 'Favourites';
