@@ -161,6 +161,13 @@ Future<void> stopPlaying() => RustLib.instance.api.crateApiPhoneStopPlaying();
 Future<void> favourite({required String who, required bool on_}) =>
     RustLib.instance.api.crateApiPhoneFavourite(who: who, on_: on_);
 
+/// Clear the recent calls shown on this device; FCP keeps the records.
+Future<void> clearRecents() => RustLib.instance.api.crateApiPhoneClearRecents();
+
+/// Remove one recent call, by record id, from those shown on this device.
+Future<void> hideRecent({required String id}) =>
+    RustLib.instance.api.crateApiPhoneHideRecent(id: id);
+
 /// Use this microphone (`input`) or speaker by id, `None` for the system's
 /// default, for the calls set up from now on.
 Future<void> chooseAudio({required bool input, String? device}) =>

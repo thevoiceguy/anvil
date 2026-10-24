@@ -165,6 +165,10 @@ class NativeShell with TrayListener, WindowListener implements DesktopShell {
   }
 
   @override
+  Future<void> setTitle(String title) =>
+      _part('window', () => windowManager.setTitle(title));
+
+  @override
   Future<void> setTray(TrayState state, String tooltip, TrayMenu menu) async {
     if (!_tray) return;
     await _part('tray', () async {

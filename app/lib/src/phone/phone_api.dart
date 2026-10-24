@@ -580,6 +580,12 @@ abstract class PhoneApi {
   Future<void> stopPlaying();
   Future<void> favourite(String who, bool on);
 
+  /// Clear the recent calls shown on this device (FCP keeps the records).
+  Future<void> clearRecents();
+
+  /// Remove one recent call, by id, from those shown on this device.
+  Future<void> hideRecent(String id);
+
   /// Use this microphone (`input`) or speaker by id, null for the system's
   /// default.
   Future<void> chooseAudio({required bool input, String? device});

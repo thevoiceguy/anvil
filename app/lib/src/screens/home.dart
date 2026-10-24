@@ -223,8 +223,10 @@ class _HomeScreenState extends State<HomeScreen> {
                 errorBuilder: (_, _, _) => const SizedBox.shrink(),
               ),
             ),
+      // The brand names the window (and the tray); the screen names who
+      // is signed in.
       title: Text(
-        snap.brandName ?? model.account?.username ?? s.appName,
+        model.account?.username ?? s.appName,
         key: const Key('title'),
       ),
       actions: [

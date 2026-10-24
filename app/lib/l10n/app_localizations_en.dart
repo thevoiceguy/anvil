@@ -242,6 +242,19 @@ class StringsEn extends Strings {
   String get callBackButton => 'Call back';
 
   @override
+  String get clearRecentsButton => 'Clear recent calls';
+
+  @override
+  String get clearRecentsConfirm =>
+      'Clear your recent calls from this device? Your organisation keeps its call records.';
+
+  @override
+  String get clearButton => 'Clear';
+
+  @override
+  String get removeRecentButton => 'Remove from recents';
+
+  @override
   String get refreshButton => 'Refresh';
 
   @override
@@ -349,9 +362,6 @@ class StringsEn extends Strings {
 
   @override
   String get saveButton => 'Save';
-
-  @override
-  String get clearButton => 'Clear';
 
   @override
   String get settingsAudio => 'Audio';
