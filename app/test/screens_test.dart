@@ -5,6 +5,7 @@ import 'package:anvil/src/app.dart';
 import 'package:clock/clock.dart';
 import 'package:anvil/src/phone/phone_api.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 import 'fake_phone.dart';
@@ -133,7 +134,16 @@ void main() {
               .copyWith(
                 state: CallState.connected,
                 encrypted: true,
-                quality: const CallQuality(jitterMs: 80, lossPermille: 3),
+                quality: const CallQuality(
+                  jitterMs: 80,
+                  lossPermille: 3,
+                  packetsReceived: 120,
+                  packetsPlayed: 100,
+                  packetsDropped: 20,
+                  unexpectedPt: 8,
+                  expectedPt: 111,
+                  lastSource: '203.0.113.5:40000',
+                ),
               ),
         ],
       ),
@@ -151,7 +161,10 @@ void main() {
             ),
           )
           .message,
-      'Poor connection',
+      'Poor connection\n'
+      '120 packets received, 100 played, 20 dropped\n'
+      "Payload type 8 arrived; this call's codec is 111\n"
+      'From 203.0.113.5:40000',
     );
 
     await tapKey(tester, 'keypad');
@@ -412,6 +425,28 @@ void main() {
       expect(find.byKey(const Key('signIn')), findsOneWidget);
     },
   );
+
+  testWidgets('settings show where the log file is, to copy', (tester) async {
+    final phone = await signedIn(tester);
+    phone.logPath = '/support/anvil.log';
+    await go(tester, 'Settings');
+    await tester.ensureVisible(find.byKey(const Key('logFile')));
+    await tester.pumpAndSettle();
+    expect(find.text('/support/anvil.log'), findsOneWidget);
+    String? copied;
+    tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(
+      SystemChannels.platform,
+      (call) async {
+        if (call.method == 'Clipboard.setData') {
+          copied = (call.arguments as Map)['text'] as String?;
+        }
+        return null;
+      },
+    );
+    await tapKey(tester, 'logFileCopy');
+    expect(copied, '/support/anvil.log');
+    expect(find.text('Path copied'), findsOneWidget);
+  });
 
   testWidgets('a narrow window navigates from the bottom', (tester) async {
     await signedIn(tester, size: const Size(400, 800));

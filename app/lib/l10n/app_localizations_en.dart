@@ -453,4 +453,34 @@ class StringsEn extends Strings {
 
   @override
   String get checkForUpdates => 'Check for updates';
+
+  @override
+  String qualityPackets(int received, int played, int dropped) {
+    return '$received packets received, $played played, $dropped dropped';
+  }
+
+  @override
+  String qualityUnexpectedPt(int pt, int expected) {
+    return 'Payload type $pt arrived; this call\'s codec is $expected';
+  }
+
+  @override
+  String qualityFrom(String source) {
+    return 'From $source';
+  }
+
+  @override
+  String get settingsTroubleshooting => 'Troubleshooting';
+
+  @override
+  String get logFile => 'Log file';
+
+  @override
+  String get logFileCopy => 'Copy the path';
+
+  @override
+  String get logFileCopied => 'Path copied';
+
+  @override
+  String get logFileOpenFolder => 'Open the folder';
 }

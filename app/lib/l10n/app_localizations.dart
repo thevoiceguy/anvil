@@ -908,6 +908,54 @@ abstract class Strings {
   /// In en, this message translates to:
   /// **'Check for updates'**
   String get checkForUpdates;
+
+  /// No description provided for @qualityPackets.
+  ///
+  /// In en, this message translates to:
+  /// **'{received} packets received, {played} played, {dropped} dropped'**
+  String qualityPackets(int received, int played, int dropped);
+
+  /// No description provided for @qualityUnexpectedPt.
+  ///
+  /// In en, this message translates to:
+  /// **'Payload type {pt} arrived; this call\'s codec is {expected}'**
+  String qualityUnexpectedPt(int pt, int expected);
+
+  /// No description provided for @qualityFrom.
+  ///
+  /// In en, this message translates to:
+  /// **'From {source}'**
+  String qualityFrom(String source);
+
+  /// No description provided for @settingsTroubleshooting.
+  ///
+  /// In en, this message translates to:
+  /// **'Troubleshooting'**
+  String get settingsTroubleshooting;
+
+  /// No description provided for @logFile.
+  ///
+  /// In en, this message translates to:
+  /// **'Log file'**
+  String get logFile;
+
+  /// No description provided for @logFileCopy.
+  ///
+  /// In en, this message translates to:
+  /// **'Copy the path'**
+  String get logFileCopy;
+
+  /// No description provided for @logFileCopied.
+  ///
+  /// In en, this message translates to:
+  /// **'Path copied'**
+  String get logFileCopied;
+
+  /// No description provided for @logFileOpenFolder.
+  ///
+  /// In en, this message translates to:
+  /// **'Open the folder'**
+  String get logFileOpenFolder;
 }
 
 class _StringsDelegate extends LocalizationsDelegate<Strings> {

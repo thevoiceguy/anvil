@@ -2,7 +2,11 @@
 // shared with every device), this device's microphone and speaker, and the
 // account (`docs/APP.md` §4, Settings).
 
+import 'dart:io';
+
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
+import 'package:url_launcher/url_launcher.dart';
 
 import '../../l10n/app_localizations.dart';
 import '../desktop/shell.dart';
@@ -154,6 +158,10 @@ class SettingsPage extends StatelessWidget {
         if (UpdateScope.maybeOf(context) case final update?) ...[
           header(s.settingsUpdates),
           _Updates(scope: update, model: model),
+        ],
+        if (model.api.logPath case final log?) ...[
+          header(s.settingsTroubleshooting),
+          _LogFile(path: log),
         ],
         header(s.settingsAccount),
         ListTile(
@@ -441,6 +449,49 @@ class _Updates extends StatelessWidget {
                 ),
         );
       },
+    );
+  }
+}
+
+/// Where the log file is, to copy or (on a desktop) to open its folder: what
+/// a user sends when a call goes wrong.
+class _LogFile extends StatelessWidget {
+  const _LogFile({required this.path});
+  final String path;
+
+  @override
+  Widget build(BuildContext context) {
+    final s = Strings.of(context);
+    final desktop = Platform.isWindows || Platform.isMacOS || Platform.isLinux;
+    return ListTile(
+      key: const Key('logFile'),
+      leading: const Icon(Icons.description_outlined),
+      title: Text(s.logFile),
+      subtitle: SelectableText(path),
+      trailing: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          IconButton(
+            key: const Key('logFileCopy'),
+            tooltip: s.logFileCopy,
+            icon: const Icon(Icons.copy),
+            onPressed: () async {
+              await Clipboard.setData(ClipboardData(text: path));
+              if (context.mounted) {
+                ScaffoldMessenger.maybeOf(context)
+                    ?.showSnackBar(SnackBar(content: Text(s.logFileCopied)));
+              }
+            },
+          ),
+          if (desktop)
+            IconButton(
+              key: const Key('logFileOpenFolder'),
+              tooltip: s.logFileOpenFolder,
+              icon: const Icon(Icons.folder_open),
+              onPressed: () => launchUrl(File(path).parent.uri),
+            ),
+        ],
+      ),
     );
   }
 }

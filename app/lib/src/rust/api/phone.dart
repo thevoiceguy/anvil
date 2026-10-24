@@ -161,6 +161,14 @@ Future<void> setAudioProcessing({
 /// Read the user's data from FCP again.
 Future<void> refresh() => RustLib.instance.api.crateApiPhoneRefresh();
 
+/// Start the log file in `dir` (the support directory, beside the
+/// session); its path. Once per app: later calls return the same path.
+String startLog({required String dir}) =>
+    RustLib.instance.api.crateApiPhoneStartLog(dir: dir);
+
+/// The log file's path, once started.
+String? logPath() => RustLib.instance.api.crateApiPhoneLogPath();
+
 /// Who is signed in.
 class Account {
   final String username;
@@ -577,15 +585,47 @@ class Quality {
   final int packetLossPermille;
   final int? rttMs;
 
+  /// RTP datagrams received since the call began, of any kind.
+  final BigInt packetsReceived;
+
+  /// Audio frames played.
+  final BigInt packetsPlayed;
+
+  /// Packets dropped: the wrong payload type, failed SRTP, not RTP.
+  final BigInt packetsDropped;
+
+  /// The payload type of the last packet dropped for it.
+  final int? unexpectedPt;
+
+  /// The payload type the call's codec is sent with.
+  final int? expectedPt;
+
+  /// Where the last packet came from.
+  final String? lastSource;
+
   const Quality({
     required this.jitterMs,
     required this.packetLossPermille,
     this.rttMs,
+    required this.packetsReceived,
+    required this.packetsPlayed,
+    required this.packetsDropped,
+    this.unexpectedPt,
+    this.expectedPt,
+    this.lastSource,
   });
 
   @override
   int get hashCode =>
-      jitterMs.hashCode ^ packetLossPermille.hashCode ^ rttMs.hashCode;
+      jitterMs.hashCode ^
+      packetLossPermille.hashCode ^
+      rttMs.hashCode ^
+      packetsReceived.hashCode ^
+      packetsPlayed.hashCode ^
+      packetsDropped.hashCode ^
+      unexpectedPt.hashCode ^
+      expectedPt.hashCode ^
+      lastSource.hashCode;
 
   @override
   bool operator ==(Object other) =>
@@ -594,7 +634,13 @@ class Quality {
           runtimeType == other.runtimeType &&
           jitterMs == other.jitterMs &&
           packetLossPermille == other.packetLossPermille &&
-          rttMs == other.rttMs;
+          rttMs == other.rttMs &&
+          packetsReceived == other.packetsReceived &&
+          packetsPlayed == other.packetsPlayed &&
+          packetsDropped == other.packetsDropped &&
+          unexpectedPt == other.unexpectedPt &&
+          expectedPt == other.expectedPt &&
+          lastSource == other.lastSource;
 }
 
 /// One call in the user's history.

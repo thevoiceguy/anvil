@@ -1140,12 +1140,21 @@ async fn run(cli: Cli, cfg: AnvilConfig, tone_stats: Option<Arc<ToneStats>>) -> 
                     }
                     Event::MediaStats { call, stats } => {
                         println!(
-                            "[stats] call={call:?} codec={:?} jitter={:.1}ms loss={:.1}% rx={:.1}kbps tx={:.1}kbps",
+                            "[stats] call={call:?} codec={:?} jitter={:.1}ms loss={:.1}% rx={:.1}kbps tx={:.1}kbps \
+                             received={} played={} dropped={} (pt {} {:?}, srtp {}, malformed {}) from={:?}",
                             stats.codec,
                             stats.jitter_ms,
                             stats.packet_loss_pct,
                             stats.recv_kbps,
                             stats.send_kbps,
+                            stats.receive.received,
+                            stats.receive.played,
+                            stats.receive.dropped(),
+                            stats.receive.dropped_payload_type,
+                            stats.receive.last_unexpected_pt,
+                            stats.receive.dropped_srtp,
+                            stats.receive.dropped_malformed,
+                            stats.receive.last_source,
                         );
                     }
                     Event::CallEnded { call, reason } => {

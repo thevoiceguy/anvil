@@ -16,11 +16,34 @@ class CallQuality {
     required this.jitterMs,
     required this.lossPermille,
     this.rttMs,
+    this.packetsReceived = 0,
+    this.packetsPlayed = 0,
+    this.packetsDropped = 0,
+    this.unexpectedPt,
+    this.expectedPt,
+    this.lastSource,
   });
 
   final int jitterMs;
   final int lossPermille;
   final int? rttMs;
+
+  /// RTP packets received since the call began, of any kind.
+  final int packetsReceived;
+
+  /// Audio frames played.
+  final int packetsPlayed;
+
+  /// Packets dropped: the wrong payload type, failed SRTP, not RTP.
+  final int packetsDropped;
+
+  /// The payload type of the last packet dropped for it, and the one the
+  /// call's codec is sent with.
+  final int? unexpectedPt;
+  final int? expectedPt;
+
+  /// Where the last packet came from (`address:port`).
+  final String? lastSource;
 
   /// Good, fair or poor, as a person would hear it.
   QualityLevel get level {
@@ -529,4 +552,8 @@ abstract class PhoneApi {
     bool? noiseSuppression,
   });
   Future<void> refresh();
+
+  /// The app's log file, once it is written: what a user sends when a call
+  /// goes wrong.
+  String? get logPath;
 }
