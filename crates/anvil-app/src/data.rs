@@ -92,10 +92,7 @@ pub(crate) async fn refresh_recents(inner: &Inner, fcp: &FcpClient) {
     };
     match fcp.calls(&query).await {
         Ok(page) => {
-            let recents: Vec<Recent> = page.data.iter().map(recent).collect();
-            let missed = recents.iter().filter(|r| r.missed).count() as u32;
-            inner.state.lock().recents = recents;
-            let _ = inner.changes.send(Change::Recents { missed });
+            inner.set_recents(page.data.iter().map(recent).collect());
         }
         Err(e) => tracing::debug!(%e, "recent calls not read"),
     }

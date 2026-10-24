@@ -33,6 +33,7 @@ class DesktopBridge extends StatefulWidget {
 class _DesktopBridgeState extends State<DesktopBridge> {
   StreamSubscription<ShellEvent>? _events;
   (TrayState, String, TrayMenu)? _tray;
+  String? _title;
   final Set<int> _notified = {};
   bool _askedForNotifications = false;
 
@@ -92,6 +93,10 @@ class _DesktopBridgeState extends State<DesktopBridge> {
       TrayState.inCall => s.callConnected,
     };
     final app = snap.brandName ?? s.appName;
+    if (app != _title) {
+      _title = app;
+      unawaited(shell.setTitle(app));
+    }
     final tray = (
       state,
       '$app — $status',

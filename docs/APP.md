@@ -129,13 +129,18 @@ share sheet.
   beside the session (`last_sign_in.json`, never a password) and fill the
   form in after signing out. The install becomes a device of the user's,
   as it does today.
-- **Keypad.** Dial a number, an extension or a name.
+- **Keypad.** Dial a number, an extension or a name. Each key shows its
+  letters (2 ABC … 9 WXYZ), and a number written with them is dialled as
+  its digits (`800555FOOD` → `8005553663`, separators dropped); a name
+  such as `alice` is dialled as it is.
 - **In a call.** Mute, hold, keypad (DTMF), speaker or headset, blind and
   attended transfer, park, add a second call and swap, end. Call quality and
   encryption shown.
 - **Incoming.** Answer, decline, send to voicemail, the caller's name from the
   directory. A second call while one is up.
-- **Recents.** History, missed calls marked, call back.
+- **Recents.** History, missed calls marked, call back. Clear them all, or
+  remove one; this hides them on this device only (`settings.json`), as FCP
+  keeps the call records.
 - **Contacts.** The tenant's directory with presence, searchable, busy lamps for
   favourites.
 - **Voicemail.** Messages with transcription, play, mark heard, delete, the

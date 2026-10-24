@@ -80,6 +80,10 @@ pub enum Command {
     Stop,
     /// Make someone in the directory a favourite, or not.
     Favourite { who: String, on: bool },
+    /// Clear the recent calls shown here (FCP keeps their records).
+    ClearRecents,
+    /// Remove one recent call, by record id, from those shown here.
+    HideRecent { id: String },
     /// Use this microphone or speaker (by id; `None` for the system's
     /// default) for the calls set up from now on, or ring on this speaker.
     Audio {
@@ -162,7 +166,7 @@ impl Command {
     /// `park`, `dnd on`, `forward busy 1003`, `forward all off`,
     /// `waiting off`, `heard <id>`, `delete <id>`, `play <id>`, `stop`,
     /// `favourite alice`,
-    /// `unfavourite alice`, `audio in USB Headset`, `audio out default`,
+    /// `unfavourite alice`, `recents clear`, `recents hide <id>`, `audio in USB Headset`, `audio out default`,
     /// `audio ring Speakers`, `audio echo off`, `audio noise on`,
     /// `ringtone classic`, `ringtone default`,
     /// `refresh`, `register`, `status`. A trailing number names the call.
@@ -264,6 +268,13 @@ impl Command {
             "favourite" | "favorite" | "unfavourite" | "unfavorite" => Command::Favourite {
                 who: rest(&words, 1).ok_or_else(|| format!("{verb} needs a name"))?,
                 on: !verb.to_ascii_lowercase().starts_with("un"),
+            },
+            "recents" => match words.get(1).map(|w| w.to_ascii_lowercase()).as_deref() {
+                Some("clear") => Command::ClearRecents,
+                Some("hide") => Command::HideRecent {
+                    id: need(words.get(2), "a call record id")?,
+                },
+                _ => return Err("recents clear, or recents hide <id>".into()),
             },
             "audio"
                 if matches!(
@@ -412,6 +423,15 @@ mod tests {
                 on: false
             }
         );
+        assert_eq!(
+            Command::parse_line("recents clear").unwrap(),
+            Command::ClearRecents
+        );
+        assert_eq!(
+            Command::parse_line("recents hide cdr-9").unwrap(),
+            Command::HideRecent { id: "cdr-9".into() }
+        );
+        assert!(Command::parse_line("recents").is_err());
         assert_eq!(
             Command::parse_line("play vm-1").unwrap(),
             Command::Play { id: "vm-1".into() }

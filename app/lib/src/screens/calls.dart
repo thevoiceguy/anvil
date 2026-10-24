@@ -577,6 +577,18 @@ class DigitPad extends StatelessWidget {
     '#',
   ];
 
+  /// The letters under each key (ITU E.161), as a desk phone prints them.
+  static const letters = {
+    '2': 'ABC',
+    '3': 'DEF',
+    '4': 'GHI',
+    '5': 'JKL',
+    '6': 'MNO',
+    '7': 'PQRS',
+    '8': 'TUV',
+    '9': 'WXYZ',
+  };
+
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
@@ -606,7 +618,20 @@ class DigitPad extends StatelessWidget {
                 OutlinedButton(
                   key: Key('key$k'),
                   onPressed: () => onDigit(k),
-                  child: Text(k, style: theme.textTheme.titleLarge),
+                  style: OutlinedButton.styleFrom(padding: EdgeInsets.zero),
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Text(k, style: theme.textTheme.titleLarge),
+                      Text(
+                        letters[k] ?? '',
+                        style: theme.textTheme.labelSmall?.copyWith(
+                          letterSpacing: 1.5,
+                          color: theme.colorScheme.onSurfaceVariant,
+                        ),
+                      ),
+                    ],
+                  ),
                 ),
             ],
           ),

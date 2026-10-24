@@ -359,6 +359,21 @@ class FakePhone implements PhoneApi {
   }
 
   @override
+  Future<void> clearRecents() async {
+    log.add('clear recents');
+    set(state.copyWith(recents: const []), 'recents');
+  }
+
+  @override
+  Future<void> hideRecent(String id) async {
+    log.add('hide recent $id');
+    set(
+      state.copyWith(recents: state.recents.where((r) => r.id != id).toList()),
+      'recents',
+    );
+  }
+
+  @override
   Future<void> favourite(String who, bool on) async {
     log.add('favourite $who $on');
     set(

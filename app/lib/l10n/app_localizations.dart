@@ -513,6 +513,30 @@ abstract class Strings {
   /// **'Call back'**
   String get callBackButton;
 
+  /// No description provided for @clearRecentsButton.
+  ///
+  /// In en, this message translates to:
+  /// **'Clear recent calls'**
+  String get clearRecentsButton;
+
+  /// No description provided for @clearRecentsConfirm.
+  ///
+  /// In en, this message translates to:
+  /// **'Clear your recent calls from this device? Your organisation keeps its call records.'**
+  String get clearRecentsConfirm;
+
+  /// No description provided for @clearButton.
+  ///
+  /// In en, this message translates to:
+  /// **'Clear'**
+  String get clearButton;
+
+  /// No description provided for @removeRecentButton.
+  ///
+  /// In en, this message translates to:
+  /// **'Remove from recents'**
+  String get removeRecentButton;
+
   /// No description provided for @refreshButton.
   ///
   /// In en, this message translates to:
@@ -722,12 +746,6 @@ abstract class Strings {
   /// In en, this message translates to:
   /// **'Save'**
   String get saveButton;
-
-  /// No description provided for @clearButton.
-  ///
-  /// In en, this message translates to:
-  /// **'Clear'**
-  String get clearButton;
 
   /// No description provided for @settingsAudio.
   ///

@@ -121,7 +121,11 @@ void main() {
     final phone = await signedIn(tester);
     phone.brand('Acme Phone', '#AA2200');
     await tester.pumpAndSettle();
-    expect(find.text('Acme Phone'), findsOneWidget);
+    expect(
+      find.text('Acme Phone'),
+      findsNothing,
+      reason: "the brand names the window, not the screen",
+    );
     final context = tester.element(find.byKey(const Key('title')));
     final seeded = Theme.of(context).colorScheme.primary;
     expect(seeded, isNot(equals(Theme.of(context).colorScheme.surface)));

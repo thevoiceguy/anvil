@@ -296,6 +296,13 @@ enum Command {
         #[arg(long)]
         off: bool,
     },
+    /// Clear the recent calls shown, or remove one by record id (FCP keeps
+    /// the records).
+    Recents {
+        #[arg(value_parser = ["clear", "hide"])]
+        action: String,
+        id: Option<String>,
+    },
     /// Use this microphone (`in`) or speaker (`out`); `default` for the
     /// system's.
     Audio {
@@ -356,6 +363,10 @@ impl Command {
                 who: who.join(" "),
                 on: !off,
             },
+            Command::Recents { action, id } => {
+                let line = format!("recents {action} {}", id.as_deref().unwrap_or(""));
+                return anvil_app::Command::parse_line(&line).ok();
+            }
             Command::Audio { kind, device } => {
                 return anvil_app::Command::parse_line(&format!(
                     "audio {kind} {}",

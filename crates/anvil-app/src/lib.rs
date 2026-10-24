@@ -404,6 +404,26 @@ impl Phone {
                 self.inner.update_person_by_key(&key, |p| p.favourite = on);
                 Ok(Response::ok())
             }
+            Command::ClearRecents => {
+                let (account, recents) = {
+                    let state = self.inner.state.lock();
+                    (state.aor.clone(), state.recents.clone())
+                };
+                self.inner
+                    .local
+                    .lock()
+                    .clear_recents(&account, recents.iter().map(|r| r.started_at.as_str()));
+                self.inner.save_settings();
+                self.inner.set_recents(recents);
+                Ok(Response::ok())
+            }
+            Command::HideRecent { id } => {
+                self.inner.local.lock().hidden_recents.insert(id);
+                self.inner.save_settings();
+                let recents = self.inner.state.lock().recents.clone();
+                self.inner.set_recents(recents);
+                Ok(Response::ok())
+            }
             Command::Audio {
                 kind: AudioKind::Ring,
                 device,
@@ -870,6 +890,19 @@ impl Inner {
         }
     }
 
+    /// Show `recents`, less those cleared or removed here.
+    fn set_recents(&self, mut recents: Vec<Recent>) {
+        let missed = {
+            let local = self.local.lock();
+            let mut state = self.state.lock();
+            let account = state.aor.clone();
+            recents.retain(|r| !local.hides_recent(&account, &r.id, &r.started_at));
+            state.recents = recents;
+            state.recents.iter().filter(|r| r.missed).count() as u32
+        };
+        let _ = self.changes.send(Change::Recents { missed });
+    }
+
     fn update_voicemail(&self, change: impl FnOnce(&mut Vec<Voicemail>)) {
         let (new, total) = {
             let mut state = self.state.lock();
@@ -1101,7 +1134,9 @@ fn domain_of(aor: &str) -> String {
         .unwrap_or_else(|| rest.to_string())
 }
 
-/// What to dial: a SIP or tel URI as given, anything else in `domain`.
+/// What to dial: a SIP or tel URI as given, anything else in `domain`. A
+/// phone number is dialled as its digits: letters by the keypad
+/// (`800555FOOD` → `8005553663`), spaces, dashes, dots and brackets dropped.
 fn dial_target(target: &str, domain: &str) -> String {
     let t = target.trim();
     if t.starts_with("sip:") || t.starts_with("sips:") || t.starts_with("tel:") {
@@ -1109,7 +1144,43 @@ fn dial_target(target: &str, domain: &str) -> String {
     } else if t.contains('@') {
         format!("sip:{t}")
     } else {
+        let number = phone_number(t);
+        let t = number.as_deref().unwrap_or(t);
         format!("sip:{t}@{domain}")
+    }
+}
+
+/// The digits of a phone number as written, or `None` for what is not one:
+/// a number starts with a digit or `+` and holds nothing but digits, keypad
+/// letters, `*`, `#` and separators. A name (`alice`) is not one.
+fn phone_number(t: &str) -> Option<String> {
+    let first = t.chars().find(|c| !matches!(c, '(' | ' '))?;
+    if !(first.is_ascii_digit() || first == '+') {
+        return None;
+    }
+    let mut digits = String::with_capacity(t.len());
+    for c in t.chars() {
+        match c {
+            '0'..='9' | '+' | '*' | '#' => digits.push(c),
+            ' ' | '-' | '.' | '(' | ')' => {}
+            c if c.is_ascii_alphabetic() => digits.push(keypad_digit(c)),
+            _ => return None,
+        }
+    }
+    Some(digits)
+}
+
+/// The key a letter is on (ITU E.161).
+fn keypad_digit(letter: char) -> char {
+    match letter.to_ascii_uppercase() {
+        'A'..='C' => '2',
+        'D'..='F' => '3',
+        'G'..='I' => '4',
+        'J'..='L' => '5',
+        'M'..='O' => '6',
+        'P'..='S' => '7',
+        'T'..='V' => '8',
+        _ => '9',
     }
 }
 
@@ -1127,5 +1198,16 @@ mod tests {
         assert_eq!(dial_target("bob@other.net", "x"), "sip:bob@other.net");
         assert_eq!(dial_target("sip:carol@y", "x"), "sip:carol@y");
         assert_eq!(dial_target("tel:+15551234", "x"), "tel:+15551234");
+    }
+
+    #[test]
+    fn a_number_is_dialled_as_its_digits() {
+        assert_eq!(dial_target("800555FOOD", "d"), "sip:8005553663@d");
+        assert_eq!(dial_target("1-800-flowers", "d"), "sip:18003569377@d");
+        assert_eq!(dial_target("(800) 555-1234", "d"), "sip:8005551234@d");
+        assert_eq!(dial_target("+44 20 7946 0958", "d"), "sip:+442079460958@d");
+        assert_eq!(dial_target("*70", "d"), "sip:*70@d");
+        assert_eq!(dial_target("alice", "d"), "sip:alice@d");
+        assert_eq!(dial_target("2x_3", "d"), "sip:2x_3@d");
     }
 }
