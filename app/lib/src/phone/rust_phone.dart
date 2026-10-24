@@ -15,8 +15,17 @@ class RustPhone implements PhoneApi {
     if (_sessionPath != null) return _sessionPath!;
     var dir = (await getApplicationSupportDirectory()).path;
     if (Platform.isWindows) dir = await localOnWindows(dir);
+    try {
+      // The log goes beside the session, from the first thing the app does.
+      rust.startLog(dir: dir);
+    } catch (_) {
+      // No log file is no reason not to run.
+    }
     return _sessionPath = '$dir${Platform.pathSeparator}session.json';
   }
+
+  @override
+  String? get logPath => rust.logPath();
 
   /// Windows keeps the app's files — the session's tokens, its settings —
   /// in the local profile (`%LOCALAPPDATA%`), not the roaming one, which
@@ -225,6 +234,12 @@ class RustPhone implements PhoneApi {
               jitterMs: q.jitterMs,
               lossPermille: q.packetLossPermille,
               rttMs: q.rttMs,
+              packetsReceived: q.packetsReceived.toInt(),
+              packetsPlayed: q.packetsPlayed.toInt(),
+              packetsDropped: q.packetsDropped.toInt(),
+              unexpectedPt: q.unexpectedPt,
+              expectedPt: q.expectedPt,
+              lastSource: q.lastSource,
             ),
       connectedAt: at == null
           ? null

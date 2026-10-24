@@ -62,3 +62,13 @@ and, to build, `libayatana-appindicator3-dev`.
 
 The font is Inter (SIL Open Font License, `assets/fonts/OFL.txt`), declared in
 `pubspec.yaml` and bundled so the app reads the same on every platform.
+
+The app keeps a log, `anvil.log`, in its support directory beside the session
+(on Windows `%LOCALAPPDATA%\Anvil\Anvil`): Anvil's own crates at INFO, the
+rest when it warns (`ANVIL_LOG`, a `tracing` filter, changes that). Past 2 MB
+it becomes `anvil.log.1` and a new one starts. Settings shows where it is,
+to copy or to open its folder. Every call writes a line when it ends,
+`rtp: receive summary`, with what arrived on its RTP socket and what was
+played or dropped (the wrong payload type, failed SRTP, not RTP), and a line
+the first time each kind of drop happens: where to look when a call is heard
+one way only. The in-call quality icon's tooltip shows the same counts.

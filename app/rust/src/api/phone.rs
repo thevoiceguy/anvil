@@ -431,6 +431,18 @@ pub struct Quality {
     pub jitter_ms: u32,
     pub packet_loss_permille: u32,
     pub rtt_ms: Option<u32>,
+    /// RTP datagrams received since the call began, of any kind.
+    pub packets_received: u64,
+    /// Audio frames played.
+    pub packets_played: u64,
+    /// Packets dropped: the wrong payload type, failed SRTP, not RTP.
+    pub packets_dropped: u64,
+    /// The payload type of the last packet dropped for it.
+    pub unexpected_pt: Option<u8>,
+    /// The payload type the call's codec is sent with.
+    pub expected_pt: Option<u8>,
+    /// Where the last packet came from.
+    pub last_source: Option<String>,
 }
 
 /// One call in the user's history.
@@ -634,6 +646,12 @@ pub fn phone_state() -> anyhow::Result<PhoneState> {
                     jitter_ms: q.jitter_ms,
                     packet_loss_permille: q.packet_loss_permille,
                     rtt_ms: q.rtt_ms,
+                    packets_received: q.packets_received,
+                    packets_played: q.packets_played,
+                    packets_dropped: q.packets_dropped,
+                    unexpected_pt: q.unexpected_pt.map(|(pt, _)| pt),
+                    expected_pt: q.unexpected_pt.map(|(_, want)| want),
+                    last_source: q.last_source.map(|a| a.to_string()),
                 }),
                 connected_at: c.connected_at,
             })
@@ -979,6 +997,20 @@ pub async fn set_audio_processing(
 /// Read the user's data from FCP again.
 pub async fn refresh() -> anyhow::Result<()> {
     execute(Command::Refresh).await.map(|_| ())
+}
+
+/// Start the log file in `dir` (the support directory, beside the
+/// session); its path. Once per app: later calls return the same path.
+#[frb(sync)]
+pub fn start_log(dir: String) -> anyhow::Result<String> {
+    let path = crate::log::start(std::path::Path::new(&dir))?;
+    Ok(path.to_string_lossy().into_owned())
+}
+
+/// The log file's path, once started.
+#[frb(sync)]
+pub fn log_path() -> Option<String> {
+    crate::log::path().map(|p| p.to_string_lossy().into_owned())
 }
 
 #[frb(init)]

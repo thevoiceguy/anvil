@@ -414,7 +414,20 @@ class _MediaLine extends StatelessWidget {
         ),
         if (qIcon != null)
           Tooltip(
-            message: qLabel!,
+            message: [
+              qLabel!,
+              s.qualityPackets(
+                quality!.packetsReceived,
+                quality.packetsPlayed,
+                quality.packetsDropped,
+              ),
+              if ((quality.unexpectedPt, quality.expectedPt) case (
+                final pt?,
+                final expected?,
+              ))
+                s.qualityUnexpectedPt(pt, expected),
+              if (quality.lastSource case final from?) s.qualityFrom(from),
+            ].join('\n'),
             child: Icon(
               qIcon,
               key: const Key('quality'),

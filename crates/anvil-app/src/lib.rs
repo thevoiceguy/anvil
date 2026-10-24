@@ -978,6 +978,14 @@ async fn follow(inner: std::sync::Weak<Inner>, mut events: EventStream) {
                     jitter_ms: stats.jitter_ms.round() as u32,
                     packet_loss_permille: (stats.packet_loss_pct * 10.0).round() as u32,
                     rtt_ms: stats.rtt_ms.map(|r| r.round() as u32),
+                    packets_received: stats.receive.received,
+                    packets_played: stats.receive.played,
+                    packets_dropped: stats.receive.dropped(),
+                    unexpected_pt: stats
+                        .receive
+                        .last_unexpected_pt
+                        .map(|pt| (pt, stats.receive.expected_pt)),
+                    last_source: stats.receive.last_source,
                 };
                 let known = inner.state.lock().call(call.0).is_some();
                 if known {

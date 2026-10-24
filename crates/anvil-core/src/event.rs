@@ -49,6 +49,43 @@ pub struct MediaStats {
     pub rtt_ms: Option<f32>,
     pub recv_kbps: f32,
     pub send_kbps: f32,
+    /// What arrived on the call's RTP socket so far, and what became of it.
+    pub receive: ReceiveCounts,
+}
+
+/// A call's receive side counted from its start: every datagram on the RTP
+/// socket, what was played, and what was dropped and why. When a call is
+/// heard one way only, these say whether the far end's packets reach this
+/// machine at all and, if they do, why they are not played.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct ReceiveCounts {
+    /// Datagrams read from the RTP socket, of any kind.
+    pub received: u64,
+    /// Audio frames handed to the speaker.
+    pub played: u64,
+    /// Packets dropped because their payload type is not the call's codec
+    /// (nor telephone-event).
+    pub dropped_payload_type: u64,
+    /// The payload type of the last packet dropped for it.
+    pub last_unexpected_pt: Option<u8>,
+    /// The call's codec's payload type: what a packet must carry to be played.
+    pub expected_pt: u8,
+    /// Packets that did not authenticate under the far end's SRTP key.
+    pub dropped_srtp: u64,
+    /// Datagrams that are not RTP.
+    pub dropped_malformed: u64,
+    /// Receives that reported an earlier datagram of ours refused (an ICMP
+    /// port unreachable, seen as a connection reset on Windows).
+    pub refused: u64,
+    /// Where the last datagram came from.
+    pub last_source: Option<std::net::SocketAddr>,
+}
+
+impl ReceiveCounts {
+    /// Every packet dropped, whatever the reason.
+    pub fn dropped(&self) -> u64 {
+        self.dropped_payload_type + self.dropped_srtp + self.dropped_malformed
+    }
 }
 
 /// Events delivered to the application.

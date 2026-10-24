@@ -182,6 +182,22 @@ pub struct Quality {
     /// Packets lost, per thousand.
     pub packet_loss_permille: u32,
     pub rtt_ms: Option<u32>,
+    /// RTP datagrams received since the call began, of any kind.
+    #[serde(default)]
+    pub packets_received: u64,
+    /// Audio frames played.
+    #[serde(default)]
+    pub packets_played: u64,
+    /// Packets dropped: the wrong payload type, failed SRTP, not RTP.
+    #[serde(default)]
+    pub packets_dropped: u64,
+    /// The payload type of the last packet dropped for it, and the one
+    /// expected: a far end sending a codec this call did not agree on.
+    #[serde(default)]
+    pub unexpected_pt: Option<(u8, u8)>,
+    /// Where the last packet came from.
+    #[serde(default)]
+    pub last_source: Option<std::net::SocketAddr>,
 }
 
 /// One call in the user's history.
