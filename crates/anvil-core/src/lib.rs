@@ -62,8 +62,8 @@ pub struct Anvil {
     events: mpsc::Sender<Event>,
     calls: Arc<DashMap<CallId, CallEntry>>,
     audio: Arc<dyn AudioHost>,
-    /// IP used in SDP offers. Defaults to loopback; `AccountConfig::bind_addr`
-    /// overrides when set to a specific host.
+    /// IP used in SDP offers: STUN's answer, `AccountConfig::bind_addr`'s
+    /// host, else this machine's address on the route to the registrar.
     media_ip: IpAddr,
     /// AOR user component, used as the SDP origin username.
     local_user: String,
@@ -148,7 +148,9 @@ impl Anvil {
         //   1. STUN reflexive address if `account.stun` is configured and
         //      reachable. Best for clients behind NAT.
         //   2. Pinned host from `account.bind_addr` (`1.2.3.4:5060` → 1.2.3.4).
-        //   3. Loopback. Useful for tests; useless on the open net.
+        //   3. This machine's address on the route to the registrar (or
+        //      the outbound proxy). Behind NAT the server learns the rest
+        //      from where our packets come from.
         let stun_ip = if let Some(server) = cfg.account.stun.as_deref() {
             match stun::discover_public_addr(server, std::time::Duration::from_secs(3)).await {
                 Ok(addr) => {
@@ -163,14 +165,24 @@ impl Anvil {
         } else {
             None
         };
-        let media_ip = stun_ip.unwrap_or_else(|| {
-            cfg.account
-                .bind_addr
-                .as_deref()
-                .and_then(|s| s.rsplit_once(':').map(|(host, _)| host))
-                .and_then(|host| host.parse::<IpAddr>().ok())
-                .unwrap_or_else(call::default_media_ip)
-        });
+        let pinned = cfg
+            .account
+            .bind_addr
+            .as_deref()
+            .and_then(|s| s.rsplit_once(':').map(|(host, _)| host))
+            .and_then(|host| host.parse::<IpAddr>().ok())
+            .filter(|ip| !ip.is_unspecified());
+        let media_ip = match stun_ip.or(pinned) {
+            Some(ip) => ip,
+            None => {
+                let server = cfg
+                    .account
+                    .outbound_proxy
+                    .as_deref()
+                    .unwrap_or(&cfg.account.registrar);
+                call::default_media_ip(server).await
+            }
+        };
 
         // Where peers reach us: the media IP with the SIP port, in REGISTER's
         // Contact and in our answers. The bound address may be 0.0.0.0.
