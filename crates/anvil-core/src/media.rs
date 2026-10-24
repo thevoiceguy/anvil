@@ -1681,8 +1681,10 @@ mod tests {
         peer.send_to(&[0u8; 4], to).await.unwrap();
 
         let rx = until_received(&pipe, 10).await;
+        // The pipeline also sends, to a port nobody listens on: Windows
+        // reports that as refused datagrams on this socket, Linux does not.
         assert_eq!(
-            rx,
+            ReceiveCounts { refused: 0, ..rx },
             ReceiveCounts {
                 received: 10,
                 played: 5,
