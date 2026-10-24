@@ -323,6 +323,24 @@ void main() {
     );
   });
 
+  testWidgets('recents are removed one at a time, then cleared', (
+    tester,
+  ) async {
+    final phone = await signedIn(tester);
+    await go(tester, 'Recents');
+    await tapKey(tester, 'recentMenu-r2');
+    await tapKey(tester, 'removeRecent-r2');
+    expect(phone.log, contains('hide recent r2'));
+    expect(find.byKey(const Key('recent-r2')), findsNothing);
+    expect(find.text('Ann Lee'), findsOneWidget, reason: 'the other stays');
+
+    await tapKey(tester, 'clearRecents');
+    expect(find.textContaining('keeps its call records'), findsOneWidget);
+    await tapKey(tester, 'confirmClearRecents');
+    expect(phone.log, contains('clear recents'));
+    expect(find.text('No recent calls'), findsOneWidget);
+  });
+
   testWidgets('contacts are searched, lit, made favourites and called', (
     tester,
   ) async {

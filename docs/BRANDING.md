@@ -284,6 +284,8 @@ Client                                    FCP
 - **FFI**: `ANVIL_EVENT_KIND_BRAND_UPDATED` with `brand_json` (the profile
   as JSON with `local_path`s and no bytes), and
   `ANVIL_EVENT_KIND_BRAND_CLEARED`.
+- **The app** (v0.2.5): `app_name` is the window's title and the tray's
+  name; the screen's header names who is signed in.
 - **Not yet done:** the `/.well-known/fcp-provisioning` fallback (step 3 of
   §2). A signed-in account always knows its server.
 

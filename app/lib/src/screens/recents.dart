@@ -14,6 +14,29 @@ class RecentsPage extends StatelessWidget {
   final PhoneModel model;
   final ValueChanged<String> onDial;
 
+  Future<void> _clear(BuildContext context) async {
+    final s = Strings.of(context);
+    final yes = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: Text(s.clearRecentsButton),
+        content: Text(s.clearRecentsConfirm),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(false),
+            child: Text(s.cancelButton),
+          ),
+          FilledButton(
+            key: const Key('confirmClearRecents'),
+            onPressed: () => Navigator.of(context).pop(true),
+            child: Text(s.clearButton),
+          ),
+        ],
+      ),
+    );
+    if (yes == true) await model.run(model.api.clearRecents);
+  }
+
   @override
   Widget build(BuildContext context) {
     final s = Strings.of(context);
@@ -31,10 +54,25 @@ class RecentsPage extends StatelessWidget {
               ],
             )
           : ListView.separated(
-              itemCount: recents.length,
-              separatorBuilder: (_, _) => const Divider(height: 1),
+              itemCount: recents.length + 1,
+              separatorBuilder: (_, i) =>
+                  i == 0 ? const SizedBox.shrink() : const Divider(height: 1),
               itemBuilder: (context, i) {
-                final r = recents[i];
+                if (i == 0) {
+                  return Align(
+                    alignment: Alignment.centerRight,
+                    child: Padding(
+                      padding: const EdgeInsets.symmetric(horizontal: 8),
+                      child: TextButton.icon(
+                        key: const Key('clearRecents'),
+                        icon: const Icon(Icons.delete_sweep_outlined),
+                        label: Text(s.clearRecentsButton),
+                        onPressed: () => _clear(context),
+                      ),
+                    ),
+                  );
+                }
+                final r = recents[i - 1];
                 final name = snap.personFor(r.remote)?.name ?? r.who;
                 final (icon, color) = r.missed
                     ? (Icons.call_missed, AnvilColors.hangup)
@@ -57,11 +95,27 @@ class RecentsPage extends StatelessWidget {
                         : null,
                   ),
                   subtitle: Text(details),
-                  trailing: IconButton(
-                    key: Key('callBack-${r.id}'),
-                    tooltip: s.callBackButton,
-                    icon: const Icon(Icons.call),
-                    onPressed: () => onDial(r.remote),
+                  trailing: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      IconButton(
+                        key: Key('callBack-${r.id}'),
+                        tooltip: s.callBackButton,
+                        icon: const Icon(Icons.call),
+                        onPressed: () => onDial(r.remote),
+                      ),
+                      PopupMenuButton<void>(
+                        key: Key('recentMenu-${r.id}'),
+                        itemBuilder: (_) => [
+                          PopupMenuItem(
+                            key: Key('removeRecent-${r.id}'),
+                            onTap: () =>
+                                model.run(() => model.api.hideRecent(r.id)),
+                            child: Text(s.removeRecentButton),
+                          ),
+                        ],
+                      ),
+                    ],
                   ),
                   onTap: () => onDial(r.remote),
                 );

@@ -342,6 +342,12 @@ class RustPhone implements PhoneApi {
       rust.favourite(who: who, on_: on);
 
   @override
+  Future<void> clearRecents() => rust.clearRecents();
+
+  @override
+  Future<void> hideRecent(String id) => rust.hideRecent(id: id);
+
+  @override
   Future<void> chooseAudio({required bool input, String? device}) =>
       rust.chooseAudio(input: input, device: device);
 

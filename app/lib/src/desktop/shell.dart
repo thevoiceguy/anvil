@@ -103,6 +103,9 @@ abstract class DesktopShell {
 
   Future<void> setTray(TrayState state, String tooltip, TrayMenu menu);
 
+  /// The window's title: the tenant's name for the app, else Anvil.
+  Future<void> setTitle(String title);
+
   /// Ask for leave to show notifications, where the system asks the user
   /// (macOS). Called once someone has signed in, never awaited: the answer
   /// is the user's to give whenever they like.

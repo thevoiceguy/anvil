@@ -41,6 +41,11 @@ class FakeShell implements DesktopShell {
   @override
   void whenSessionEnds(Future<void> Function()? stop) => sessionEnds = stop;
 
+  String? title;
+
+  @override
+  Future<void> setTitle(String title) async => this.title = title;
+
   @override
   Future<void> setTray(TrayState state, String tooltip, TrayMenu menu) async {
     tray = state;

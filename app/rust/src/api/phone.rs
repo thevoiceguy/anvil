@@ -1021,6 +1021,16 @@ pub async fn favourite(who: String, on: bool) -> anyhow::Result<()> {
     execute(Command::Favourite { who, on }).await.map(|_| ())
 }
 
+/// Clear the recent calls shown on this device; FCP keeps the records.
+pub async fn clear_recents() -> anyhow::Result<()> {
+    execute(Command::ClearRecents).await.map(|_| ())
+}
+
+/// Remove one recent call, by record id, from those shown on this device.
+pub async fn hide_recent(id: String) -> anyhow::Result<()> {
+    execute(Command::HideRecent { id }).await.map(|_| ())
+}
+
 /// Use this microphone (`input`) or speaker by id, `None` for the system's
 /// default, for the calls set up from now on.
 pub async fn choose_audio(input: bool, device: Option<String>) -> anyhow::Result<()> {

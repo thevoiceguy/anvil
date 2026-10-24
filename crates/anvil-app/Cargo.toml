@@ -19,6 +19,8 @@ thiserror  = { workspace = true }
 tracing    = { workspace = true }
 parking_lot = { workspace = true }
 dirs       = "5"
+# When a recent call started, against when the recents were cleared.
+chrono     = { version = "0.4", default-features = false, features = ["std"] }
 # A brand's ringtones: Ogg Vorbis and MP3 (WAV is read by `clip`).
 symphonia  = { version = "0.5.5", default-features = false, features = ["ogg", "vorbis", "mp3"] }
 

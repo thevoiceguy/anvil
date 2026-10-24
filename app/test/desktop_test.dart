@@ -38,6 +38,7 @@ void main() {
     expect(shell.log.where((l) => l == 'allow notifications'), hasLength(1));
     expect(shell.tray, TrayState.ready);
     expect(shell.tooltip, 'Anvil — Ready');
+    expect(shell.title, 'Anvil');
     expect(shell.menu!.dndAvailable, isTrue);
 
     await phone.setDnd(true);
@@ -63,6 +64,7 @@ void main() {
     await tester.pumpAndSettle();
     expect(shell.tooltip, 'Acme Phone — Offline');
     expect(shell.menu!.show, 'Show Acme Phone');
+    expect(shell.title, 'Acme Phone', reason: 'the brand names the window');
   });
 
   testWidgets('a call ringing in is a notice until it stops ringing', (
