@@ -155,6 +155,32 @@ jobs:
           test ! -e "$entry" || { echo "::error::the branded entry outlived the brand"; exit 1; }
           sudo apt-get remove -y anvil
           test ! -e /opt/anvil/anvil
+      # A branded .deb (brand.py): the profile in /etc/anvil/profile and the
+      # menu entry named from it; the app shows the brand; the stock package
+      # over it keeps the profile (a conffile), and a purge takes it away.
+      - name: A branded .deb installs the profile and keeps it
+        run: |
+          brand=$(mktemp -d)
+          cp app/assets/app/anvil.png "$brand/icon.png"
+          echo '{"profile_version": 1, "server": "https://voice.acme.example", "brand": {"app_name": "Acme Voice", "icon": "icon.png"}}' > "$brand/profile.json"
+          deb=$(python3 app/packaging/brand.py "$brand" --bundle dist/anvil_${{ needs.version.outputs.label }}_amd64.deb \
+            --version ${{ needs.version.outputs.version }} --label ${{ needs.version.outputs.label }} --out "$RUNNER_TEMP/branded" | tail -1)
+          test "$(basename "$deb")" = "acme-voice_${{ needs.version.outputs.label }}_amd64.deb"
+          sudo apt-get install -y "$deb"
+          packaged=/usr/share/applications/com.thevoiceguy.anvil.desktop
+          test -f /etc/anvil/profile/profile.json
+          grep -qx 'Name=Acme Voice' "$packaged" || { cat "$packaged"; exit 1; }
+          grep -qx 'Icon=/etc/anvil/profile/icon.png' "$packaged"
+          entry=~/.local/share/applications/com.thevoiceguy.anvil.desktop
+          rm -f "$entry"
+          set +e; xvfb-run -a timeout 10 anvil; code=$?; set -e
+          [ "$code" = 124 ] || { echo "::error::anvil exited with $code"; exit 1; }
+          grep -qx 'Name=Acme Voice' "$entry" || { echo "::error::the app did not show the installed profile's brand"; exit 1; }
+          sudo dpkg -i dist/anvil_${{ needs.version.outputs.label }}_amd64.deb
+          grep -qx 'Name=Anvil' "$packaged"
+          test -f /etc/anvil/profile/profile.json || { echo "::error::the stock package took the profile away"; exit 1; }
+          sudo apt-get purge -y anvil
+          test ! -e /etc/anvil/profile || { echo "::error::the purge left the profile"; exit 1; }
       - name: The AppImage starts
         run: |
           chmod +x dist/Anvil-*.AppImage
@@ -449,6 +475,32 @@ jobs:
           "$RUNNER_TEMP/Anvil.app/Contents/MacOS/Anvil" & pid=$!
           sleep 10
           kill -0 $pid || { echo "::error::the app exited"; exit 1; }
+          kill $pid
+      # A branded .pkg (brand.py): the app renamed, with the brand's icon,
+      # in /Applications and the profile where the app reads it.
+      - name: A branded .pkg installs the app renamed and the profile
+        run: |
+          brand=$(mktemp -d)
+          cp app/assets/app/anvil.png "$brand/icon.png"
+          echo '{"profile_version": 1, "server": "https://voice.acme.example", "brand": {"app_name": "Acme Voice", "icon": "icon.png"}}' > "$brand/profile.json"
+          pkg=$(python3 app/packaging/brand.py "$brand" --bundle dist/Anvil-${{ needs.version.outputs.label }}-macos.dmg \
+            --version ${{ needs.version.outputs.version }} --label ${{ needs.version.outputs.label }} --out "$RUNNER_TEMP/branded" | tail -1)
+          test "$(basename "$pkg")" = "Acme-Voice-${{ needs.version.outputs.label }}-macos.pkg"
+          sudo installer -pkg "$pkg" -target /
+          app="/Applications/Acme Voice.app"
+          plist="$app/Contents/Info.plist"
+          [ "$(/usr/libexec/PlistBuddy -c 'Print CFBundleName' "$plist")" = "Acme Voice" ]
+          [ "$(/usr/libexec/PlistBuddy -c 'Print CFBundleDisplayName' "$plist")" = "Acme Voice" ]
+          [ "$(/usr/libexec/PlistBuddy -c 'Print CFBundleIdentifier' "$plist")" = "com.thevoiceguy.anvil" ]
+          [ "$(/usr/libexec/PlistBuddy -c 'Print CFBundleIconFile' "$plist")" = "Brand" ]
+          ! /usr/libexec/PlistBuddy -c 'Print CFBundleIconName' "$plist" 2>/dev/null
+          test -s "$app/Contents/Resources/Brand.icns"
+          codesign --verify --deep "$app"
+          test -f "/Library/Application Support/Anvil/profile/profile.json"
+          test -f "/Library/Application Support/Anvil/profile/icon.png"
+          "$app/Contents/MacOS/Anvil" & pid=$!
+          sleep 10
+          kill -0 $pid || { echo "::error::the branded app exited"; exit 1; }
           kill $pid
       - uses: actions/upload-artifact@v4
         with:

@@ -5,7 +5,7 @@ Designed 2026-10-24 from D8's findings on FCP (`thevoiceguy/fcp`,
 in §7.
 
 Progress: M1 done (v0.2.6), see §4.1; M2 done (v0.2.7), see §4.2; M3 done
-(v0.2.8), see §4.3.
+(v0.2.8), see §4.3; M4 done (v0.2.9), see §4.4.
 The findings this answers:
 
 - **8c.** The server address should be set without the user, so the app
@@ -427,6 +427,46 @@ M1 can ship alone, and is what finding 8c needs. M2 and F1 together make
   Start menu and the desktop, no brand names them Anvil with the program's
   icon, the uninstaller removes the renamed ones) and its `.deb` job (the
   menu entry written for a brand and gone without one).
+
+### 4.4 M4 as built (v0.2.9)
+
+- **Where a profile and policy are read** was built in M1 and is unchanged:
+  `/Library/Application Support/Anvil/profile` and managed preferences
+  (`com.thevoiceguy.anvil`) on macOS, `/etc/anvil/profile` and
+  `/etc/anvil/policy.json` on Linux, a folder `anvil-profile` beside an
+  AppImage. An MDM or a configuration tool can put them there for the
+  stock packages; M4 adds packages that carry them.
+- **`brand.py`** builds for every desktop, from the release's own file for
+  it; the target follows from `--bundle` (`.dmg` or `.app`, `.deb`, else
+  Windows) or `--target`:
+  - **macOS** (`--bundle Anvil-<label>-macos.dmg`, on a Mac):
+    `Acme-Voice-<label>-macos.pkg`. It installs `/Applications/Acme
+    Voice.app` (`CFBundleName` and `CFBundleDisplayName` the brand's,
+    `Brand.icns` made with sips and iconutil as `CFBundleIconFile`, the
+    asset catalog's `CFBundleIconName` removed so the file wins, signed
+    again ad hoc) and the profile in
+    `/Library/Application Support/Anvil/profile`. The bundle's identity
+    stays `com.thevoiceguy.anvil`, so the app's files and managed
+    preferences are the same; the package is not relocatable, so it never
+    lands on a stock `Anvil.app` found elsewhere.
+  - **Linux** (`--bundle anvil_<label>_amd64.deb`, with dpkg-deb):
+    `acme-voice_<label>_amd64.deb`, the stock package with the profile in
+    `/etc/anvil/profile` and its menu entry named from the brand, with the
+    profile's icon. It is still the package `anvil`, so the stock package
+    replaces it as an update. The profile's files are conffiles: kept when
+    the stock package replaces this one, gone on a purge; the menu entry
+    goes back to Anvil's, and the app names it for the brand again for each
+    user (M3).
+  - **Windows** as in M2.
+- **Updates** on macOS and from a `.deb` offer the stock download (§1); a
+  company that hands out branded builds sets `updates` to `notify` or
+  `off` and hands out the next one.
+- **Proved** by the release workflow: on Linux, a branded `.deb` built from
+  the release's, installed (the profile, the menu entry, the app showing
+  the brand), the stock package over it keeping the profile, a purge taking
+  it away; on macOS, a branded `.pkg` built from the release's disk image,
+  installed (the renamed app, its icon, its identity, a valid signature,
+  the profile) and started.
 
 ## 5. How it is proved
 

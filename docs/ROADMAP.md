@@ -104,7 +104,7 @@ every recommendation:
       and kept across updates, `brand.py` for a branded setup
 - [x] **M3** The brand on the system at run time: window and tray icons,
       Windows shortcuts and app id, the Linux `.desktop`, the macOS Dock
-- [ ] **M4** macOS and Linux packages with a profile and a brand
+- [x] **M4** macOS and Linux packages with a profile and a brand
 - [ ] **F1** (FCP) The tenant's deployment profile from the admin
 
 ## The app (`docs/APP.md`)
