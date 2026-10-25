@@ -91,6 +91,22 @@ live in FCP: `docs/SOFTPHONE.md` in `thevoiceguy/fcp`. Anvil's phases:
 
 ---
 
+
+## Managed installs and branded builds
+
+Designed 2026-10-24 (`docs/MANAGED_INSTALLS.md`), agreed the same day on
+every recommendation:
+
+- [ ] **M1** The profile and policy: server (locked), login domain, sign-in
+      mode, username from the system, updates; the profile's brand before
+      sign-in
+- [ ] **M2** The Windows installer taking a profile, shortcuts named from it
+      and kept across updates, `brand.py` for a branded setup
+- [ ] **M3** The brand on the system at run time: window and tray icons,
+      Windows shortcuts and app id, the Linux `.desktop`, the macOS Dock
+- [ ] **M4** macOS and Linux packages with a profile and a brand
+- [ ] **F1** (FCP) The tenant's deployment profile from the admin
+
 ## The app (`docs/APP.md`)
 
 - [x] **U0** The running phone: `anvil-app` (one state model, one stream of
