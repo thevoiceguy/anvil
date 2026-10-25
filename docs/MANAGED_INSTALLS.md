@@ -4,7 +4,7 @@ Designed 2026-10-24 from D8's findings on FCP (`thevoiceguy/fcp`,
 `docs/DEEP_TESTING.md`) and agreed the same day on every recommendation
 in §7.
 
-Progress: M1 done (v0.2.6), see §4.1.
+Progress: M1 done (v0.2.6), see §4.1; M2 done (v0.2.7), see §4.2.
 The findings this answers:
 
 - **8c.** The server address should be set without the user, so the app
@@ -323,6 +323,54 @@ M1 can ship alone, and is what finding 8c needs. M2 and F1 together make
     sign-in mode, the brand before sign-in, `off` and `notify`.
   - The Windows registry code is type-checked against `windows-sys` for
     `x86_64-pc-windows-msvc`. The macOS code is built by CI's macOS job.
+
+### 4.2 M2 as built (v0.2.7)
+
+- **The setup's options:**
+  - `/PROFILE=` takes a directory, a `.zip` (with `profile.json` at the top
+    or in its one folder) or an `https` URL of a `.zip`. A relative path is
+    taken from the current directory, else from beside the setup, as an
+    Intune package runs it.
+  - `/SERVER=`, `/LOGINDOMAIN=`, `/SIGNIN=` (`auto`, `sso`, `password`) and
+    `/LOCKSERVER=` (`1`, `0`) are written into `profile.json`, over the
+    profile given or the one already installed.
+  - A new profile replaces the old one whole; fields given before do not
+    outlive it.
+  - A profile that cannot be fetched or read, or a field with a value it
+    cannot take, fails the install before anything changes (exit code 7,
+    the reason in the setup's log).
+- **`profile.ps1`**, run from `{tmp}` by `PrepareToInstall`, does the work
+  Inno's Pascal does badly: it fetches and unzips the profile, writes the
+  fields, makes `icon.ico` from the brand's PNG (16, 32, 48 and 256 pixels,
+  or the PNG as it is where System.Drawing is missing), and tells the setup
+  the brand's name and icon. It needs Windows PowerShell, which every
+  supported Windows has.
+- **Named from the profile:** the Start menu and desktop shortcuts (name
+  and icon), the notifications' app id (`DisplayName`, `IconUri`) and the
+  uninstall entry (name and icon). The app registers the app id again at
+  every start, so it now passes the profile's name and `icon.ico` too
+  (`Managed::system_icon`, `brandIconPath`), or the start would turn it
+  back into Anvil.
+- **`shortcuts.json`** in `{app}\profile` lists the shortcuts the setup
+  made. The next install removes the ones a new brand renamed; an install
+  from before profiles is taken to have made `Anvil.lnk`.
+- **A self-update** runs the stock setup with no options: the profile stays,
+  and the shortcuts are named from it again.
+- **A branded setup:** `app/packaging/brand.py <profile> --bundle <app's
+  files> --version …` runs Inno Setup with `/DProfile` (the profile as a
+  `.zip` inside the setup), `/DName` (the setup's and uninstaller's name)
+  and `/DOutName` (`Acme-Voice-v0.2.7-windows-x86_64-setup.exe`). The app's
+  files are a new release asset,
+  `Anvil-<version>-windows-x86_64-bundle.zip`. `/PROFILE=` on its command
+  line still goes first.
+- **`profile.json`** may be saved with a byte order mark (Windows
+  PowerShell 5 writes one); the app now reads it either way.
+- **Proved** by the release workflow's Windows job: the stock install, then
+  a profile with `/SIGNIN=` over it (the shortcuts renamed with the
+  brand's icon, Anvil's gone, the app id and uninstaller named, the app's
+  own start keeping them), the stock setup again as an update keeping all
+  of it, a `brand.py` setup renaming it again, a missing profile failing
+  the install, and the uninstaller taking all of it away.
 
 ## 5. How it is proved
 

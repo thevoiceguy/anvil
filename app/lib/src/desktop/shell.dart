@@ -89,7 +89,14 @@ class ShellEvent {
 abstract class DesktopShell {
   /// Set up the tray, notifications and the window; a part the desktop
   /// lacks (a Linux without a tray) is left out, not fatal.
-  Future<void> init({required String appName});
+  /// [appName] keys what the app registers (start at login); [displayName]
+  /// and [iconPath] are what its notifications show, a managed install's
+  /// brand (`docs/MANAGED_INSTALLS.md` §2.3).
+  Future<void> init({
+    required String appName,
+    String? displayName,
+    String? iconPath,
+  });
 
   Stream<ShellEvent> get events;
 

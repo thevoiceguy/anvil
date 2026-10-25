@@ -437,6 +437,9 @@ class ManagedSettings {
   final String? brandPrimary;
   final Uint8List? brandLogo;
 
+  /// The brand's icon file for the system (Windows' notifications).
+  final String? brandIconPath;
+
   /// Where each setting came from, for Settings.
   final List<String> sources;
 
@@ -450,6 +453,7 @@ class ManagedSettings {
     this.brandName,
     this.brandPrimary,
     this.brandLogo,
+    this.brandIconPath,
     required this.sources,
   });
 
@@ -464,6 +468,7 @@ class ManagedSettings {
       brandName.hashCode ^
       brandPrimary.hashCode ^
       brandLogo.hashCode ^
+      brandIconPath.hashCode ^
       sources.hashCode;
 
   @override
@@ -480,6 +485,7 @@ class ManagedSettings {
           brandName == other.brandName &&
           brandPrimary == other.brandPrimary &&
           brandLogo == other.brandLogo &&
+          brandIconPath == other.brandIconPath &&
           sources == other.sources;
 }
 

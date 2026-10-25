@@ -492,6 +492,7 @@ class Managed {
     this.brandName,
     this.brandPrimary,
     this.brandLogo,
+    this.brandIconPath,
     this.sources = const [],
   });
 
@@ -515,6 +516,9 @@ class Managed {
   final String? brandName;
   final int? brandPrimary;
   final Uint8List? brandLogo;
+
+  /// The brand's icon file for the system (Windows' notifications).
+  final String? brandIconPath;
 
   /// Where the settings came from.
   final List<String> sources;

@@ -117,6 +117,7 @@ class RustPhone implements PhoneApi {
       brandName: m.brandName,
       brandPrimary: PhoneSnapshot.colorFromHex(m.brandPrimary),
       brandLogo: m.brandLogo,
+      brandIconPath: m.brandIconPath,
       sources: m.sources,
     );
   }

@@ -11,10 +11,15 @@ Future<void> main(List<String> args) async {
   WidgetsFlutterBinding.ensureInitialized();
   await RustLib.init();
   final shell = NativeShell.supported ? NativeShell(args: args) : null;
-  await shell?.init(appName: 'Anvil');
+  final phone = RustPhone();
+  await shell?.init(
+    appName: 'Anvil',
+    displayName: phone.managed.brandName,
+    iconPath: phone.managed.brandIconPath,
+  );
   runApp(
     AnvilApp(
-      phone: RustPhone(),
+      phone: phone,
       shell: shell,
       // A store updates the app on a phone.
       updates: NativeMobile.supported ? null : RustUpdates(),

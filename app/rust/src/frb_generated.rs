@@ -1972,6 +1972,7 @@ impl SseDecode for crate::api::phone::ManagedSettings {
         let mut var_brandName = <Option<String>>::sse_decode(deserializer);
         let mut var_brandPrimary = <Option<String>>::sse_decode(deserializer);
         let mut var_brandLogo = <Option<Vec<u8>>>::sse_decode(deserializer);
+        let mut var_brandIconPath = <Option<String>>::sse_decode(deserializer);
         let mut var_sources = <Vec<String>>::sse_decode(deserializer);
         return crate::api::phone::ManagedSettings {
             server: var_server,
@@ -1983,6 +1984,7 @@ impl SseDecode for crate::api::phone::ManagedSettings {
             brand_name: var_brandName,
             brand_primary: var_brandPrimary,
             brand_logo: var_brandLogo,
+            brand_icon_path: var_brandIconPath,
             sources: var_sources,
         };
     }
@@ -2629,6 +2631,7 @@ impl flutter_rust_bridge::IntoDart for crate::api::phone::ManagedSettings {
             self.brand_name.into_into_dart().into_dart(),
             self.brand_primary.into_into_dart().into_dart(),
             self.brand_logo.into_into_dart().into_dart(),
+            self.brand_icon_path.into_into_dart().into_dart(),
             self.sources.into_into_dart().into_dart(),
         ]
         .into_dart()
@@ -3147,6 +3150,7 @@ impl SseEncode for crate::api::phone::ManagedSettings {
         <Option<String>>::sse_encode(self.brand_name, serializer);
         <Option<String>>::sse_encode(self.brand_primary, serializer);
         <Option<Vec<u8>>>::sse_encode(self.brand_logo, serializer);
+        <Option<String>>::sse_encode(self.brand_icon_path, serializer);
         <Vec<String>>::sse_encode(self.sources, serializer);
     }
 }
