@@ -4,6 +4,7 @@
 // login. An interface, so the screens' tests stand in for the desktop.
 
 import 'dart:async';
+import 'dart:typed_data';
 
 import 'package:flutter/widgets.dart';
 
@@ -112,6 +113,12 @@ abstract class DesktopShell {
 
   /// The window's title: the tenant's name for the app, else Anvil.
   Future<void> setTitle(String title);
+
+  /// The brand on the system (`docs/MANAGED_INSTALLS.md` §2.4): its name
+  /// and [icon] (a PNG, JPEG or WebP image) on the window, the tray and the
+  /// Dock, Windows' shortcuts and notifications, and a Linux menu; Anvil's
+  /// own with neither.
+  Future<void> setBrand(String? name, Uint8List? icon);
 
   /// Ask for leave to show notifications, where the system asks the user
   /// (macOS). Called once someone has signed in, never awaited: the answer

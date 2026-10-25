@@ -4,7 +4,8 @@ Designed 2026-10-24 from D8's findings on FCP (`thevoiceguy/fcp`,
 `docs/DEEP_TESTING.md`) and agreed the same day on every recommendation
 in §7.
 
-Progress: M1 done (v0.2.6), see §4.1; M2 done (v0.2.7), see §4.2.
+Progress: M1 done (v0.2.6), see §4.1; M2 done (v0.2.7), see §4.2; M3 done
+(v0.2.8), see §4.3.
 The findings this answers:
 
 - **8c.** The server address should be set without the user, so the app
@@ -371,6 +372,61 @@ M1 can ship alone, and is what finding 8c needs. M2 and F1 together make
   own start keeping them), the stock setup again as an update keeping all
   of it, a `brand.py` setup renaming it again, a missing profile failing
   the install, and the uninstaller taking all of it away.
+
+### 4.3 M3 as built (v0.2.8)
+
+- **One brand on the system:** the app's brand as its screens show it,
+  FCP's once signed in, else the installed profile's, else none. The
+  desktop bridge hands its name and icon to the shell
+  (`DesktopShell.setBrand`) when either changes, and Anvil's at start when
+  there is none.
+- **The icons** are made by `anvil-app` (`system_brand.rs`) from the brand's
+  PNG, JPEG or WebP image, in the app's directory under `brand\`
+  (`%LOCALAPPDATA%\Anvil\Anvil\brand` on Windows):
+  - the window's: an ICO of 16, 24, 32, 48 and 256 pixels on Windows, a
+    256-pixel PNG elsewhere (the Dock's and a Linux menu's too);
+  - the tray's, one per state: the brand's icon with a dot in the state's
+    colour cut out of its bottom right corner (Q5), an ICO of 16 to 32
+    pixels on Windows, a 64-pixel PNG elsewhere.
+  - Each file is named by the image's hash: Windows keeps an icon by its
+    path, so a new image at an old path would go unseen. An earlier
+    image's files go.
+  - An image that cannot be read (an SVG) leaves the icons Anvil's and is
+    logged; the name is still shown.
+- **The window, the tray and the Dock:** `window_manager.setIcon` (Windows,
+  Linux), the tray's icons by state, and `NSApplication.applicationIconImage`
+  over `anvil/dock` (macOS). Without a brand they are Anvil's again
+  (`assets/app`, the Dock's bundle icon). On macOS tray_manager takes an icon
+  only from the app's assets, so a brand's is handed to its channel as its
+  own Dart side would.
+- **Windows:**
+  - The shortcuts listed in `{app}\profile\shortcuts.json`, and no others,
+    are saved under the brand's name (`IShellLinkW`, keeping their target
+    and app id) with the brand's ICO, or Anvil's name and the program's
+    icon without a brand. The list is rewritten with the new names, with a
+    byte order mark as the installer reads it.
+  - The notifications' app id is given the name and the ICO
+    (`DisplayName`, `IconUri`; the icon taken away without a brand).
+  - The next install still names the shortcuts from the profile and
+    removes the ones the app renamed (it goes by the list); the app,
+    started again, names them for FCP's brand once more.
+  - The uninstaller removes the shortcuts in the list, which the uninstall
+    log does not know under their new names.
+- **Linux:** `~/.local/share/applications/com.thevoiceguy.anvil.desktop`,
+  the packaged entry with the brand's name (every language's replaced) and
+  its PNG, marked `X-Anvil-Brand=true`; removed without a brand. Nothing is
+  written where no entry is packaged (an AppImage), and a user's own entry
+  without the mark is never touched.
+- **Mobile:** nothing, as designed.
+- **Proved** by unit tests (the icons' sizes, the dot in each state's
+  colour, files by hash, `shortcuts.json` as the installer writes it, the
+  menu entry), widget tests (the brand reaching the shell once per change,
+  Anvil's back without one, a managed install's before FCP's), the release
+  workflow's Windows job (the app re-icons the installer's shortcuts and
+  app id, a brand given to the app alone renames the shortcuts on the
+  Start menu and the desktop, no brand names them Anvil with the program's
+  icon, the uninstaller removes the renamed ones) and its `.deb` job (the
+  menu entry written for a brand and gone without one).
 
 ## 5. How it is proved
 

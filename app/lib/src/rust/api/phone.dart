@@ -13,6 +13,21 @@ import 'package:flutter_rust_bridge/flutter_rust_bridge_for_generated.dart';
 ManagedSettings managedSettings() =>
     RustLib.instance.api.crateApiPhoneManagedSettings();
 
+/// Show the brand `name` and `icon` where the system keeps the app's name
+/// and icon outside it (Windows' shortcuts and app id, a Linux menu), or
+/// Anvil's with neither (`docs/MANAGED_INSTALLS.md` §2.4). The icon's files
+/// go in `dir`; they are returned for the window, the tray and the Dock,
+/// or `None` with no icon (or one that is not an image, which is logged).
+Future<SystemLook?> systemBrand({
+  required String dir,
+  String? name,
+  Uint8List? icon,
+}) => RustLib.instance.api.crateApiPhoneSystemBrand(
+  dir: dir,
+  name: name,
+  icon: icon,
+);
+
 /// The session kept at `session_path`, if there is one.
 Future<Account?> savedAccount({required String sessionPath}) =>
     RustLib.instance.api.crateApiPhoneSavedAccount(sessionPath: sessionPath);
@@ -437,6 +452,9 @@ class ManagedSettings {
   final String? brandPrimary;
   final Uint8List? brandLogo;
 
+  /// The brand's icon (PNG, JPEG or WebP), for the system's icons.
+  final Uint8List? brandIcon;
+
   /// The brand's icon file for the system (Windows' notifications).
   final String? brandIconPath;
 
@@ -453,6 +471,7 @@ class ManagedSettings {
     this.brandName,
     this.brandPrimary,
     this.brandLogo,
+    this.brandIcon,
     this.brandIconPath,
     required this.sources,
   });
@@ -468,6 +487,7 @@ class ManagedSettings {
       brandName.hashCode ^
       brandPrimary.hashCode ^
       brandLogo.hashCode ^
+      brandIcon.hashCode ^
       brandIconPath.hashCode ^
       sources.hashCode;
 
@@ -485,6 +505,7 @@ class ManagedSettings {
           brandName == other.brandName &&
           brandPrimary == other.brandPrimary &&
           brandLogo == other.brandLogo &&
+          brandIcon == other.brandIcon &&
           brandIconPath == other.brandIconPath &&
           sources == other.sources;
 }
@@ -585,6 +606,7 @@ class PhoneState {
   final String? brandName;
   final String? brandPrimary;
   final Uint8List? brandLogo;
+  final Uint8List? brandIcon;
 
   /// Signed in to FCP: the calling settings, once read.
   final CallingSettings? calling;
@@ -626,6 +648,7 @@ class PhoneState {
     this.brandName,
     this.brandPrimary,
     this.brandLogo,
+    this.brandIcon,
     this.calling,
     required this.recents,
     required this.people,
@@ -652,6 +675,7 @@ class PhoneState {
       brandName.hashCode ^
       brandPrimary.hashCode ^
       brandLogo.hashCode ^
+      brandIcon.hashCode ^
       calling.hashCode ^
       recents.hashCode ^
       people.hashCode ^
@@ -680,6 +704,7 @@ class PhoneState {
           brandName == other.brandName &&
           brandPrimary == other.brandPrimary &&
           brandLogo == other.brandLogo &&
+          brandIcon == other.brandIcon &&
           calling == other.calling &&
           recents == other.recents &&
           people == other.people &&
@@ -892,6 +917,55 @@ class SystemAudio {
           runtimeType == other.runtimeType &&
           inputs == other.inputs &&
           outputs == other.outputs;
+}
+
+/// The brand's icon as the system shows it, made into files.
+class SystemLook {
+  /// The window's: an ICO on Windows, a PNG elsewhere.
+  final String window;
+
+  /// A PNG, for the Dock.
+  final String png;
+
+  /// The tray's, by state (`offline`, `ready`, `dnd`, `ringing`,
+  /// `in_call`).
+  final List<TrayIcon> tray;
+
+  const SystemLook({
+    required this.window,
+    required this.png,
+    required this.tray,
+  });
+
+  @override
+  int get hashCode => window.hashCode ^ png.hashCode ^ tray.hashCode;
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is SystemLook &&
+          runtimeType == other.runtimeType &&
+          window == other.window &&
+          png == other.png &&
+          tray == other.tray;
+}
+
+class TrayIcon {
+  final String state;
+  final String path;
+
+  const TrayIcon({required this.state, required this.path});
+
+  @override
+  int get hashCode => state.hashCode ^ path.hashCode;
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is TrayIcon &&
+          runtimeType == other.runtimeType &&
+          state == other.state &&
+          path == other.path;
 }
 
 /// One voicemail message.

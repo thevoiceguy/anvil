@@ -39,7 +39,7 @@ flutter_rust_bridge::frb_generated_boilerplate!(
     default_rust_auto_opaque = RustAutoOpaqueMoi,
 );
 pub(crate) const FLUTTER_RUST_BRIDGE_CODEGEN_VERSION: &str = "2.13.0";
-pub(crate) const FLUTTER_RUST_BRIDGE_CODEGEN_CONTENT_HASH: i32 = -1825814696;
+pub(crate) const FLUTTER_RUST_BRIDGE_CODEGEN_CONTENT_HASH: i32 = -1655590640;
 
 // Section: executor
 
@@ -1623,6 +1623,42 @@ fn wire__crate__api__phone__system_audio_impl(
         },
     )
 }
+fn wire__crate__api__phone__system_brand_impl(
+    port_: flutter_rust_bridge::for_generated::MessagePort,
+    ptr_: flutter_rust_bridge::for_generated::PlatformGeneralizedUint8ListPtr,
+    rust_vec_len_: i32,
+    data_len_: i32,
+) {
+    FLUTTER_RUST_BRIDGE_HANDLER.wrap_normal::<flutter_rust_bridge::for_generated::SseCodec, _, _>(
+        flutter_rust_bridge::for_generated::TaskInfo {
+            debug_name: "system_brand",
+            port: Some(port_),
+            mode: flutter_rust_bridge::for_generated::FfiCallMode::Normal,
+        },
+        move || {
+            let message = unsafe {
+                flutter_rust_bridge::for_generated::Dart2RustMessageSse::from_wire(
+                    ptr_,
+                    rust_vec_len_,
+                    data_len_,
+                )
+            };
+            let mut deserializer =
+                flutter_rust_bridge::for_generated::SseDeserializer::new(message);
+            let api_dir = <String>::sse_decode(&mut deserializer);
+            let api_name = <Option<String>>::sse_decode(&mut deserializer);
+            let api_icon = <Option<Vec<u8>>>::sse_decode(&mut deserializer);
+            deserializer.end();
+            move |context| {
+                transform_result_sse::<_, ()>((move || {
+                    let output_ok =
+                        Ok::<_, ()>(crate::api::phone::system_brand(api_dir, api_name, api_icon))?;
+                    std::result::Result::Ok(output_ok)
+                })())
+            }
+        },
+    )
+}
 fn wire__crate__api__phone__transfer_impl(
     port_: flutter_rust_bridge::for_generated::MessagePort,
     ptr_: flutter_rust_bridge::for_generated::PlatformGeneralizedUint8ListPtr,
@@ -1948,6 +1984,18 @@ impl SseDecode for Vec<crate::api::phone::Ringtone> {
     }
 }
 
+impl SseDecode for Vec<crate::api::phone::TrayIcon> {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
+        let mut len_ = <i32>::sse_decode(deserializer);
+        let mut ans_ = Vec::with_capacity(len_ as usize);
+        for idx_ in 0..len_ {
+            ans_.push(<crate::api::phone::TrayIcon>::sse_decode(deserializer));
+        }
+        return ans_;
+    }
+}
+
 impl SseDecode for Vec<crate::api::phone::Voicemail> {
     // Codec=Sse (Serialization based), see doc to use other codecs
     fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
@@ -1972,6 +2020,7 @@ impl SseDecode for crate::api::phone::ManagedSettings {
         let mut var_brandName = <Option<String>>::sse_decode(deserializer);
         let mut var_brandPrimary = <Option<String>>::sse_decode(deserializer);
         let mut var_brandLogo = <Option<Vec<u8>>>::sse_decode(deserializer);
+        let mut var_brandIcon = <Option<Vec<u8>>>::sse_decode(deserializer);
         let mut var_brandIconPath = <Option<String>>::sse_decode(deserializer);
         let mut var_sources = <Vec<String>>::sse_decode(deserializer);
         return crate::api::phone::ManagedSettings {
@@ -1984,6 +2033,7 @@ impl SseDecode for crate::api::phone::ManagedSettings {
             brand_name: var_brandName,
             brand_primary: var_brandPrimary,
             brand_logo: var_brandLogo,
+            brand_icon: var_brandIcon,
             brand_icon_path: var_brandIconPath,
             sources: var_sources,
         };
@@ -2054,6 +2104,17 @@ impl SseDecode for Option<crate::api::phone::RememberedSignIn> {
             return Some(<crate::api::phone::RememberedSignIn>::sse_decode(
                 deserializer,
             ));
+        } else {
+            return None;
+        }
+    }
+}
+
+impl SseDecode for Option<crate::api::phone::SystemLook> {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
+        if (<bool>::sse_decode(deserializer)) {
+            return Some(<crate::api::phone::SystemLook>::sse_decode(deserializer));
         } else {
             return None;
         }
@@ -2166,6 +2227,7 @@ impl SseDecode for crate::api::phone::PhoneState {
         let mut var_brandName = <Option<String>>::sse_decode(deserializer);
         let mut var_brandPrimary = <Option<String>>::sse_decode(deserializer);
         let mut var_brandLogo = <Option<Vec<u8>>>::sse_decode(deserializer);
+        let mut var_brandIcon = <Option<Vec<u8>>>::sse_decode(deserializer);
         let mut var_calling =
             <Option<crate::api::phone::CallingSettings>>::sse_decode(deserializer);
         let mut var_recents = <Vec<crate::api::phone::Recent>>::sse_decode(deserializer);
@@ -2190,6 +2252,7 @@ impl SseDecode for crate::api::phone::PhoneState {
             brand_name: var_brandName,
             brand_primary: var_brandPrimary,
             brand_logo: var_brandLogo,
+            brand_icon: var_brandIcon,
             calling: var_calling,
             recents: var_recents,
             people: var_people,
@@ -2320,6 +2383,32 @@ impl SseDecode for crate::api::phone::SystemAudio {
     }
 }
 
+impl SseDecode for crate::api::phone::SystemLook {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
+        let mut var_window = <String>::sse_decode(deserializer);
+        let mut var_png = <String>::sse_decode(deserializer);
+        let mut var_tray = <Vec<crate::api::phone::TrayIcon>>::sse_decode(deserializer);
+        return crate::api::phone::SystemLook {
+            window: var_window,
+            png: var_png,
+            tray: var_tray,
+        };
+    }
+}
+
+impl SseDecode for crate::api::phone::TrayIcon {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
+        let mut var_state = <String>::sse_decode(deserializer);
+        let mut var_path = <String>::sse_decode(deserializer);
+        return crate::api::phone::TrayIcon {
+            state: var_state,
+            path: var_path,
+        };
+    }
+}
+
 impl SseDecode for u32 {
     // Codec=Sse (Serialization based), see doc to use other codecs
     fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
@@ -2442,8 +2531,9 @@ fn pde_ffi_dispatcher_primary_impl(
         42 => wire__crate__api__phone__stop_phone_impl(port, ptr, rust_vec_len, data_len),
         43 => wire__crate__api__phone__stop_playing_impl(port, ptr, rust_vec_len, data_len),
         44 => wire__crate__api__phone__system_audio_impl(port, ptr, rust_vec_len, data_len),
-        45 => wire__crate__api__phone__transfer_impl(port, ptr, rust_vec_len, data_len),
-        46 => wire__crate__api__phone__transfer_attended_impl(port, ptr, rust_vec_len, data_len),
+        45 => wire__crate__api__phone__system_brand_impl(port, ptr, rust_vec_len, data_len),
+        46 => wire__crate__api__phone__transfer_impl(port, ptr, rust_vec_len, data_len),
+        47 => wire__crate__api__phone__transfer_attended_impl(port, ptr, rust_vec_len, data_len),
         _ => unreachable!(),
     }
 }
@@ -2631,6 +2721,7 @@ impl flutter_rust_bridge::IntoDart for crate::api::phone::ManagedSettings {
             self.brand_name.into_into_dart().into_dart(),
             self.brand_primary.into_into_dart().into_dart(),
             self.brand_logo.into_into_dart().into_dart(),
+            self.brand_icon.into_into_dart().into_dart(),
             self.brand_icon_path.into_into_dart().into_dart(),
             self.sources.into_into_dart().into_dart(),
         ]
@@ -2705,6 +2796,7 @@ impl flutter_rust_bridge::IntoDart for crate::api::phone::PhoneState {
             self.brand_name.into_into_dart().into_dart(),
             self.brand_primary.into_into_dart().into_dart(),
             self.brand_logo.into_into_dart().into_dart(),
+            self.brand_icon.into_into_dart().into_dart(),
             self.calling.into_into_dart().into_dart(),
             self.recents.into_into_dart().into_dart(),
             self.people.into_into_dart().into_dart(),
@@ -2877,6 +2969,43 @@ impl flutter_rust_bridge::IntoIntoDart<crate::api::phone::SystemAudio>
     for crate::api::phone::SystemAudio
 {
     fn into_into_dart(self) -> crate::api::phone::SystemAudio {
+        self
+    }
+}
+// Codec=Dco (DartCObject based), see doc to use other codecs
+impl flutter_rust_bridge::IntoDart for crate::api::phone::SystemLook {
+    fn into_dart(self) -> flutter_rust_bridge::for_generated::DartAbi {
+        [
+            self.window.into_into_dart().into_dart(),
+            self.png.into_into_dart().into_dart(),
+            self.tray.into_into_dart().into_dart(),
+        ]
+        .into_dart()
+    }
+}
+impl flutter_rust_bridge::for_generated::IntoDartExceptPrimitive for crate::api::phone::SystemLook {}
+impl flutter_rust_bridge::IntoIntoDart<crate::api::phone::SystemLook>
+    for crate::api::phone::SystemLook
+{
+    fn into_into_dart(self) -> crate::api::phone::SystemLook {
+        self
+    }
+}
+// Codec=Dco (DartCObject based), see doc to use other codecs
+impl flutter_rust_bridge::IntoDart for crate::api::phone::TrayIcon {
+    fn into_dart(self) -> flutter_rust_bridge::for_generated::DartAbi {
+        [
+            self.state.into_into_dart().into_dart(),
+            self.path.into_into_dart().into_dart(),
+        ]
+        .into_dart()
+    }
+}
+impl flutter_rust_bridge::for_generated::IntoDartExceptPrimitive for crate::api::phone::TrayIcon {}
+impl flutter_rust_bridge::IntoIntoDart<crate::api::phone::TrayIcon>
+    for crate::api::phone::TrayIcon
+{
+    fn into_into_dart(self) -> crate::api::phone::TrayIcon {
         self
     }
 }
@@ -3128,6 +3257,16 @@ impl SseEncode for Vec<crate::api::phone::Ringtone> {
     }
 }
 
+impl SseEncode for Vec<crate::api::phone::TrayIcon> {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
+        <i32>::sse_encode(self.len() as _, serializer);
+        for item in self {
+            <crate::api::phone::TrayIcon>::sse_encode(item, serializer);
+        }
+    }
+}
+
 impl SseEncode for Vec<crate::api::phone::Voicemail> {
     // Codec=Sse (Serialization based), see doc to use other codecs
     fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
@@ -3150,6 +3289,7 @@ impl SseEncode for crate::api::phone::ManagedSettings {
         <Option<String>>::sse_encode(self.brand_name, serializer);
         <Option<String>>::sse_encode(self.brand_primary, serializer);
         <Option<Vec<u8>>>::sse_encode(self.brand_logo, serializer);
+        <Option<Vec<u8>>>::sse_encode(self.brand_icon, serializer);
         <Option<String>>::sse_encode(self.brand_icon_path, serializer);
         <Vec<String>>::sse_encode(self.sources, serializer);
     }
@@ -3211,6 +3351,16 @@ impl SseEncode for Option<crate::api::phone::RememberedSignIn> {
         <bool>::sse_encode(self.is_some(), serializer);
         if let Some(value) = self {
             <crate::api::phone::RememberedSignIn>::sse_encode(value, serializer);
+        }
+    }
+}
+
+impl SseEncode for Option<crate::api::phone::SystemLook> {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
+        <bool>::sse_encode(self.is_some(), serializer);
+        if let Some(value) = self {
+            <crate::api::phone::SystemLook>::sse_encode(value, serializer);
         }
     }
 }
@@ -3300,6 +3450,7 @@ impl SseEncode for crate::api::phone::PhoneState {
         <Option<String>>::sse_encode(self.brand_name, serializer);
         <Option<String>>::sse_encode(self.brand_primary, serializer);
         <Option<Vec<u8>>>::sse_encode(self.brand_logo, serializer);
+        <Option<Vec<u8>>>::sse_encode(self.brand_icon, serializer);
         <Option<crate::api::phone::CallingSettings>>::sse_encode(self.calling, serializer);
         <Vec<crate::api::phone::Recent>>::sse_encode(self.recents, serializer);
         <Vec<crate::api::phone::Person>>::sse_encode(self.people, serializer);
@@ -3393,6 +3544,23 @@ impl SseEncode for crate::api::phone::SystemAudio {
     fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
         <Vec<crate::api::phone::AudioDevice>>::sse_encode(self.inputs, serializer);
         <Vec<crate::api::phone::AudioDevice>>::sse_encode(self.outputs, serializer);
+    }
+}
+
+impl SseEncode for crate::api::phone::SystemLook {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
+        <String>::sse_encode(self.window, serializer);
+        <String>::sse_encode(self.png, serializer);
+        <Vec<crate::api::phone::TrayIcon>>::sse_encode(self.tray, serializer);
+    }
+}
+
+impl SseEncode for crate::api::phone::TrayIcon {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
+        <String>::sse_encode(self.state, serializer);
+        <String>::sse_encode(self.path, serializer);
     }
 }
 

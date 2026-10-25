@@ -5,7 +5,9 @@
 // signs out when the user's session ends.
 
 import 'dart:async';
+import 'dart:typed_data';
 
+import 'package:flutter/foundation.dart' show listEquals;
 import 'package:flutter/widgets.dart';
 
 import '../../l10n/app_localizations.dart';
@@ -34,6 +36,7 @@ class _DesktopBridgeState extends State<DesktopBridge> {
   StreamSubscription<ShellEvent>? _events;
   (TrayState, String, TrayMenu)? _tray;
   String? _title;
+  (String?, Uint8List?)? _brand;
   final Set<int> _notified = {};
   bool _askedForNotifications = false;
 
@@ -97,6 +100,12 @@ class _DesktopBridgeState extends State<DesktopBridge> {
       _title = app;
       unawaited(shell.setTitle(app));
     }
+    final name = model.brandName, icon = model.brandIcon;
+    final last = _brand;
+    if (last == null || last.$1 != name || !_same(last.$2, icon)) {
+      _brand = (name, icon);
+      unawaited(shell.setBrand(name, icon));
+    }
     final tray = (
       state,
       '$app — $status',
@@ -139,6 +148,10 @@ class _DesktopBridgeState extends State<DesktopBridge> {
       unawaited(shell.clearIncoming(id));
     }
   }
+
+  /// The same image: each snapshot carries its own copy of the bytes.
+  static bool _same(Uint8List? a, Uint8List? b) =>
+      identical(a, b) || (a != null && b != null && listEquals(a, b));
 
   Future<void> _act(ShellEvent event) async {
     switch (event.action) {

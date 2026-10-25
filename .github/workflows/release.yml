@@ -141,6 +141,18 @@ jobs:
           ! ldd /opt/anvil/anvil /opt/anvil/lib/*.so | grep "not found"
           set +e; xvfb-run -a timeout 10 anvil; code=$?; set -e
           [ "$code" = 124 ] || { echo "::error::anvil exited with $code"; exit 1; }
+          # A brand puts a menu entry of its own over the packaged one
+          # (system_brand.rs); without one it goes.
+          brand=$(mktemp -d)
+          cp app/assets/app/anvil.png "$brand/icon.png"
+          echo '{"brand": {"app_name": "Acme Voice", "icon": "icon.png"}}' > "$brand/profile.json"
+          entry=~/.local/share/applications/com.thevoiceguy.anvil.desktop
+          set +e; ANVIL_PROFILE="$brand" xvfb-run -a timeout 10 anvil; set -e
+          grep -qx 'Name=Acme Voice' "$entry" || { echo "::error::no branded menu entry"; cat "$entry"; exit 1; }
+          grep -q '^Icon=/.*/brand/icon-.*\.png$' "$entry" || { echo "::error::the entry's icon"; cat "$entry"; exit 1; }
+          grep -qx 'Exec=anvil' "$entry"
+          set +e; ANVIL_PROFILE="$(mktemp -d)" xvfb-run -a timeout 10 anvil; set -e
+          test ! -e "$entry" || { echo "::error::the branded entry outlived the brand"; exit 1; }
           sudo apt-get remove -y anvil
           test ! -e /opt/anvil/anvil
       - name: The AppImage starts
@@ -258,7 +270,7 @@ jobs:
       # — then the stock setup again as the app updates itself, keeping it
       # all; a branded setup from brand.py renaming it again; a profile that
       # is not there failing the install; and the uninstaller taking it away.
-      - name: A company's profile is installed, kept and removed
+      - name: A company's profile is installed, kept and removed, and the app renames it
         shell: pwsh
         run: |
           $setup = (Get-ChildItem dist/Anvil-*-setup.exe | Select-Object -First 1).FullName
@@ -266,6 +278,8 @@ jobs:
           $programs = [Environment]::GetFolderPath('Programs')
           $desktop = [Environment]::GetFolderPath('Desktop')
           $aumid = 'HKCU:\Software\Classes\AppUserModelId\Anvil.Softphone'
+          # Where the app makes a brand's icons (system_brand.rs).
+          $brand = "$env:LOCALAPPDATA\Anvil\Anvil\brand"
           $uninstall = 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall\{B3F0D2A4-5C1E-4E8B-9A7D-3F6C2E1B0A95}_is1'
           function Run-Setup([string]$exe, [string[]]$more = @()) {
             $list = @('/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART', "/LOG=$env:RUNNER_TEMP\setup.log") + $more
@@ -293,6 +307,17 @@ jobs:
           function Expect([bool]$ok, [string]$what) {
             if (-not $ok) { Get-Content "$env:RUNNER_TEMP\setup.log" -Tail 40; throw $what }
           }
+          # The app for ten seconds, given a profile of its own (as FCP's
+          # brand would differ from the installed one), or none.
+          function Run-App([string]$given = '') {
+            if ($given) { $env:ANVIL_PROFILE = $given }
+            $app = Start-Process "$dir\anvil.exe" -PassThru
+            Start-Sleep -Seconds 10
+            Remove-Item Env:ANVIL_PROFILE -ErrorAction SilentlyContinue
+            Expect (-not $app.HasExited) "anvil.exe exited"
+            Stop-Process -Id $app.Id -Force
+            Start-Sleep -Seconds 2
+          }
 
           Expect ((Run-Setup $setup) -eq 0) "the stock install failed"
           Expect ($null -ne (Shortcut 'Anvil')) "the stock install made no Anvil shortcut"
@@ -316,15 +341,13 @@ jobs:
           Expect ((Get-ItemProperty $uninstall).DisplayName -eq 'Acme Voice') "the uninstaller is named $((Get-ItemProperty $uninstall).DisplayName)"
           Expect ((Get-Content -Raw "$dir\profile\shortcuts.json") -like '*Acme Voice.lnk*') "shortcuts.json: $(Get-Content -Raw "$dir\profile\shortcuts.json")"
 
-          # The app registers its app id at every start: with the brand's
-          # name and icon, not Anvil's.
-          $app = Start-Process "$dir\anvil.exe" -PassThru
-          Start-Sleep -Seconds 10
-          Expect (-not $app.HasExited) "anvil.exe exited with a profile installed"
-          Stop-Process -Id $app.Id -Force
-          Start-Sleep -Seconds 2
+          # The app registers its app id at every start, and shows the
+          # brand on the system from icons of its own: the brand's name and
+          # icon, not Anvil's.
+          Run-App
           Expect ((Get-ItemProperty $aumid).DisplayName -eq 'Acme Voice') "the app named its app id $((Get-ItemProperty $aumid).DisplayName)"
-          Expect ((Get-ItemProperty $aumid).IconUri -eq "$dir\profile\icon.ico") "the app gave its app id the icon $((Get-ItemProperty $aumid).IconUri)"
+          Expect ((Get-ItemProperty $aumid).IconUri -like "$brand\icon-*.ico") "the app gave its app id the icon $((Get-ItemProperty $aumid).IconUri)"
+          Expect ((Shortcut 'Acme Voice').IconLocation -like "$brand\icon-*.ico*") "the app left the shortcut's icon at $((Shortcut 'Acme Voice').IconLocation)"
 
           # The update: the stock setup, with nothing given.
           Expect ((Run-Setup $setup @('/relaunch=0')) -eq 0) "the update failed"
@@ -351,11 +374,34 @@ jobs:
           Expect ((Run-Setup $setup @('/PROFILE=C:\nowhere\profile.zip')) -ne 0) "a missing profile did not fail the install"
           Expect ($null -ne (Shortcut 'Beta Phone')) "a failed install touched the shortcuts"
 
+          # Another brand at run time: the app renames the installer's
+          # shortcuts and gives them its icon.
+          Run-App (Profile-Named 'Gamma Line' 'DarkGreen')
+          $lnk = Shortcut 'Gamma Line'
+          Expect ($null -ne $lnk) "the app did not rename the shortcut for its brand"
+          Expect ($lnk.TargetPath -eq "$dir\anvil.exe") "the renamed shortcut opens $($lnk.TargetPath)"
+          Expect ($lnk.IconLocation -like "$brand\icon-*.ico*") "the renamed shortcut's icon is $($lnk.IconLocation)"
+          Expect ($null -eq (Shortcut 'Beta Phone')) "the app left the old brand's shortcut"
+          Expect (Test-Path -LiteralPath "$desktop\Gamma Line.lnk") "the app did not rename the desktop shortcut"
+          Expect (-not (Test-Path -LiteralPath "$desktop\Beta Phone.lnk")) "the app left the old brand's desktop shortcut"
+          Expect ((Get-ItemProperty $aumid).DisplayName -eq 'Gamma Line') "the app id is named $((Get-ItemProperty $aumid).DisplayName)"
+          Expect ((Get-Content -Raw "$dir\profile\shortcuts.json") -like '*Gamma Line.lnk*') "shortcuts.json: $(Get-Content -Raw "$dir\profile\shortcuts.json")"
+
+          # No brand at all: Anvil's name and the program's own icon.
+          $none = New-Item -ItemType Directory -Force "$env:RUNNER_TEMP\no-profile"
+          Run-App $none.FullName
+          $lnk = Shortcut 'Anvil'
+          Expect ($null -ne $lnk) "the app did not name the shortcut Anvil without a brand"
+          Expect ($lnk.IconLocation -notlike "*\brand\*") "Anvil's shortcut kept the brand's icon: $($lnk.IconLocation)"
+          Expect ($null -eq (Shortcut 'Gamma Line')) "the brand's shortcut was left"
+          Expect ((Get-ItemProperty $aumid).DisplayName -eq 'Anvil') "the app id is named $((Get-ItemProperty $aumid).DisplayName)"
+          Expect ($null -eq (Get-ItemProperty $aumid).IconUri) "the app id kept the brand's icon"
+
           Start-Process "$dir\unins000.exe" -ArgumentList '/VERYSILENT', '/SUPPRESSMSGBOXES' -Wait
           Start-Sleep -Seconds 2
           Expect (-not (Test-Path "$dir\profile")) "the uninstaller left the profile"
-          Expect ($null -eq (Shortcut 'Beta Phone')) "the uninstaller left the shortcut"
-          Expect (-not (Test-Path -LiteralPath "$desktop\Beta Phone.lnk")) "the uninstaller left the desktop shortcut"
+          Expect ($null -eq (Shortcut 'Anvil')) "the uninstaller left the shortcut the app renamed"
+          Expect (-not (Test-Path -LiteralPath "$desktop\Anvil.lnk")) "the uninstaller left the desktop shortcut the app renamed"
           Expect (-not (Test-Path $aumid)) "the uninstaller left the app id"
       - uses: actions/upload-artifact@v4
         with:

@@ -11,8 +11,29 @@ class MainFlutterWindow: NSWindow {
 
     RegisterGeneratedPlugins(registry: flutterViewController)
     StartAtLogin.register(with: flutterViewController.engine.binaryMessenger)
+    Dock.register(with: flutterViewController.engine.binaryMessenger)
 
     super.awakeFromNib()
+  }
+}
+
+/// The Dock's icon while the app runs: a brand's PNG, or the bundle's own
+/// again with none (lib/src/desktop/native_shell.dart).
+enum Dock {
+  static func register(with messenger: FlutterBinaryMessenger) {
+    let channel = FlutterMethodChannel(name: "anvil/dock", binaryMessenger: messenger)
+    channel.setMethodCallHandler { call, result in
+      guard call.method == "setIcon" else {
+        result(FlutterMethodNotImplemented)
+        return
+      }
+      if let path = call.arguments as? String, let image = NSImage(contentsOfFile: path) {
+        NSApplication.shared.applicationIconImage = image
+      } else {
+        NSApplication.shared.applicationIconImage = nil
+      }
+      result(nil)
+    }
   }
 }
 

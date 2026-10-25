@@ -6,8 +6,8 @@
   handset, as PNG (Linux, macOS) and ICO (Windows).
 - The app's: the handset on a rounded square in Anvil's accent colour, for
   macOS (the AppIcon set), Windows (app_icon.ico), Linux
-  (linux/packaging/anvil.png, the installers' icon) and Android (the
-  launcher's mipmaps); on a full, opaque square for iOS (the AppIcon set),
+  (linux/packaging/anvil.png, the installers' icon), Android (the
+  launcher's mipmaps) and the window once a brand's icon goes (assets/app); on a full, opaque square for iOS (the AppIcon set),
   which rounds the corners itself and refuses an alpha channel."""
 
 import math
@@ -130,8 +130,16 @@ def main():
     for size in (16, 32, 64, 128, 256, 512, 1024):
         with open(os.path.join(mac, f"app_icon_{size}.png"), "wb") as f:
             f.write(icons[size])
+    windows_ico = ico([(s, icons[s]) for s in (16, 32, 48, 64, 128, 256)])
     with open(os.path.join(app, "windows", "runner", "resources", "app_icon.ico"), "wb") as f:
-        f.write(ico([(s, icons[s]) for s in (16, 32, 48, 64, 128, 256)]))
+        f.write(windows_ico)
+    # The window's own again once a brand's goes (lib/src/desktop/native_shell.dart).
+    own = os.path.join(app, "assets", "app")
+    os.makedirs(own, exist_ok=True)
+    with open(os.path.join(own, "anvil.ico"), "wb") as f:
+        f.write(windows_ico)
+    with open(os.path.join(own, "anvil.png"), "wb") as f:
+        f.write(icons[256])
     linux = os.path.join(app, "linux", "packaging")
     os.makedirs(linux, exist_ok=True)
     with open(os.path.join(linux, "anvil.png"), "wb") as f:

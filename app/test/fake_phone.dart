@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:typed_data';
 
 import 'package:anvil/src/phone/phone_api.dart';
 
@@ -28,13 +29,17 @@ class FakePhone implements PhoneApi {
   }
 
   /// The tenant's brand arrives.
-  void brand(String name, String primaryHex) => set(
+  void brand(String name, String primaryHex, {Uint8List? icon}) => set(
     state.copyWith(
       brandName: name,
       brandPrimary: PhoneSnapshot.colorFromHex(primaryHex),
+      brandIcon: icon,
     ),
     'brand',
   );
+
+  /// The tenant's brand is taken away.
+  void unbrand() => set(state.copyWith(clearBrand: true), 'brand');
 
   void ring(String from, {String? name}) {
     final id = _next++;

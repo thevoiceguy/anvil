@@ -15,6 +15,10 @@
 ; the app updating itself runs it, keeps the profile already there. A
 ; profile that cannot be read fails the install (exit code 7).
 ;
+; The app renames the shortcuts listed in {app}\profile\shortcuts.json when
+; FCP's brand differs (docs/MANAGED_INSTALLS.md §2.4) and lists them under
+; their new names; the next install and the uninstaller go by that list.
+;
 ; brand.py builds a branded setup: /DProfile=<profile .zip> inside it,
 ; /DName=<the brand's name> and /DOutName=<the file's name>.
 
@@ -197,29 +201,32 @@ begin
     Result := AddBackslash(ExpandConstant('{src}')) + Given;
 end;
 
-// shortcuts.json, one path a line as WriteShortcuts writes it.
-procedure ReadMadeBefore;
+// shortcuts.json, one path a line as WriteShortcuts and the app write it.
+function ReadShortcuts(List: TStringList): Boolean;
 var
   Lines: TArrayOfString;
   I: Integer;
   Line: String;
 begin
-  MadeBefore := TStringList.Create;
-  if LoadStringsFromFile(ExpandConstant('{app}\profile\shortcuts.json'), Lines) then
+  Result := LoadStringsFromFile(ExpandConstant('{app}\profile\shortcuts.json'), Lines);
+  if not Result then Exit;
+  for I := 0 to GetArrayLength(Lines) - 1 do
   begin
-    for I := 0 to GetArrayLength(Lines) - 1 do
+    Line := Trim(Lines[I]);
+    if (Length(Line) > 1) and (Line[1] = '"') and (Pos('.lnk"', Lowercase(Line)) > 0) then
     begin
-      Line := Trim(Lines[I]);
-      if (Length(Line) > 1) and (Line[1] = '"') and (Pos('.lnk"', Lowercase(Line)) > 0) then
-      begin
-        Delete(Line, 1, 1);
-        Line := Copy(Line, 1, Pos('"', Line) - 1);
-        StringChangeEx(Line, '\\', '\', True);
-        MadeBefore.Add(Line);
-      end;
+      Delete(Line, 1, 1);
+      Line := Copy(Line, 1, Pos('"', Line) - 1);
+      StringChangeEx(Line, '\\', '\', True);
+      List.Add(Line);
     end;
-  end
-  else
+  end;
+end;
+
+procedure ReadMadeBefore;
+begin
+  MadeBefore := TStringList.Create;
+  if not ReadShortcuts(MadeBefore) then
   begin
     // An install from before profiles made these.
     MadeBefore.Add(ExpandConstant('{autoprograms}\Anvil.lnk'));
@@ -327,6 +334,28 @@ end;
 procedure CurStepChanged(CurStep: TSetupStep);
 begin
   if CurStep = ssPostInstall then WriteShortcuts;
+end;
+
+// The shortcuts as the app renamed them, which the uninstall log does not
+// know; before {app}\profile goes.
+procedure CurUninstallStepChanged(CurUninstallStep: TUninstallStep);
+var
+  Made: TStringList;
+  I: Integer;
+begin
+  if CurUninstallStep <> usUninstall then Exit;
+  Made := TStringList.Create;
+  try
+    if ReadShortcuts(Made) then
+      for I := 0 to Made.Count - 1 do
+        if FileExists(Made[I]) then
+        begin
+          Log('A shortcut goes: ' + Made[I]);
+          DeleteFile(Made[I]);
+        end;
+  finally
+    Made.Free;
+  end;
 end;
 
 // Nothing opens |Scheme| but, perhaps, an earlier Anvil.

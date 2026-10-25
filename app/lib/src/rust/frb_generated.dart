@@ -70,7 +70,7 @@ class RustLib extends BaseEntrypoint<RustLibApi, RustLibApiImpl, RustLibWire> {
   String get codegenVersion => '2.13.0';
 
   @override
-  int get rustContentHash => -1825814696;
+  int get rustContentHash => -1655590640;
 
   static const kDefaultExternalLibraryLoaderConfig =
       ExternalLibraryLoaderConfig(
@@ -191,6 +191,12 @@ abstract class RustLibApi extends BaseApi {
   Future<void> crateApiPhoneStopPlaying();
 
   Future<SystemAudio> crateApiPhoneSystemAudio();
+
+  Future<SystemLook?> crateApiPhoneSystemBrand({
+    required String dir,
+    String? name,
+    Uint8List? icon,
+  });
 
   Future<void> crateApiPhoneTransfer({BigInt? call, required String target});
 
@@ -1469,6 +1475,42 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       const TaskConstMeta(debugName: "system_audio", argNames: []);
 
   @override
+  Future<SystemLook?> crateApiPhoneSystemBrand({
+    required String dir,
+    String? name,
+    Uint8List? icon,
+  }) {
+    return handler.executeNormal(
+      NormalTask(
+        callFfi: (port_) {
+          final serializer = SseSerializer(generalizedFrbRustBinding);
+          sse_encode_String(dir, serializer);
+          sse_encode_opt_String(name, serializer);
+          sse_encode_opt_list_prim_u_8_strict(icon, serializer);
+          pdeCallFfi(
+            generalizedFrbRustBinding,
+            serializer,
+            funcId: 45,
+            port: port_,
+          );
+        },
+        codec: SseCodec(
+          decodeSuccessData: sse_decode_opt_box_autoadd_system_look,
+          decodeErrorData: null,
+        ),
+        constMeta: kCrateApiPhoneSystemBrandConstMeta,
+        argValues: [dir, name, icon],
+        apiImpl: this,
+      ),
+    );
+  }
+
+  TaskConstMeta get kCrateApiPhoneSystemBrandConstMeta => const TaskConstMeta(
+    debugName: "system_brand",
+    argNames: ["dir", "name", "icon"],
+  );
+
+  @override
   Future<void> crateApiPhoneTransfer({BigInt? call, required String target}) {
     return handler.executeNormal(
       NormalTask(
@@ -1479,7 +1521,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 45,
+            funcId: 46,
             port: port_,
           );
         },
@@ -1511,7 +1553,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 46,
+            funcId: 47,
             port: port_,
           );
         },
@@ -1617,6 +1659,12 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   RememberedSignIn dco_decode_box_autoadd_remembered_sign_in(dynamic raw) {
     // Codec=Dco (DartCObject based), see doc to use other codecs
     return dco_decode_remembered_sign_in(raw);
+  }
+
+  @protected
+  SystemLook dco_decode_box_autoadd_system_look(dynamic raw) {
+    // Codec=Dco (DartCObject based), see doc to use other codecs
+    return dco_decode_system_look(raw);
   }
 
   @protected
@@ -1758,6 +1806,12 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   }
 
   @protected
+  List<TrayIcon> dco_decode_list_tray_icon(dynamic raw) {
+    // Codec=Dco (DartCObject based), see doc to use other codecs
+    return (raw as List<dynamic>).map(dco_decode_tray_icon).toList();
+  }
+
+  @protected
   List<Voicemail> dco_decode_list_voicemail(dynamic raw) {
     // Codec=Dco (DartCObject based), see doc to use other codecs
     return (raw as List<dynamic>).map(dco_decode_voicemail).toList();
@@ -1767,8 +1821,8 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   ManagedSettings dco_decode_managed_settings(dynamic raw) {
     // Codec=Dco (DartCObject based), see doc to use other codecs
     final arr = raw as List<dynamic>;
-    if (arr.length != 11)
-      throw Exception('unexpected arr length: expect 11 but see ${arr.length}');
+    if (arr.length != 12)
+      throw Exception('unexpected arr length: expect 12 but see ${arr.length}');
     return ManagedSettings(
       server: dco_decode_opt_String(arr[0]),
       lockServer: dco_decode_bool(arr[1]),
@@ -1779,8 +1833,9 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       brandName: dco_decode_opt_String(arr[6]),
       brandPrimary: dco_decode_opt_String(arr[7]),
       brandLogo: dco_decode_opt_list_prim_u_8_strict(arr[8]),
-      brandIconPath: dco_decode_opt_String(arr[9]),
-      sources: dco_decode_list_String(arr[10]),
+      brandIcon: dco_decode_opt_list_prim_u_8_strict(arr[9]),
+      brandIconPath: dco_decode_opt_String(arr[10]),
+      sources: dco_decode_list_String(arr[11]),
     );
   }
 
@@ -1818,6 +1873,12 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   RememberedSignIn? dco_decode_opt_box_autoadd_remembered_sign_in(dynamic raw) {
     // Codec=Dco (DartCObject based), see doc to use other codecs
     return raw == null ? null : dco_decode_box_autoadd_remembered_sign_in(raw);
+  }
+
+  @protected
+  SystemLook? dco_decode_opt_box_autoadd_system_look(dynamic raw) {
+    // Codec=Dco (DartCObject based), see doc to use other codecs
+    return raw == null ? null : dco_decode_box_autoadd_system_look(raw);
   }
 
   @protected
@@ -1886,8 +1947,8 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   PhoneState dco_decode_phone_state(dynamic raw) {
     // Codec=Dco (DartCObject based), see doc to use other codecs
     final arr = raw as List<dynamic>;
-    if (arr.length != 22)
-      throw Exception('unexpected arr length: expect 22 but see ${arr.length}');
+    if (arr.length != 23)
+      throw Exception('unexpected arr length: expect 23 but see ${arr.length}');
     return PhoneState(
       aor: dco_decode_String(arr[0]),
       registration: dco_decode_registration(arr[1]),
@@ -1897,20 +1958,21 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       brandName: dco_decode_opt_String(arr[5]),
       brandPrimary: dco_decode_opt_String(arr[6]),
       brandLogo: dco_decode_opt_list_prim_u_8_strict(arr[7]),
-      calling: dco_decode_opt_box_autoadd_calling_settings(arr[8]),
-      recents: dco_decode_list_recent(arr[9]),
-      people: dco_decode_list_person(arr[10]),
-      voicemail: dco_decode_list_voicemail(arr[11]),
-      inputs: dco_decode_list_audio_device(arr[12]),
-      outputs: dco_decode_list_audio_device(arr[13]),
-      input: dco_decode_opt_String(arr[14]),
-      output: dco_decode_opt_String(arr[15]),
-      ringDevice: dco_decode_opt_String(arr[16]),
-      ringtones: dco_decode_list_ringtone(arr[17]),
-      ringtone: dco_decode_String(arr[18]),
-      echoCancellation: dco_decode_opt_box_autoadd_bool(arr[19]),
-      noiseSuppression: dco_decode_opt_box_autoadd_bool(arr[20]),
-      playing: dco_decode_opt_String(arr[21]),
+      brandIcon: dco_decode_opt_list_prim_u_8_strict(arr[8]),
+      calling: dco_decode_opt_box_autoadd_calling_settings(arr[9]),
+      recents: dco_decode_list_recent(arr[10]),
+      people: dco_decode_list_person(arr[11]),
+      voicemail: dco_decode_list_voicemail(arr[12]),
+      inputs: dco_decode_list_audio_device(arr[13]),
+      outputs: dco_decode_list_audio_device(arr[14]),
+      input: dco_decode_opt_String(arr[15]),
+      output: dco_decode_opt_String(arr[16]),
+      ringDevice: dco_decode_opt_String(arr[17]),
+      ringtones: dco_decode_list_ringtone(arr[18]),
+      ringtone: dco_decode_String(arr[19]),
+      echoCancellation: dco_decode_opt_box_autoadd_bool(arr[20]),
+      noiseSuppression: dco_decode_opt_box_autoadd_bool(arr[21]),
+      playing: dco_decode_opt_String(arr[22]),
     );
   }
 
@@ -2002,6 +2064,31 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     return SystemAudio(
       inputs: dco_decode_list_audio_device(arr[0]),
       outputs: dco_decode_list_audio_device(arr[1]),
+    );
+  }
+
+  @protected
+  SystemLook dco_decode_system_look(dynamic raw) {
+    // Codec=Dco (DartCObject based), see doc to use other codecs
+    final arr = raw as List<dynamic>;
+    if (arr.length != 3)
+      throw Exception('unexpected arr length: expect 3 but see ${arr.length}');
+    return SystemLook(
+      window: dco_decode_String(arr[0]),
+      png: dco_decode_String(arr[1]),
+      tray: dco_decode_list_tray_icon(arr[2]),
+    );
+  }
+
+  @protected
+  TrayIcon dco_decode_tray_icon(dynamic raw) {
+    // Codec=Dco (DartCObject based), see doc to use other codecs
+    final arr = raw as List<dynamic>;
+    if (arr.length != 2)
+      throw Exception('unexpected arr length: expect 2 but see ${arr.length}');
+    return TrayIcon(
+      state: dco_decode_String(arr[0]),
+      path: dco_decode_String(arr[1]),
     );
   }
 
@@ -2147,6 +2234,12 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   ) {
     // Codec=Sse (Serialization based), see doc to use other codecs
     return (sse_decode_remembered_sign_in(deserializer));
+  }
+
+  @protected
+  SystemLook sse_decode_box_autoadd_system_look(SseDeserializer deserializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    return (sse_decode_system_look(deserializer));
   }
 
   @protected
@@ -2342,6 +2435,18 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   }
 
   @protected
+  List<TrayIcon> sse_decode_list_tray_icon(SseDeserializer deserializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+
+    var len_ = sse_decode_i_32(deserializer);
+    var ans_ = <TrayIcon>[];
+    for (var idx_ = 0; idx_ < len_; ++idx_) {
+      ans_.add(sse_decode_tray_icon(deserializer));
+    }
+    return ans_;
+  }
+
+  @protected
   List<Voicemail> sse_decode_list_voicemail(SseDeserializer deserializer) {
     // Codec=Sse (Serialization based), see doc to use other codecs
 
@@ -2365,6 +2470,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     var var_brandName = sse_decode_opt_String(deserializer);
     var var_brandPrimary = sse_decode_opt_String(deserializer);
     var var_brandLogo = sse_decode_opt_list_prim_u_8_strict(deserializer);
+    var var_brandIcon = sse_decode_opt_list_prim_u_8_strict(deserializer);
     var var_brandIconPath = sse_decode_opt_String(deserializer);
     var var_sources = sse_decode_list_String(deserializer);
     return ManagedSettings(
@@ -2377,6 +2483,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       brandName: var_brandName,
       brandPrimary: var_brandPrimary,
       brandLogo: var_brandLogo,
+      brandIcon: var_brandIcon,
       brandIconPath: var_brandIconPath,
       sources: var_sources,
     );
@@ -2447,6 +2554,19 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
 
     if (sse_decode_bool(deserializer)) {
       return (sse_decode_box_autoadd_remembered_sign_in(deserializer));
+    } else {
+      return null;
+    }
+  }
+
+  @protected
+  SystemLook? sse_decode_opt_box_autoadd_system_look(
+    SseDeserializer deserializer,
+  ) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+
+    if (sse_decode_bool(deserializer)) {
+      return (sse_decode_box_autoadd_system_look(deserializer));
     } else {
       return null;
     }
@@ -2554,6 +2674,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     var var_brandName = sse_decode_opt_String(deserializer);
     var var_brandPrimary = sse_decode_opt_String(deserializer);
     var var_brandLogo = sse_decode_opt_list_prim_u_8_strict(deserializer);
+    var var_brandIcon = sse_decode_opt_list_prim_u_8_strict(deserializer);
     var var_calling = sse_decode_opt_box_autoadd_calling_settings(deserializer);
     var var_recents = sse_decode_list_recent(deserializer);
     var var_people = sse_decode_list_person(deserializer);
@@ -2577,6 +2698,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       brandName: var_brandName,
       brandPrimary: var_brandPrimary,
       brandLogo: var_brandLogo,
+      brandIcon: var_brandIcon,
       calling: var_calling,
       recents: var_recents,
       people: var_people,
@@ -2682,6 +2804,23 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     var var_inputs = sse_decode_list_audio_device(deserializer);
     var var_outputs = sse_decode_list_audio_device(deserializer);
     return SystemAudio(inputs: var_inputs, outputs: var_outputs);
+  }
+
+  @protected
+  SystemLook sse_decode_system_look(SseDeserializer deserializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    var var_window = sse_decode_String(deserializer);
+    var var_png = sse_decode_String(deserializer);
+    var var_tray = sse_decode_list_tray_icon(deserializer);
+    return SystemLook(window: var_window, png: var_png, tray: var_tray);
+  }
+
+  @protected
+  TrayIcon sse_decode_tray_icon(SseDeserializer deserializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    var var_state = sse_decode_String(deserializer);
+    var var_path = sse_decode_String(deserializer);
+    return TrayIcon(state: var_state, path: var_path);
   }
 
   @protected
@@ -2846,6 +2985,15 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   }
 
   @protected
+  void sse_encode_box_autoadd_system_look(
+    SystemLook self,
+    SseSerializer serializer,
+  ) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    sse_encode_system_look(self, serializer);
+  }
+
+  @protected
   void sse_encode_box_autoadd_u_32(int self, SseSerializer serializer) {
     // Codec=Sse (Serialization based), see doc to use other codecs
     sse_encode_u_32(self, serializer);
@@ -3000,6 +3148,18 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   }
 
   @protected
+  void sse_encode_list_tray_icon(
+    List<TrayIcon> self,
+    SseSerializer serializer,
+  ) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    sse_encode_i_32(self.length, serializer);
+    for (final item in self) {
+      sse_encode_tray_icon(item, serializer);
+    }
+  }
+
+  @protected
   void sse_encode_list_voicemail(
     List<Voicemail> self,
     SseSerializer serializer,
@@ -3026,6 +3186,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     sse_encode_opt_String(self.brandName, serializer);
     sse_encode_opt_String(self.brandPrimary, serializer);
     sse_encode_opt_list_prim_u_8_strict(self.brandLogo, serializer);
+    sse_encode_opt_list_prim_u_8_strict(self.brandIcon, serializer);
     sse_encode_opt_String(self.brandIconPath, serializer);
     sse_encode_list_String(self.sources, serializer);
   }
@@ -3099,6 +3260,19 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     sse_encode_bool(self != null, serializer);
     if (self != null) {
       sse_encode_box_autoadd_remembered_sign_in(self, serializer);
+    }
+  }
+
+  @protected
+  void sse_encode_opt_box_autoadd_system_look(
+    SystemLook? self,
+    SseSerializer serializer,
+  ) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+
+    sse_encode_bool(self != null, serializer);
+    if (self != null) {
+      sse_encode_box_autoadd_system_look(self, serializer);
     }
   }
 
@@ -3191,6 +3365,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     sse_encode_opt_String(self.brandName, serializer);
     sse_encode_opt_String(self.brandPrimary, serializer);
     sse_encode_opt_list_prim_u_8_strict(self.brandLogo, serializer);
+    sse_encode_opt_list_prim_u_8_strict(self.brandIcon, serializer);
     sse_encode_opt_box_autoadd_calling_settings(self.calling, serializer);
     sse_encode_list_recent(self.recents, serializer);
     sse_encode_list_person(self.people, serializer);
@@ -3272,6 +3447,21 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     // Codec=Sse (Serialization based), see doc to use other codecs
     sse_encode_list_audio_device(self.inputs, serializer);
     sse_encode_list_audio_device(self.outputs, serializer);
+  }
+
+  @protected
+  void sse_encode_system_look(SystemLook self, SseSerializer serializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    sse_encode_String(self.window, serializer);
+    sse_encode_String(self.png, serializer);
+    sse_encode_list_tray_icon(self.tray, serializer);
+  }
+
+  @protected
+  void sse_encode_tray_icon(TrayIcon self, SseSerializer serializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    sse_encode_String(self.state, serializer);
+    sse_encode_String(self.path, serializer);
   }
 
   @protected
