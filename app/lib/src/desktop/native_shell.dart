@@ -71,7 +71,12 @@ class NativeShell with TrayListener, WindowListener implements DesktopShell {
   }
 
   @override
-  Future<void> init({required String appName}) async {
+  Future<void> init({
+    required String appName,
+    String? displayName,
+    String? iconPath,
+  }) async {
+    final shown = displayName ?? appName;
     await _part('window', () async {
       await windowManager.ensureInitialized();
       await windowManager.setPreventClose(true);
@@ -93,11 +98,14 @@ class NativeShell with TrayListener, WindowListener implements DesktopShell {
     await _part('notifications', () async {
       await _notifications.initialize(
         settings: InitializationSettings(
-          linux: LinuxInitializationSettings(defaultActionName: appName),
+          linux: LinuxInitializationSettings(defaultActionName: shown),
+          // Registered under the app id at every start: the installer's
+          // name and icon would otherwise go back to Anvil's.
           windows: WindowsInitializationSettings(
-            appName: appName,
+            appName: shown,
             appUserModelId: _aumid,
             guid: _guid,
+            iconPath: iconPath,
           ),
           // Not asked for at start: a prompt before anyone has signed in,
           // and one nobody answers on a build machine (it waits forever).

@@ -195,6 +195,10 @@ jobs:
         run: |
           iscc /Q "/DVersion=${{ needs.version.outputs.version }}" "/DLabel=${{ needs.version.outputs.label }}" `
             "/DBundle=$env:GITHUB_WORKSPACE\app\build\windows\x64\runner\Release" "/DOut=$env:GITHUB_WORKSPACE\dist" windows.iss
+          # The app's files, for a company building a branded setup
+          # (brand.py, docs/MANAGED_INSTALLS.md §2.3).
+          Compress-Archive -Path "$env:GITHUB_WORKSPACE\app\build\windows\x64\runner\Release\*" `
+            -DestinationPath "$env:GITHUB_WORKSPACE\dist\Anvil-${{ needs.version.outputs.label }}-windows-x86_64-bundle.zip"
           Get-ChildItem $env:GITHUB_WORKSPACE\dist
       # Installed silently for this user, started (still running ten seconds
       # later), started again with a link (which hands it on and leaves),
@@ -247,6 +251,112 @@ jobs:
           if ((Get-ItemProperty 'HKCU:\Software\RegisteredApplications' -ErrorAction SilentlyContinue).Anvil) {
             throw "the uninstaller left Anvil in the default apps"
           }
+      # A company's install (docs/MANAGED_INSTALLS.md §2.3): the stock setup,
+      # then the same setup given a profile and a field over it — the
+      # shortcuts renamed with the brand's icon, the old one gone, the app id
+      # and the uninstaller named, the app registering the same at its start
+      # — then the stock setup again as the app updates itself, keeping it
+      # all; a branded setup from brand.py renaming it again; a profile that
+      # is not there failing the install; and the uninstaller taking it away.
+      - name: A company's profile is installed, kept and removed
+        shell: pwsh
+        run: |
+          $setup = (Get-ChildItem dist/Anvil-*-setup.exe | Select-Object -First 1).FullName
+          $dir = "$env:LOCALAPPDATA\Programs\Anvil"
+          $programs = [Environment]::GetFolderPath('Programs')
+          $desktop = [Environment]::GetFolderPath('Desktop')
+          $aumid = 'HKCU:\Software\Classes\AppUserModelId\Anvil.Softphone'
+          $uninstall = 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall\{B3F0D2A4-5C1E-4E8B-9A7D-3F6C2E1B0A95}_is1'
+          function Run-Setup([string]$exe, [string[]]$more = @()) {
+            $list = @('/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART', "/LOG=$env:RUNNER_TEMP\setup.log") + $more
+            (Start-Process $exe -ArgumentList $list -Wait -PassThru).ExitCode
+          }
+          function Shortcut([string]$name) {
+            $path = Join-Path $programs "$name.lnk"
+            if (Test-Path -LiteralPath $path) { (New-Object -ComObject WScript.Shell).CreateShortcut($path) }
+          }
+          function Profile-Named([string]$name, [string]$color) {
+            $p = Join-Path $env:RUNNER_TEMP ($name -replace ' ', '-')
+            New-Item -ItemType Directory -Force $p | Out-Null
+            Add-Type -AssemblyName System.Drawing
+            $bmp = New-Object System.Drawing.Bitmap 512, 512
+            $g = [System.Drawing.Graphics]::FromImage($bmp)
+            $g.Clear([System.Drawing.Color]::FromName($color))
+            $g.Dispose()
+            $bmp.Save("$p\icon.png", [System.Drawing.Imaging.ImageFormat]::Png)
+            $bmp.Dispose()
+            @{ profile_version = 1; server = 'https://voice.acme.example'; login_domain = 'acme.example'
+               brand = @{ app_name = $name; icon = 'icon.png' } } |
+              ConvertTo-Json -Depth 5 | Set-Content -Encoding utf8 "$p\profile.json"
+            $p
+          }
+          function Expect([bool]$ok, [string]$what) {
+            if (-not $ok) { Get-Content "$env:RUNNER_TEMP\setup.log" -Tail 40; throw $what }
+          }
+
+          Expect ((Run-Setup $setup) -eq 0) "the stock install failed"
+          Expect ($null -ne (Shortcut 'Anvil')) "the stock install made no Anvil shortcut"
+
+          $acme = Profile-Named 'Acme Voice' 'DarkRed'
+          Compress-Archive -Path "$acme\*" -DestinationPath "$env:RUNNER_TEMP\acme-profile.zip"
+          Expect ((Run-Setup $setup @("/PROFILE=$env:RUNNER_TEMP\acme-profile.zip", '/SIGNIN=sso', '/TASKS=desktopicon')) -eq 0) "the install with a profile failed"
+          $lnk = Shortcut 'Acme Voice'
+          Expect ($null -ne $lnk) "no Acme Voice shortcut"
+          Expect ($lnk.TargetPath -eq "$dir\anvil.exe") "the shortcut opens $($lnk.TargetPath)"
+          Expect ($lnk.IconLocation -like "$dir\profile\icon.ico*") "the shortcut's icon is $($lnk.IconLocation)"
+          Expect (Test-Path -LiteralPath "$desktop\Acme Voice.lnk") "no Acme Voice on the desktop"
+          Expect ($null -eq (Shortcut 'Anvil')) "the Anvil shortcut was left beside the brand's"
+          $profile = Get-Content -Raw "$dir\profile\profile.json" | ConvertFrom-Json
+          Expect ($profile.server -eq 'https://voice.acme.example' -and $profile.login_domain -eq 'acme.example') "the profile's fields: $($profile | ConvertTo-Json -Compress)"
+          Expect ($profile.sign_in -eq 'sso') "/SIGNIN= was not written over the profile"
+          $ico = [IO.File]::ReadAllBytes("$dir\profile\icon.ico")
+          Expect ($ico[0] -eq 0 -and $ico[1] -eq 0 -and $ico[2] -eq 1 -and $ico[3] -eq 0 -and $ico[4] -eq 4) "icon.ico is not an ICO of four images"
+          Expect ((Get-ItemProperty $aumid).DisplayName -eq 'Acme Voice') "the app id is not named for the brand"
+          Expect ((Get-ItemProperty $aumid).IconUri -eq "$dir\profile\icon.ico") "the app id has not the brand's icon"
+          Expect ((Get-ItemProperty $uninstall).DisplayName -eq 'Acme Voice') "the uninstaller is named $((Get-ItemProperty $uninstall).DisplayName)"
+          Expect ((Get-Content -Raw "$dir\profile\shortcuts.json") -like '*Acme Voice.lnk*') "shortcuts.json: $(Get-Content -Raw "$dir\profile\shortcuts.json")"
+
+          # The app registers its app id at every start: with the brand's
+          # name and icon, not Anvil's.
+          $app = Start-Process "$dir\anvil.exe" -PassThru
+          Start-Sleep -Seconds 10
+          Expect (-not $app.HasExited) "anvil.exe exited with a profile installed"
+          Stop-Process -Id $app.Id -Force
+          Start-Sleep -Seconds 2
+          Expect ((Get-ItemProperty $aumid).DisplayName -eq 'Acme Voice') "the app named its app id $((Get-ItemProperty $aumid).DisplayName)"
+          Expect ((Get-ItemProperty $aumid).IconUri -eq "$dir\profile\icon.ico") "the app gave its app id the icon $((Get-ItemProperty $aumid).IconUri)"
+
+          # The update: the stock setup, with nothing given.
+          Expect ((Run-Setup $setup @('/relaunch=0')) -eq 0) "the update failed"
+          Expect ($null -ne (Shortcut 'Acme Voice')) "the update lost the brand's shortcut"
+          Expect ((Shortcut 'Acme Voice').IconLocation -like "$dir\profile\icon.ico*") "the update lost the brand's icon"
+          Expect ($null -eq (Shortcut 'Anvil')) "the update put Anvil's shortcut back"
+          Expect ((Get-Content -Raw "$dir\profile\profile.json" | ConvertFrom-Json).sign_in -eq 'sso') "the update changed the profile"
+
+          # A branded setup over it.
+          $beta = Profile-Named 'Beta Phone' 'Navy'
+          python app/packaging/brand.py $beta --bundle app/build/windows/x64/runner/Release `
+            --version ${{ needs.version.outputs.version }} --label ${{ needs.version.outputs.label }} --out "$env:RUNNER_TEMP\branded"
+          if ($LASTEXITCODE) { throw "brand.py failed" }
+          $branded = Get-Item "$env:RUNNER_TEMP\branded\Beta-Phone-${{ needs.version.outputs.label }}-windows-x86_64-setup.exe"
+          Expect ((Run-Setup $branded.FullName) -eq 0) "the branded install failed"
+          Expect ($null -ne (Shortcut 'Beta Phone')) "no Beta Phone shortcut"
+          Expect ($null -eq (Shortcut 'Acme Voice')) "the renamed brand's shortcut was left"
+          Expect (-not (Test-Path -LiteralPath "$desktop\Acme Voice.lnk")) "the renamed brand's desktop shortcut was left"
+          Expect (Test-Path -LiteralPath "$desktop\Beta Phone.lnk") "no Beta Phone on the desktop"
+          Expect ((Get-ItemProperty $aumid).DisplayName -eq 'Beta Phone') "the app id is not named for the branded setup's brand"
+          Expect ($null -eq (Get-Content -Raw "$dir\profile\profile.json" | ConvertFrom-Json).sign_in) "the old profile's field outlived a new profile"
+
+          # A profile that is not there fails the install and changes nothing.
+          Expect ((Run-Setup $setup @('/PROFILE=C:\nowhere\profile.zip')) -ne 0) "a missing profile did not fail the install"
+          Expect ($null -ne (Shortcut 'Beta Phone')) "a failed install touched the shortcuts"
+
+          Start-Process "$dir\unins000.exe" -ArgumentList '/VERYSILENT', '/SUPPRESSMSGBOXES' -Wait
+          Start-Sleep -Seconds 2
+          Expect (-not (Test-Path "$dir\profile")) "the uninstaller left the profile"
+          Expect ($null -eq (Shortcut 'Beta Phone')) "the uninstaller left the shortcut"
+          Expect (-not (Test-Path -LiteralPath "$desktop\Beta Phone.lnk")) "the uninstaller left the desktop shortcut"
+          Expect (-not (Test-Path $aumid)) "the uninstaller left the app id"
       - uses: actions/upload-artifact@v4
         with:
           name: release-app-windows

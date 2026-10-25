@@ -79,6 +79,8 @@ pub struct ManagedSettings {
     /// `#RRGGBB`.
     pub brand_primary: Option<String>,
     pub brand_logo: Option<Vec<u8>>,
+    /// The brand's icon file for the system (Windows' notifications).
+    pub brand_icon_path: Option<String>,
     /// Where each setting came from, for Settings.
     pub sources: Vec<String>,
 }
@@ -116,6 +118,10 @@ pub fn managed_settings() -> ManagedSettings {
             .as_ref()
             .and_then(|b| b.logo.as_ref())
             .map(|a| a.bytes.clone()),
+        brand_icon_path: m
+            .system_icon
+            .as_ref()
+            .map(|p| p.to_string_lossy().into_owned()),
         sources: m.sources.clone(),
     }
 }

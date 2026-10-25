@@ -1767,8 +1767,8 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   ManagedSettings dco_decode_managed_settings(dynamic raw) {
     // Codec=Dco (DartCObject based), see doc to use other codecs
     final arr = raw as List<dynamic>;
-    if (arr.length != 10)
-      throw Exception('unexpected arr length: expect 10 but see ${arr.length}');
+    if (arr.length != 11)
+      throw Exception('unexpected arr length: expect 11 but see ${arr.length}');
     return ManagedSettings(
       server: dco_decode_opt_String(arr[0]),
       lockServer: dco_decode_bool(arr[1]),
@@ -1779,7 +1779,8 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       brandName: dco_decode_opt_String(arr[6]),
       brandPrimary: dco_decode_opt_String(arr[7]),
       brandLogo: dco_decode_opt_list_prim_u_8_strict(arr[8]),
-      sources: dco_decode_list_String(arr[9]),
+      brandIconPath: dco_decode_opt_String(arr[9]),
+      sources: dco_decode_list_String(arr[10]),
     );
   }
 
@@ -2364,6 +2365,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     var var_brandName = sse_decode_opt_String(deserializer);
     var var_brandPrimary = sse_decode_opt_String(deserializer);
     var var_brandLogo = sse_decode_opt_list_prim_u_8_strict(deserializer);
+    var var_brandIconPath = sse_decode_opt_String(deserializer);
     var var_sources = sse_decode_list_String(deserializer);
     return ManagedSettings(
       server: var_server,
@@ -2375,6 +2377,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       brandName: var_brandName,
       brandPrimary: var_brandPrimary,
       brandLogo: var_brandLogo,
+      brandIconPath: var_brandIconPath,
       sources: var_sources,
     );
   }
@@ -3023,6 +3026,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     sse_encode_opt_String(self.brandName, serializer);
     sse_encode_opt_String(self.brandPrimary, serializer);
     sse_encode_opt_list_prim_u_8_strict(self.brandLogo, serializer);
+    sse_encode_opt_String(self.brandIconPath, serializer);
     sse_encode_list_String(self.sources, serializer);
   }
 

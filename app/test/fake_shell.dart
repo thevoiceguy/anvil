@@ -23,7 +23,11 @@ class FakeShell implements DesktopShell {
       _events.add(ShellEvent(action, call: call));
 
   @override
-  Future<void> init({required String appName}) async => log.add('init');
+  Future<void> init({
+    required String appName,
+    String? displayName,
+    String? iconPath,
+  }) async => log.add('init');
 
   @override
   Stream<ShellEvent> get events => _events.stream;

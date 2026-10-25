@@ -6,6 +6,17 @@
 ; where nothing else does.
 ;
 ;   iscc /DVersion=0.1.0 /DLabel=v0.1.0 /DBundle=<release dir> /DOut=<dir> windows.iss
+;
+; A company's profile (docs/MANAGED_INSTALLS.md §2.3): the setup takes
+; /PROFILE=<directory, .zip or https URL> and the single fields /SERVER=,
+; /LOGINDOMAIN=, /SIGNIN= and /LOCKSERVER=, puts the profile in
+; {app}\profile (profile.ps1), and names the shortcuts, the notifications'
+; app id and the uninstaller after its brand. A setup run without them, as
+; the app updating itself runs it, keeps the profile already there. A
+; profile that cannot be read fails the install (exit code 7).
+;
+; brand.py builds a branded setup: /DProfile=<profile .zip> inside it,
+; /DName=<the brand's name> and /DOutName=<the file's name>.
 
 #ifndef Version
   #error Version is required
@@ -13,9 +24,14 @@
 
 [Setup]
 AppId={{B3F0D2A4-5C1E-4E8B-9A7D-3F6C2E1B0A95}
+#ifdef Name
+AppName={#Name}
+AppVerName={#Name} {#Version}
+#else
 AppName=Anvil
-AppVersion={#Version}
 AppVerName=Anvil {#Version}
+#endif
+AppVersion={#Version}
 AppPublisher=Anvil
 AppPublisherURL=https://github.com/thevoiceguy/anvil
 DefaultDirName={localappdata}\Programs\Anvil
@@ -26,10 +42,14 @@ PrivilegesRequired=lowest
 ArchitecturesAllowed=x64compatible
 ArchitecturesInstallIn64BitMode=x64compatible
 OutputDir={#Out}
+#ifdef OutName
+OutputBaseFilename={#OutName}
+#else
 OutputBaseFilename=Anvil-{#Label}-windows-x86_64-setup
+#endif
 SetupIconFile=..\windows\runner\resources\app_icon.ico
-UninstallDisplayIcon={app}\anvil.exe
-UninstallDisplayName=Anvil
+UninstallDisplayIcon={code:UninstallIcon}
+UninstallDisplayName={code:BrandName}
 Compression=lzma2
 SolidCompression=yes
 WizardStyle=modern
@@ -44,19 +64,31 @@ Name: "desktopicon"; Description: "{cm:CreateDesktopIcon}"; Flags: unchecked
 
 [Files]
 Source: "{#Bundle}\*"; DestDir: "{app}"; Flags: recursesubdirs ignoreversion
+; The profile step, run from {tmp} before anything is installed.
+Source: "profile.ps1"; Flags: dontcopy
+#ifdef Profile
+Source: "{#Profile}"; DestName: "embedded-profile.zip"; Flags: dontcopy
+#endif
 
 [Icons]
 ; The notifications' app id (lib/src/desktop/native_shell.dart), so a call's
-; notification is the Start menu's Anvil.
-Name: "{autoprograms}\Anvil"; Filename: "{app}\anvil.exe"; AppUserModelID: "Anvil.Softphone"
-Name: "{autodesktop}\Anvil"; Filename: "{app}\anvil.exe"; AppUserModelID: "Anvil.Softphone"; Tasks: desktopicon
+; notification is the Start menu's entry. Named, and with the icon, of the
+; profile's brand when there is one.
+Name: "{autoprograms}\{code:ShortcutName}"; Filename: "{app}\anvil.exe"; AppUserModelID: "Anvil.Softphone"; Check: not HasBrandIcon
+Name: "{autoprograms}\{code:ShortcutName}"; Filename: "{app}\anvil.exe"; AppUserModelID: "Anvil.Softphone"; IconFilename: "{code:BrandIcon}"; Check: HasBrandIcon
+Name: "{autodesktop}\{code:ShortcutName}"; Filename: "{app}\anvil.exe"; AppUserModelID: "Anvil.Softphone"; Tasks: desktopicon; Check: not HasBrandIcon
+Name: "{autodesktop}\{code:ShortcutName}"; Filename: "{app}\anvil.exe"; AppUserModelID: "Anvil.Softphone"; IconFilename: "{code:BrandIcon}"; Tasks: desktopicon; Check: HasBrandIcon
 
 [Registry]
 ; Start at login (launch_at_startup) writes these values; they go with the app.
 Root: HKCU; Subkey: "Software\Microsoft\Windows\CurrentVersion\Run"; ValueName: "Anvil"; Flags: dontcreatekey uninsdeletevalue
 Root: HKCU; Subkey: "Software\Microsoft\Windows\CurrentVersion\Explorer\StartupApproved\Run"; ValueName: "Anvil"; Flags: dontcreatekey uninsdeletevalue
-; The notifications register the app under its app id; those go too.
+; The notifications register the app under its app id; those go too. A
+; brand's name and icon are registered now, so they are right before the
+; app first starts (it registers them again at every start).
 Root: HKCU; Subkey: "Software\Classes\AppUserModelId\Anvil.Softphone"; Flags: dontcreatekey uninsdeletekey
+Root: HKCU; Subkey: "Software\Classes\AppUserModelId\Anvil.Softphone"; ValueType: string; ValueName: "DisplayName"; ValueData: "{code:BrandName}"; Check: HasBrandName
+Root: HKCU; Subkey: "Software\Classes\AppUserModelId\Anvil.Softphone"; ValueType: string; ValueName: "IconUri"; ValueData: "{code:BrandIcon}"; Check: HasBrandIcon
 Root: HKCU; Subkey: "Software\Microsoft\Windows\CurrentVersion\PushNotifications\Backup\Anvil.Softphone"; Flags: dontcreatekey uninsdeletekey
 ; Links to call: Anvil.Url opens them (a second start hands the link to the
 ; running app); Windows offers Anvil for each scheme in its default apps.
@@ -87,6 +119,8 @@ Root: HKCU; Subkey: "Software\Classes\callto"; ValueType: string; ValueName: "UR
 Root: HKCU; Subkey: "Software\Classes\callto\shell\open\command"; ValueType: string; ValueData: """{app}\anvil.exe"" ""%1"""; Check: Unclaimed('callto')
 
 [UninstallDelete]
+; The profile, which the installer put there but did not install as a file.
+Type: filesandordirs; Name: "{app}\profile"
 ; The app's files: the session (its tokens and the device's SIP password,
 ; sealed for the user) and settings, local since W2, roaming before.
 Type: filesandordirs; Name: "{localappdata}\Anvil\Anvil"
@@ -101,6 +135,200 @@ Filename: "{app}\anvil.exe"; Description: "{cm:LaunchProgram,Anvil}"; Flags: now
 Filename: "{app}\anvil.exe"; Flags: nowait; Check: Relaunch
 
 [Code]
+var
+  // What profile.ps1 said: the brand's name, its file-safe form, its icon.
+  ProfileName, ProfileFile, ProfileIcon: String;
+  // The shortcuts the previous install made (shortcuts.json).
+  MadeBefore: TStringList;
+
+function BrandName(Param: String): String;
+begin
+  if ProfileName = '' then Result := 'Anvil' else Result := ProfileName;
+end;
+
+function ShortcutName(Param: String): String;
+begin
+  if ProfileFile = '' then Result := 'Anvil' else Result := ProfileFile;
+end;
+
+function BrandIcon(Param: String): String;
+begin
+  Result := ProfileIcon;
+end;
+
+function HasBrandName: Boolean;
+begin
+  Result := (ProfileName <> '') and (ProfileName <> 'Anvil');
+end;
+
+function HasBrandIcon: Boolean;
+begin
+  Result := ProfileIcon <> '';
+end;
+
+function UninstallIcon(Param: String): String;
+begin
+  if ProfileIcon <> '' then Result := ProfileIcon else Result := ExpandConstant('{app}\anvil.exe');
+end;
+
+// A command-line value, without quotes that would end its argument.
+function Option(Name: String): String;
+begin
+  Result := ExpandConstant('{param:' + Name + '|}');
+  StringChangeEx(Result, '"', '', True);
+end;
+
+function Quoted(Value: String): String;
+begin
+  Result := '"' + Value + '"';
+end;
+
+// A local /PROFILE= is taken from the current directory, else beside the
+// setup (an Intune package's folder).
+function ProfileSource: String;
+var
+  Given: String;
+begin
+  Given := Option('PROFILE');
+  Result := Given;
+  if (Given = '') or (Pos('://', Given) > 0) then Exit;
+  Result := ExpandFileName(Given);
+  if not FileExists(Result) and not DirExists(Result) then
+    Result := AddBackslash(ExpandConstant('{src}')) + Given;
+end;
+
+// shortcuts.json, one path a line as WriteShortcuts writes it.
+procedure ReadMadeBefore;
+var
+  Lines: TArrayOfString;
+  I: Integer;
+  Line: String;
+begin
+  MadeBefore := TStringList.Create;
+  if LoadStringsFromFile(ExpandConstant('{app}\profile\shortcuts.json'), Lines) then
+  begin
+    for I := 0 to GetArrayLength(Lines) - 1 do
+    begin
+      Line := Trim(Lines[I]);
+      if (Length(Line) > 1) and (Line[1] = '"') and (Pos('.lnk"', Lowercase(Line)) > 0) then
+      begin
+        Delete(Line, 1, 1);
+        Line := Copy(Line, 1, Pos('"', Line) - 1);
+        StringChangeEx(Line, '\\', '\', True);
+        MadeBefore.Add(Line);
+      end;
+    end;
+  end
+  else
+  begin
+    // An install from before profiles made these.
+    MadeBefore.Add(ExpandConstant('{autoprograms}\Anvil.lnk'));
+    MadeBefore.Add(ExpandConstant('{autodesktop}\Anvil.lnk'));
+  end;
+end;
+
+// Run before anything is installed, so the shortcuts and the registry take
+// the brand; a profile that cannot be read stops the install.
+function PrepareToInstall(var NeedsRestart: Boolean): String;
+var
+  Args, Ini, Embedded, Value: String;
+  Code: Integer;
+begin
+  Result := '';
+  ExtractTemporaryFile('profile.ps1');
+  Embedded := '';
+#ifdef Profile
+  ExtractTemporaryFile('embedded-profile.zip');
+  Embedded := ExpandConstant('{tmp}\embedded-profile.zip');
+#endif
+  ReadMadeBefore;
+  Ini := ExpandConstant('{tmp}\profile.ini');
+  Args := '-NoProfile -NonInteractive -ExecutionPolicy Bypass -File '
+    + Quoted(ExpandConstant('{tmp}\profile.ps1'))
+    + ' -App ' + Quoted(ExpandConstant('{app}')) + ' -Out ' + Quoted(Ini);
+  // Only what is given: an empty quoted argument is lost on the way.
+  Value := ProfileSource;
+  if Value <> '' then Args := Args + ' -Source ' + Quoted(Value);
+  if Embedded <> '' then Args := Args + ' -Embedded ' + Quoted(Embedded);
+  Value := Option('SERVER');
+  if Value <> '' then Args := Args + ' -Server ' + Quoted(Value);
+  Value := Option('LOGINDOMAIN');
+  if Value <> '' then Args := Args + ' -LoginDomain ' + Quoted(Value);
+  Value := Option('SIGNIN');
+  if Value <> '' then Args := Args + ' -SignIn ' + Quoted(Value);
+  Value := Option('LOCKSERVER');
+  if Value <> '' then Args := Args + ' -LockServer ' + Quoted(Value);
+  Log('The profile step: powershell.exe ' + Args);
+  if not Exec('powershell.exe', Args, '', SW_HIDE, ewWaitUntilTerminated, Code) then
+  begin
+    Result := 'The profile could not be installed: PowerShell did not start (' + SysErrorMessage(Code) + ').';
+    Exit;
+  end;
+  Value := GetIniString('profile', 'error', '', Ini);
+  if (Code <> 0) or (Value <> '') then
+  begin
+    if Value = '' then Value := 'exit code ' + IntToStr(Code);
+    Result := 'The profile could not be installed: ' + Value;
+    Exit;
+  end;
+  ProfileName := GetIniString('profile', 'name', '', Ini);
+  ProfileFile := GetIniString('profile', 'file', '', Ini);
+  ProfileIcon := GetIniString('profile', 'icon', '', Ini);
+  Log('The profile: name ' + ProfileName + ', icon ' + ProfileIcon);
+end;
+
+function JsonString(Value: String): String;
+begin
+  StringChangeEx(Value, '\', '\\', True);
+  StringChangeEx(Value, '"', '\"', True);
+  Result := '"' + Value + '"';
+end;
+
+// The shortcuts this install made, for the next install and for the app
+// (docs/MANAGED_INSTALLS.md §2.4); the ones a renamed brand left behind go.
+procedure WriteShortcuts;
+var
+  Made, Candidates: TStringList;
+  I: Integer;
+  Lines: TArrayOfString;
+begin
+  Candidates := TStringList.Create;
+  Candidates.Add(ExpandConstant('{autoprograms}\') + ShortcutName('') + '.lnk');
+  Candidates.Add(ExpandConstant('{autodesktop}\') + ShortcutName('') + '.lnk');
+  Made := TStringList.Create;
+  try
+    for I := 0 to Candidates.Count - 1 do
+      if FileExists(Candidates[I]) then Made.Add(Candidates[I]);
+    for I := 0 to MadeBefore.Count - 1 do
+      if (Made.IndexOf(MadeBefore[I]) < 0) and FileExists(MadeBefore[I]) then
+      begin
+        Log('A shortcut the brand renamed goes: ' + MadeBefore[I]);
+        DeleteFile(MadeBefore[I]);
+      end;
+    // UTF-8, for a brand or a user's folder beyond ASCII.
+    SetArrayLength(Lines, Made.Count + 4);
+    Lines[0] := '{';
+    Lines[1] := '  "shortcuts": [';
+    for I := 0 to Made.Count - 1 do
+    begin
+      Lines[I + 2] := '    ' + JsonString(Made[I]);
+      if I < Made.Count - 1 then Lines[I + 2] := Lines[I + 2] + ',';
+    end;
+    Lines[Made.Count + 2] := '  ]';
+    Lines[Made.Count + 3] := '}';
+    ForceDirectories(ExpandConstant('{app}\profile'));
+    SaveStringsToUTF8File(ExpandConstant('{app}\profile\shortcuts.json'), Lines, False);
+  finally
+    Made.Free;
+    Candidates.Free;
+  end;
+end;
+
+procedure CurStepChanged(CurStep: TSetupStep);
+begin
+  if CurStep = ssPostInstall then WriteShortcuts;
+end;
+
 // Nothing opens |Scheme| but, perhaps, an earlier Anvil.
 function Unclaimed(Scheme: String): Boolean;
 var

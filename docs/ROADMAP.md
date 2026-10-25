@@ -100,7 +100,7 @@ every recommendation:
 - [x] **M1** The profile and policy: server (locked), login domain, sign-in
       mode, username from the system, updates; the profile's brand before
       sign-in
-- [ ] **M2** The Windows installer taking a profile, shortcuts named from it
+- [x] **M2** The Windows installer taking a profile, shortcuts named from it
       and kept across updates, `brand.py` for a branded setup
 - [ ] **M3** The brand on the system at run time: window and tray icons,
       Windows shortcuts and app id, the Linux `.desktop`, the macOS Dock

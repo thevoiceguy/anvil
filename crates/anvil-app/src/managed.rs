@@ -139,6 +139,9 @@ pub struct Managed {
     pub updates: UpdatesMode,
     /// The profile's brand, its files read.
     pub brand: Option<BrandProfile>,
+    /// The brand's icon as the system shows it (`icon.ico`, which Windows'
+    /// installer makes from the profile's PNG beside `profile.json`).
+    pub system_icon: Option<PathBuf>,
     /// Where each setting came from, for the log and Settings.
     pub sources: Vec<String>,
 }
@@ -212,6 +215,11 @@ pub fn load_from(sources: Sources) -> Managed {
         sign_in: merged.sign_in.unwrap_or_default(),
         username,
         updates: merged.updates.unwrap_or_default(),
+        system_icon: sources
+            .profile_dir
+            .as_ref()
+            .map(|dir| dir.join("icon.ico"))
+            .filter(|ico| brand.is_some() && ico.is_file()),
         brand,
         sources: named,
     }
@@ -227,7 +235,7 @@ fn read_profile(dir: &Path) -> Option<ProfileFile> {
             return None;
         }
     };
-    match serde_json::from_slice::<ProfileFile>(&bytes) {
+    match serde_json::from_slice::<ProfileFile>(without_bom(&bytes)) {
         Ok(file) => {
             if file.profile_version.is_some_and(|v| v > PROFILE_VERSION) {
                 tracing::info!(
@@ -242,6 +250,12 @@ fn read_profile(dir: &Path) -> Option<ProfileFile> {
             None
         }
     }
+}
+
+/// A file saved by Windows PowerShell or an older Notepad starts with a
+/// UTF-8 byte order mark, which JSON does not allow.
+fn without_bom(bytes: &[u8]) -> &[u8] {
+    bytes.strip_prefix(b"\xEF\xBB\xBF").unwrap_or(bytes)
 }
 
 /// The profile's brand as FCP's would be, with its files' bytes. A file
@@ -368,7 +382,7 @@ fn json_policy(path: &Path) -> Option<Settings> {
             return None;
         }
     };
-    serde_json::from_slice(&bytes)
+    serde_json::from_slice(without_bom(&bytes))
         .map_err(|e| tracing::warn!(%e, path = %path.display(), "a policy is not read"))
         .ok()
 }
@@ -668,6 +682,46 @@ mod tests {
         assert_eq!(brand.ringtones[0].name, "ring");
         assert_eq!(brand.ringtones[0].asset.mime, "audio/ogg");
         assert!(brand.ringtones[0].default);
+    }
+
+    #[test]
+    fn a_profile_saved_with_a_byte_order_mark_is_read() {
+        let dir = dir();
+        std::fs::write(
+            dir.join("profile.json"),
+            b"\xEF\xBB\xBF{\"server\": \"pbx.example\"}",
+        )
+        .unwrap();
+        let m = load_from(Sources {
+            profile_dir: Some(dir),
+            ..Default::default()
+        });
+        assert_eq!(m.server.as_deref(), Some("pbx.example"));
+    }
+
+    #[test]
+    fn the_installers_icon_is_the_systems_when_the_profile_has_a_brand() {
+        let dir = profile(r#"{"brand": {"app_name": "Acme Voice", "icon": "icon.png"}}"#);
+        let m = load_from(Sources {
+            profile_dir: Some(dir.clone()),
+            ..Default::default()
+        });
+        assert_eq!(m.system_icon, None, "no icon.ico yet");
+        std::fs::write(dir.join("icon.ico"), b"ico").unwrap();
+        let m = load_from(Sources {
+            profile_dir: Some(dir.clone()),
+            ..Default::default()
+        });
+        assert_eq!(m.system_icon, Some(dir.join("icon.ico")));
+        std::fs::write(dir.join("profile.json"), r#"{"server": "pbx.example"}"#).unwrap();
+        let m = load_from(Sources {
+            profile_dir: Some(dir),
+            ..Default::default()
+        });
+        assert_eq!(
+            m.system_icon, None,
+            "a profile without a brand names no icon"
+        );
     }
 
     #[test]
