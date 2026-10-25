@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:typed_data';
 
 import 'package:anvil/src/desktop/shell.dart';
 
@@ -49,6 +50,13 @@ class FakeShell implements DesktopShell {
 
   @override
   Future<void> setTitle(String title) async => this.title = title;
+
+  /// Each brand the system was given: its name and icon.
+  final List<(String?, Uint8List?)> brands = [];
+
+  @override
+  Future<void> setBrand(String? name, Uint8List? icon) async =>
+      brands.add((name, icon));
 
   @override
   Future<void> setTray(TrayState state, String tooltip, TrayMenu menu) async {

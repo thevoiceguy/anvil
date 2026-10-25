@@ -21,6 +21,8 @@ mod managed_windows;
 mod ring;
 mod settings;
 mod state;
+#[cfg(any(windows, target_os = "macos", target_os = "linux"))]
+pub mod system_brand;
 #[cfg(windows)]
 #[allow(unsafe_code)]
 mod user_only;
@@ -840,6 +842,11 @@ impl Inner {
             accent: profile.colors.accent.map(|c| c.to_hex()),
             logo: profile
                 .logo
+                .as_ref()
+                .map(|a| a.bytes.clone())
+                .filter(|b| !b.is_empty()),
+            icon: profile
+                .icon
                 .as_ref()
                 .map(|a| a.bytes.clone())
                 .filter(|b| !b.is_empty()),

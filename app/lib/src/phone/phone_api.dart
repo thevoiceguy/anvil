@@ -329,6 +329,7 @@ class PhoneSnapshot {
     this.brandName,
     this.brandPrimary,
     this.brandLogo,
+    this.brandIcon,
     this.calling,
     this.recents = const [],
     this.people = const [],
@@ -351,10 +352,12 @@ class PhoneSnapshot {
   final int voicemailNew;
   final bool? dnd;
 
-  /// The tenant's brand: its app name, primary colour and logo.
+  /// The tenant's brand: its app name, primary colour, logo and icon (for
+  /// the system's icons).
   final String? brandName;
   final int? brandPrimary;
   final Uint8List? brandLogo;
+  final Uint8List? brandIcon;
 
   /// Signed in to FCP: the calling settings, once read.
   final CallingSettings? calling;
@@ -416,6 +419,8 @@ class PhoneSnapshot {
     bool? dnd,
     String? brandName,
     int? brandPrimary,
+    Uint8List? brandIcon,
+    bool clearBrand = false,
     CallingSettings? calling,
     List<RecentCall>? recents,
     List<Person>? people,
@@ -440,9 +445,10 @@ class PhoneSnapshot {
     calls: calls ?? this.calls,
     voicemailNew: voicemailNew ?? this.voicemailNew,
     dnd: dnd ?? this.dnd,
-    brandName: brandName ?? this.brandName,
-    brandPrimary: brandPrimary ?? this.brandPrimary,
-    brandLogo: brandLogo,
+    brandName: clearBrand ? null : brandName ?? this.brandName,
+    brandPrimary: clearBrand ? null : brandPrimary ?? this.brandPrimary,
+    brandLogo: clearBrand ? null : brandLogo,
+    brandIcon: clearBrand ? null : brandIcon ?? this.brandIcon,
     calling: calling ?? this.calling,
     recents: recents ?? this.recents,
     people: people ?? this.people,
@@ -492,6 +498,7 @@ class Managed {
     this.brandName,
     this.brandPrimary,
     this.brandLogo,
+    this.brandIcon,
     this.brandIconPath,
     this.sources = const [],
   });
@@ -516,6 +523,7 @@ class Managed {
   final String? brandName;
   final int? brandPrimary;
   final Uint8List? brandLogo;
+  final Uint8List? brandIcon;
 
   /// The brand's icon file for the system (Windows' notifications).
   final String? brandIconPath;

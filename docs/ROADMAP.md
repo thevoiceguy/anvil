@@ -102,7 +102,7 @@ every recommendation:
       sign-in
 - [x] **M2** The Windows installer taking a profile, shortcuts named from it
       and kept across updates, `brand.py` for a branded setup
-- [ ] **M3** The brand on the system at run time: window and tray icons,
+- [x] **M3** The brand on the system at run time: window and tray icons,
       Windows shortcuts and app id, the Linux `.desktop`, the macOS Dock
 - [ ] **M4** macOS and Linux packages with a profile and a brand
 - [ ] **F1** (FCP) The tenant's deployment profile from the admin

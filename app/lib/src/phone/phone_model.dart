@@ -54,6 +54,7 @@ class PhoneModel extends ChangeNotifier {
   String? get brandName => snapshot.brandName ?? managed.brandName;
   int? get brandPrimary => snapshot.brandPrimary ?? managed.brandPrimary;
   Uint8List? get brandLogo => snapshot.brandLogo ?? managed.brandLogo;
+  Uint8List? get brandIcon => snapshot.brandIcon ?? managed.brandIcon;
 
   /// A saved session starts the phone at once.
   Future<void> boot() async {

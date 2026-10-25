@@ -46,6 +46,10 @@ pub struct Brand {
     /// the control socket.
     #[serde(skip)]
     pub logo: Option<Vec<u8>>,
+    /// The icon's bytes (PNG, JPEG or WebP), for the system's icons; not
+    /// sent on the control socket.
+    #[serde(skip)]
+    pub icon: Option<Vec<u8>>,
 }
 
 impl State {

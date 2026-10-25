@@ -61,6 +61,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   RememberedSignIn dco_decode_box_autoadd_remembered_sign_in(dynamic raw);
 
   @protected
+  SystemLook dco_decode_box_autoadd_system_look(dynamic raw);
+
+  @protected
   int dco_decode_box_autoadd_u_32(dynamic raw);
 
   @protected
@@ -112,6 +115,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   List<Ringtone> dco_decode_list_ringtone(dynamic raw);
 
   @protected
+  List<TrayIcon> dco_decode_list_tray_icon(dynamic raw);
+
+  @protected
   List<Voicemail> dco_decode_list_voicemail(dynamic raw);
 
   @protected
@@ -134,6 +140,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   RememberedSignIn? dco_decode_opt_box_autoadd_remembered_sign_in(dynamic raw);
+
+  @protected
+  SystemLook? dco_decode_opt_box_autoadd_system_look(dynamic raw);
 
   @protected
   int? dco_decode_opt_box_autoadd_u_32(dynamic raw);
@@ -179,6 +188,12 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   SystemAudio dco_decode_system_audio(dynamic raw);
+
+  @protected
+  SystemLook dco_decode_system_look(dynamic raw);
+
+  @protected
+  TrayIcon dco_decode_tray_icon(dynamic raw);
 
   @protected
   int dco_decode_u_32(dynamic raw);
@@ -243,6 +258,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   );
 
   @protected
+  SystemLook sse_decode_box_autoadd_system_look(SseDeserializer deserializer);
+
+  @protected
   int sse_decode_box_autoadd_u_32(SseDeserializer deserializer);
 
   @protected
@@ -294,6 +312,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   List<Ringtone> sse_decode_list_ringtone(SseDeserializer deserializer);
 
   @protected
+  List<TrayIcon> sse_decode_list_tray_icon(SseDeserializer deserializer);
+
+  @protected
   List<Voicemail> sse_decode_list_voicemail(SseDeserializer deserializer);
 
   @protected
@@ -318,6 +339,11 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   RememberedSignIn? sse_decode_opt_box_autoadd_remembered_sign_in(
+    SseDeserializer deserializer,
+  );
+
+  @protected
+  SystemLook? sse_decode_opt_box_autoadd_system_look(
     SseDeserializer deserializer,
   );
 
@@ -367,6 +393,12 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   SystemAudio sse_decode_system_audio(SseDeserializer deserializer);
+
+  @protected
+  SystemLook sse_decode_system_look(SseDeserializer deserializer);
+
+  @protected
+  TrayIcon sse_decode_tray_icon(SseDeserializer deserializer);
 
   @protected
   int sse_decode_u_32(SseDeserializer deserializer);
@@ -438,6 +470,12 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   );
 
   @protected
+  void sse_encode_box_autoadd_system_look(
+    SystemLook self,
+    SseSerializer serializer,
+  );
+
+  @protected
   void sse_encode_box_autoadd_u_32(int self, SseSerializer serializer);
 
   @protected
@@ -501,6 +539,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   void sse_encode_list_ringtone(List<Ringtone> self, SseSerializer serializer);
 
   @protected
+  void sse_encode_list_tray_icon(List<TrayIcon> self, SseSerializer serializer);
+
+  @protected
   void sse_encode_list_voicemail(
     List<Voicemail> self,
     SseSerializer serializer,
@@ -539,6 +580,12 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   @protected
   void sse_encode_opt_box_autoadd_remembered_sign_in(
     RememberedSignIn? self,
+    SseSerializer serializer,
+  );
+
+  @protected
+  void sse_encode_opt_box_autoadd_system_look(
+    SystemLook? self,
     SseSerializer serializer,
   );
 
@@ -595,6 +642,12 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   void sse_encode_system_audio(SystemAudio self, SseSerializer serializer);
+
+  @protected
+  void sse_encode_system_look(SystemLook self, SseSerializer serializer);
+
+  @protected
+  void sse_encode_tray_icon(TrayIcon self, SseSerializer serializer);
 
   @protected
   void sse_encode_u_32(int self, SseSerializer serializer);

@@ -11,10 +11,15 @@ import 'phone_api.dart';
 class RustPhone implements PhoneApi {
   String? _sessionPath;
 
+  /// Where the app keeps its files: the session, settings, the log.
+  static Future<String> directory() async {
+    final dir = (await getApplicationSupportDirectory()).path;
+    return Platform.isWindows ? await localOnWindows(dir) : dir;
+  }
+
   Future<String> _session() async {
     if (_sessionPath != null) return _sessionPath!;
-    var dir = (await getApplicationSupportDirectory()).path;
-    if (Platform.isWindows) dir = await localOnWindows(dir);
+    final dir = await directory();
     try {
       // The log goes beside the session, from the first thing the app does.
       rust.startLog(dir: dir);
@@ -117,6 +122,7 @@ class RustPhone implements PhoneApi {
       brandName: m.brandName,
       brandPrimary: PhoneSnapshot.colorFromHex(m.brandPrimary),
       brandLogo: m.brandLogo,
+      brandIcon: m.brandIcon,
       brandIconPath: m.brandIconPath,
       sources: m.sources,
     );
@@ -167,6 +173,7 @@ class RustPhone implements PhoneApi {
       brandName: s.brandName,
       brandPrimary: PhoneSnapshot.colorFromHex(s.brandPrimary),
       brandLogo: s.brandLogo,
+      brandIcon: s.brandIcon,
       calling: calling == null
           ? null
           : CallingSettings(

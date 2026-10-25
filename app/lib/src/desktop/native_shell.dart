@@ -4,8 +4,12 @@
 // login. Each part that fails to start is logged and left out. On Windows a
 // second start hands its arguments to this one (windows/runner/instance.cpp)
 // and the session ending signs the phone out first, over `anvil/instance`.
+// A brand's icon is made into the window's, the tray's and the Dock's by
+// `anvil-app` (system_brand.rs), which also renames Windows' shortcuts and
+// a Linux menu entry; the Dock's is set over `anvil/dock` (macOS).
 
 import 'dart:async';
+import 'dart:convert';
 import 'dart:io';
 
 import 'package:flutter/foundation.dart';
@@ -15,6 +19,8 @@ import 'package:launch_at_startup/launch_at_startup.dart';
 import 'package:tray_manager/tray_manager.dart';
 import 'package:window_manager/window_manager.dart';
 
+import '../phone/rust_phone.dart';
+import '../rust/api/phone.dart' as rust;
 import 'links.dart';
 import 'shell.dart';
 
@@ -25,6 +31,10 @@ class NativeShell with TrayListener, WindowListener implements DesktopShell {
       _hidden = Platform.isWindows && args.contains(hiddenArgument);
 
   static const _instance = MethodChannel('anvil/instance');
+  static const _dock = MethodChannel('anvil/dock');
+  // tray_manager's own: on macOS it takes an icon only from the app's
+  // assets, so a brand's file is handed to it as its Dart side would.
+  static const _trayChannel = MethodChannel('tray_manager');
 
   final _events = StreamController<ShellEvent>.broadcast();
   List<ShellEvent> _start;
@@ -37,6 +47,13 @@ class NativeShell with TrayListener, WindowListener implements DesktopShell {
   bool _notify = false;
   bool _window = false;
   bool _login = false;
+
+  /// The tray's state, and the brand's icon for each (none: Anvil's own).
+  TrayState _trayState = TrayState.offline;
+  Map<TrayState, String>? _brandTray;
+
+  /// Each brand is shown in turn, never two at once.
+  Future<void> _branding = Future.value();
 
   static bool get supported =>
       !kIsWeb && (Platform.isWindows || Platform.isMacOS || Platform.isLinux);
@@ -160,16 +177,36 @@ class NativeShell with TrayListener, WindowListener implements DesktopShell {
     }
   }
 
-  /// The tray's icon for a state: ICO on Windows, PNG elsewhere.
-  static String _icon(TrayState state) {
-    final name = switch (state) {
-      TrayState.offline => 'offline',
-      TrayState.ready => 'ready',
-      TrayState.dnd => 'dnd',
-      TrayState.ringing => 'ringing',
-      TrayState.inCall => 'in_call',
-    };
-    return 'assets/tray/$name.${Platform.isWindows ? 'ico' : 'png'}';
+  /// The tray's icon for a state: the brand's, else Anvil's own (ICO on
+  /// Windows, PNG elsewhere).
+  String _icon(TrayState state) => _brandTray?[state] ?? _ownIcon(state);
+
+  /// A state's name, as Anvil's tray icons and the brand's are named.
+  static String _stateName(TrayState state) => switch (state) {
+    TrayState.offline => 'offline',
+    TrayState.ready => 'ready',
+    TrayState.dnd => 'dnd',
+    TrayState.ringing => 'ringing',
+    TrayState.inCall => 'in_call',
+  };
+
+  static String _ownIcon(TrayState state) =>
+      'assets/tray/${_stateName(state)}.${Platform.isWindows ? 'ico' : 'png'}';
+
+  Future<void> _setTrayIcon(TrayState state) async {
+    final icon = _icon(state);
+    if (Platform.isMacOS && _brandTray != null) {
+      await _trayChannel.invokeMethod('setIcon', {
+        'id': '${state.name}-${icon.hashCode}',
+        'iconPath': icon,
+        'base64Icon': base64Encode(await File(icon).readAsBytes()),
+        'isTemplate': false,
+        'iconPosition': 'left',
+        'iconSize': 18,
+      });
+    } else {
+      await trayManager.setIcon(icon);
+    }
   }
 
   @override
@@ -177,10 +214,49 @@ class NativeShell with TrayListener, WindowListener implements DesktopShell {
       _part('window', () => windowManager.setTitle(title));
 
   @override
+  Future<void> setBrand(String? name, Uint8List? icon) =>
+      _branding = _branding.then((_) => _showBrand(name, icon));
+
+  Future<void> _showBrand(String? name, Uint8List? icon) async {
+    rust.SystemLook? look;
+    await _part('brand', () async {
+      final sep = Platform.pathSeparator;
+      look = await rust.systemBrand(
+        dir: '${await RustPhone.directory()}${sep}brand',
+        name: name,
+        icon: icon,
+      );
+    });
+    final shown = look;
+    if (shown == null) {
+      _brandTray = null;
+    } else {
+      final byName = {for (final t in shown.tray) t.state: t.path};
+      _brandTray = {
+        for (final s in TrayState.values) s: ?byName[_stateName(s)],
+      };
+    }
+    if (_window && !Platform.isMacOS) {
+      await _part(
+        'window',
+        () => windowManager.setIcon(
+          shown?.window ??
+              'assets/app/anvil.${Platform.isWindows ? 'ico' : 'png'}',
+        ),
+      );
+    }
+    if (Platform.isMacOS) {
+      await _part('dock', () => _dock.invokeMethod('setIcon', shown?.png));
+    }
+    if (_tray) await _part('tray', () => _setTrayIcon(_trayState));
+  }
+
+  @override
   Future<void> setTray(TrayState state, String tooltip, TrayMenu menu) async {
     if (!_tray) return;
+    _trayState = state;
     await _part('tray', () async {
-      await trayManager.setIcon(_icon(state));
+      await _setTrayIcon(state);
       // Linux's indicators show no tooltip.
       if (!Platform.isLinux) await trayManager.setToolTip(tooltip);
       await trayManager.setContextMenu(

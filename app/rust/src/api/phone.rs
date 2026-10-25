@@ -79,6 +79,8 @@ pub struct ManagedSettings {
     /// `#RRGGBB`.
     pub brand_primary: Option<String>,
     pub brand_logo: Option<Vec<u8>>,
+    /// The brand's icon (PNG, JPEG or WebP), for the system's icons.
+    pub brand_icon: Option<Vec<u8>>,
     /// The brand's icon file for the system (Windows' notifications).
     pub brand_icon_path: Option<String>,
     /// Where each setting came from, for Settings.
@@ -118,11 +120,73 @@ pub fn managed_settings() -> ManagedSettings {
             .as_ref()
             .and_then(|b| b.logo.as_ref())
             .map(|a| a.bytes.clone()),
+        brand_icon: m
+            .brand
+            .as_ref()
+            .and_then(|b| b.icon.as_ref())
+            .map(|a| a.bytes.clone())
+            .filter(|b| !b.is_empty()),
         brand_icon_path: m
             .system_icon
             .as_ref()
             .map(|p| p.to_string_lossy().into_owned()),
         sources: m.sources.clone(),
+    }
+}
+
+/// The brand's icon as the system shows it, made into files.
+pub struct SystemLook {
+    /// The window's: an ICO on Windows, a PNG elsewhere.
+    pub window: String,
+    /// A PNG, for the Dock.
+    pub png: String,
+    /// The tray's, by state (`offline`, `ready`, `dnd`, `ringing`,
+    /// `in_call`).
+    pub tray: Vec<TrayIcon>,
+}
+
+pub struct TrayIcon {
+    pub state: String,
+    pub path: String,
+}
+
+/// Show the brand `name` and `icon` where the system keeps the app's name
+/// and icon outside it (Windows' shortcuts and app id, a Linux menu), or
+/// Anvil's with neither (`docs/MANAGED_INSTALLS.md` §2.4). The icon's files
+/// go in `dir`; they are returned for the window, the tray and the Dock,
+/// or `None` with no icon (or one that is not an image, which is logged).
+pub fn system_brand(
+    dir: String,
+    name: Option<String>,
+    icon: Option<Vec<u8>>,
+) -> Option<SystemLook> {
+    #[cfg(any(windows, target_os = "macos", target_os = "linux"))]
+    {
+        use anvil_app::system_brand;
+        let look = icon.and_then(|icon| {
+            system_brand::look(std::path::Path::new(&dir), &icon)
+                .map_err(|e| tracing::warn!(%e, "the brand's icon is not shown"))
+                .ok()
+        });
+        system_brand::apply(name.as_deref(), look.as_ref());
+        let text = |p: &std::path::Path| p.to_string_lossy().into_owned();
+        look.map(|l| SystemLook {
+            window: text(&l.window),
+            png: text(&l.png),
+            tray: l
+                .tray
+                .iter()
+                .map(|(state, path)| TrayIcon {
+                    state: state.to_string(),
+                    path: text(path),
+                })
+                .collect(),
+        })
+    }
+    #[cfg(not(any(windows, target_os = "macos", target_os = "linux")))]
+    {
+        let _ = (dir, name, icon);
+        None
     }
 }
 
@@ -627,6 +691,7 @@ pub struct PhoneState {
     pub brand_name: Option<String>,
     pub brand_primary: Option<String>,
     pub brand_logo: Option<Vec<u8>>,
+    pub brand_icon: Option<Vec<u8>>,
     /// Signed in to FCP: the calling settings, once read.
     pub calling: Option<CallingSettings>,
     /// The latest calls, newest first.
@@ -734,7 +799,8 @@ pub fn phone_state() -> anyhow::Result<PhoneState> {
         dnd: s.dnd,
         brand_name: s.brand.as_ref().map(|b| b.app_name.clone()),
         brand_primary: s.brand.as_ref().and_then(|b| b.primary.clone()),
-        brand_logo: s.brand.and_then(|b| b.logo),
+        brand_logo: s.brand.as_ref().and_then(|b| b.logo.clone()),
+        brand_icon: s.brand.and_then(|b| b.icon),
         calling: s.calling.map(|c| CallingSettings {
             dnd: c.dnd,
             call_waiting: c.call_waiting,

@@ -2,6 +2,8 @@
 // call ringing in is a notification until it stops ringing, and the tray's
 // and notifications' actions reach the phone.
 
+import 'dart:typed_data';
+
 import 'package:anvil/src/app.dart';
 import 'package:anvil/src/desktop/shell.dart';
 import 'package:anvil/src/phone/phone_api.dart';
@@ -65,6 +67,51 @@ void main() {
     expect(shell.tooltip, 'Acme Phone — Offline');
     expect(shell.menu!.show, 'Show Acme Phone');
     expect(shell.title, 'Acme Phone', reason: 'the brand names the window');
+  });
+
+  testWidgets('the brand reaches the system, and Anvil comes back without it', (
+    tester,
+  ) async {
+    final (phone, shell) = await running(tester);
+    expect(shell.brands, [(null, null)], reason: "Anvil's own at start");
+
+    phone.brand('Acme Phone', '#AA2200', icon: Uint8List.fromList([1, 2, 3]));
+    await tester.pumpAndSettle();
+    expect(shell.brands.last.$1, 'Acme Phone');
+    expect(shell.brands.last.$2, [1, 2, 3]);
+
+    // Each snapshot's own copy of the same icon changes nothing.
+    phone.brand('Acme Phone', '#AA2200', icon: Uint8List.fromList([1, 2, 3]));
+    await phone.setDnd(true);
+    await tester.pumpAndSettle();
+    expect(shell.brands, hasLength(2));
+
+    phone.brand('Acme Phone', '#AA2200', icon: Uint8List.fromList([4, 5]));
+    await tester.pumpAndSettle();
+    expect(shell.brands.last.$2, [4, 5], reason: 'a new icon is shown');
+
+    phone.unbrand();
+    await tester.pumpAndSettle();
+    expect(shell.brands.last, (null, null));
+    expect(shell.title, 'Anvil');
+  });
+
+  testWidgets('a managed install\'s brand is the system\'s before FCP\'s', (
+    tester,
+  ) async {
+    tester.view.physicalSize = const Size(1000, 1400);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.reset);
+    final phone = FakePhone()
+      ..managed = Managed(
+        brandName: 'Acme Voice',
+        brandIcon: Uint8List.fromList([9]),
+      );
+    final shell = FakeShell();
+    await tester.pumpWidget(AnvilApp(phone: phone, shell: shell));
+    await tester.pumpAndSettle();
+    expect(shell.brands.single.$1, 'Acme Voice');
+    expect(shell.brands.single.$2, [9]);
   });
 
   testWidgets('a call ringing in is a notice until it stops ringing', (

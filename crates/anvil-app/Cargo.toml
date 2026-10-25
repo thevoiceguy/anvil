@@ -32,6 +32,21 @@ windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_Securit
 [target.'cfg(target_os = "macos")'.dependencies]
 plist = "1"
 
+# The brand on the system (`system_brand.rs`): the icon files made from the
+# brand's PNG, JPEG or WebP image, named by their hash.
+[target.'cfg(any(windows, target_os = "macos", target_os = "linux"))'.dependencies.image]
+version = "0.25"
+default-features = false
+features = ["png", "jpeg", "webp", "ico"]
+
+[target.'cfg(any(windows, target_os = "macos", target_os = "linux"))'.dependencies.sha2]
+version = "0.10"
+
+# The shortcuts Anvil's installer made, renamed and re-iconed (IShellLinkW).
+[target.'cfg(windows)'.dependencies.windows]
+version = "0.61"
+features = ["Win32_Foundation", "Win32_System_Com", "Win32_UI_Shell"]
+
 # A desktop also trusts the system's own certificates: a company's
 # internal CA, a TLS-inspecting proxy (the phones keep the bundled ones).
 [target.'cfg(any(windows, target_os = "macos", target_os = "linux"))'.dependencies]
