@@ -213,12 +213,12 @@ class _HomeScreenState extends State<HomeScreen> {
     final s = Strings.of(context);
     final snap = model.snapshot;
     return AppBar(
-      leading: snap.brandLogo == null
+      leading: model.brandLogo == null
           ? null
           : Padding(
               padding: const EdgeInsets.all(8),
               child: Image.memory(
-                snap.brandLogo!,
+                model.brandLogo!,
                 key: const Key('brandLogo'),
                 errorBuilder: (_, _, _) => const SizedBox.shrink(),
               ),

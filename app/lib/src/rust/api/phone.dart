@@ -7,7 +7,11 @@ import '../frb_generated.dart';
 
 import 'package:flutter_rust_bridge/flutter_rust_bridge_for_generated.dart';
 
-// These functions are ignored because they are not marked as `pub`: `act`, `devices`, `direction`, `execute`, `kind_only`, `on_runtime_pub`, `on_runtime`, `phone`, `place_of`, `remember`, `runtime`, `set_push`, `this_install`, `wake`
+// These functions are ignored because they are not marked as `pub`: `act`, `devices`, `direction`, `execute`, `kind_only`, `managed`, `on_runtime_pub`, `on_runtime`, `phone`, `place_of`, `remember`, `runtime`, `set_push`, `this_install`, `wake`
+
+/// This install's managed settings; an ordinary install's are all open.
+ManagedSettings managedSettings() =>
+    RustLib.instance.api.crateApiPhoneManagedSettings();
 
 /// The session kept at `session_path`, if there is one.
 Future<Account?> savedAccount({required String sessionPath}) =>
@@ -405,6 +409,79 @@ class CallingSettings {
 
 /// Which way a call goes.
 enum Direction { incoming, outgoing }
+
+/// What the sign-in screen and the app follow on a managed install.
+class ManagedSettings {
+  /// What the server field holds.
+  final String? server;
+
+  /// The server field cannot be changed.
+  final bool lockServer;
+
+  /// Put after a bare username.
+  final String? loginDomain;
+
+  /// `auto`, `sso` or `password`.
+  final String signIn;
+
+  /// The username to fill in, from the system.
+  final String? username;
+
+  /// `auto`, `notify` or `off`.
+  final String updates;
+
+  /// The installed profile's brand, before FCP's.
+  final String? brandName;
+
+  /// `#RRGGBB`.
+  final String? brandPrimary;
+  final Uint8List? brandLogo;
+
+  /// Where each setting came from, for Settings.
+  final List<String> sources;
+
+  const ManagedSettings({
+    this.server,
+    required this.lockServer,
+    this.loginDomain,
+    required this.signIn,
+    this.username,
+    required this.updates,
+    this.brandName,
+    this.brandPrimary,
+    this.brandLogo,
+    required this.sources,
+  });
+
+  @override
+  int get hashCode =>
+      server.hashCode ^
+      lockServer.hashCode ^
+      loginDomain.hashCode ^
+      signIn.hashCode ^
+      username.hashCode ^
+      updates.hashCode ^
+      brandName.hashCode ^
+      brandPrimary.hashCode ^
+      brandLogo.hashCode ^
+      sources.hashCode;
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is ManagedSettings &&
+          runtimeType == other.runtimeType &&
+          server == other.server &&
+          lockServer == other.lockServer &&
+          loginDomain == other.loginDomain &&
+          signIn == other.signIn &&
+          username == other.username &&
+          updates == other.updates &&
+          brandName == other.brandName &&
+          brandPrimary == other.brandPrimary &&
+          brandLogo == other.brandLogo &&
+          sources == other.sources;
+}
 
 /// Someone in the tenant's directory.
 class Person {

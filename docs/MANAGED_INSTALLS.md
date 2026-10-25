@@ -3,6 +3,8 @@
 Designed 2026-10-24 from D8's findings on FCP (`thevoiceguy/fcp`,
 `docs/DEEP_TESTING.md`) and agreed the same day on every recommendation
 in §7.
+
+Progress: M1 done (v0.2.6), see §4.1.
 The findings this answers:
 
 - **8c.** The server address should be set without the user, so the app
@@ -122,7 +124,8 @@ The highest source wins, field by field:
    - Windows: `{app}\profile\`;
    - macOS: `/Library/Application Support/Anvil/profile/`, outside the
      bundle so the bundle's signature still holds;
-   - Linux: `/etc/anvil/profile/`, or beside the AppImage.
+   - Linux: an `anvil-profile/` directory beside the AppImage, else
+     `/etc/anvil/profile/`.
 3. **What the person typed last** (`last_sign_in.json`), for the fields the
    first two leave open.
 
@@ -265,6 +268,61 @@ gets a **Softphone deployment** section with:
 
 M1 can ship alone, and is what finding 8c needs. M2 and F1 together make
 "deploy with no one typing anything" true on Windows.
+
+### 4.1 M1 as built (v0.2.6)
+
+- **`anvil_app::managed`:**
+  - `load()` reads the platform's sources, and `load_from(Sources)` merges
+    them, so tests give their own.
+  - Policy goes over the profile field by field. A blank policy value is no
+    setting.
+  - A server set by policy is always locked. A profile's server is locked
+    unless the profile says `"lock_server": false`.
+  - `Managed::login` puts the login domain after a bare username.
+  - `ANVIL_PROFILE` (a directory) and `ANVIL_POLICY` (a JSON file in
+    `/etc/anvil/policy.json`'s shape) go first, for a trial or a test.
+- **Policy sources:**
+  - Windows: `HKLM`, then `HKCU`, `Software\Policies\Anvil`, with
+    `REG_SZ` or `REG_DWORD` values (`managed_windows.rs`).
+  - macOS: the user's, then the machine's, managed preferences plist for
+    `com.thevoiceguy.anvil`.
+  - Linux: `/etc/anvil/policy.json`.
+- **The username from the system:** Windows' user principal name, through
+  `GetUserNameExW`. Other desktops have none yet.
+- **The profile's brand:**
+  - Its files are read beside `profile.json` and nowhere else, each up to
+    5 MB. A file that is missing is left out.
+  - It is `PhoneConfig::fallback_brand`: shown when the phone starts, and
+    again when FCP clears its own. It brings its ringtone with it, the
+    default one.
+  - Before sign-in, the app takes the name, colour and logo from
+    `managed_settings()`.
+- **The sign-in screen:**
+  - The install's server is shown, locked with "Set by your organisation".
+    A remembered server never replaces a locked one.
+  - The username comes from the system, else the last one used. The login
+    domain shows after a bare username.
+  - `password` goes straight to the password, and `sso` straight to the
+    browser, without asking the server.
+- **Updates:**
+  - `off`: no update model at all, so no checks and no Settings section.
+  - `notify`: the banner says the version and that the organisation
+    installs updates, with no button to install. The FFI refuses a
+    download.
+- **Settings:** Troubleshooting shows "Set up by your organisation" and
+  where each setting came from.
+- **Not done:** the `CaPem` policy of §3 (a company's CA from policy).
+  `AccountConfig.tls_extra_ca_pem` exists for SIP; FCP's HTTPS client
+  would need the same.
+- **Tests:**
+  - `managed.rs`: nothing set, precedence, locking, the login domain, the
+    brand's files, a broken profile, named values.
+  - `tests/phone.rs`: the profile's brand and ringtone on a phone without
+    FCP.
+  - `app/test/managed_test.dart`: the locked server, the login domain, each
+    sign-in mode, the brand before sign-in, `off` and `notify`.
+  - The Windows registry code is type-checked against `windows-sys` for
+    `x86_64-pc-windows-msvc`. The macOS code is built by CI's macOS job.
 
 ## 5. How it is proved
 

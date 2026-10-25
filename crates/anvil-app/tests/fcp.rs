@@ -123,6 +123,7 @@ async fn phone_with(fcp: Arc<FcpClient>, ip: &str, settings_path: Option<PathBuf
         register: true,
         settings_path,
         ring: false,
+        fallback_brand: None,
     })
     .await
     .expect("the phone starts and registers")

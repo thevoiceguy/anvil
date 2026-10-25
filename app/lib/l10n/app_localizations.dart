@@ -993,6 +993,24 @@ abstract class Strings {
   /// **'Troubleshooting'**
   String get settingsTroubleshooting;
 
+  /// No description provided for @signInServerLocked.
+  ///
+  /// In en, this message translates to:
+  /// **'Set by your organisation'**
+  String get signInServerLocked;
+
+  /// No description provided for @managedBy.
+  ///
+  /// In en, this message translates to:
+  /// **'Set up by your organisation'**
+  String get managedBy;
+
+  /// No description provided for @updateManaged.
+  ///
+  /// In en, this message translates to:
+  /// **'Your organisation installs updates to this app.'**
+  String get updateManaged;
+
   /// No description provided for @logFile.
   ///
   /// In en, this message translates to:

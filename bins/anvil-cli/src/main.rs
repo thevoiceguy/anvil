@@ -596,6 +596,7 @@ async fn run_phone(cli: &Cli) -> Result<()> {
         settings_path: Some(settings_path(cli)),
         // A terminal phone rings like the app on a desktop.
         ring: true,
+        fallback_brand: None,
     })
     .await?;
     let endpoint = control_endpoint(cli);

@@ -506,6 +506,15 @@ class StringsEn extends Strings {
   String get settingsTroubleshooting => 'Troubleshooting';
 
   @override
+  String get signInServerLocked => 'Set by your organisation';
+
+  @override
+  String get managedBy => 'Set up by your organisation';
+
+  @override
+  String get updateManaged => 'Your organisation installs updates to this app.';
+
+  @override
   String get logFile => 'Log file';
 
   @override

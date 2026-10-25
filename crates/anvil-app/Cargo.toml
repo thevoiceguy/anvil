@@ -25,8 +25,12 @@ chrono     = { version = "0.4", default-features = false, features = ["std"] }
 symphonia  = { version = "0.5.5", default-features = false, features = ["ogg", "vorbis", "mp3"] }
 
 [target.'cfg(windows)'.dependencies]
-windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_Security", "Win32_Security_Authorization", "Win32_System_Threading", "Win32_System_Pipes"] }
+windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_Security", "Win32_Security_Authorization", "Win32_System_Threading", "Win32_System_Pipes", "Win32_System_Registry", "Win32_Security_Authentication_Identity"] }
 
+
+# Managed preferences from a configuration profile (`managed.rs`).
+[target.'cfg(target_os = "macos")'.dependencies]
+plist = "1"
 
 # A desktop also trusts the system's own certificates: a company's
 # internal CA, a TLS-inspecting proxy (the phones keep the bundled ones).

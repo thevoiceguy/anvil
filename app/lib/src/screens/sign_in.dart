@@ -48,8 +48,14 @@ class _SignInScreenState extends State<SignInScreen> {
     _fillIn();
   }
 
-  /// Come back filled in with the last server and username signed in with.
+  Managed get _managed => widget.model.managed;
+
+  /// Filled in with what the install was set up with, then the last server
+  /// and username signed in with (a locked server stays the install's).
   Future<void> _fillIn() async {
+    final managed = _managed;
+    _server.text = managed.server ?? '';
+    _user.text = managed.username ?? '';
     RememberedSignIn? last;
     try {
       last = await widget.model.api.lastSignIn();
@@ -59,8 +65,10 @@ class _SignInScreenState extends State<SignInScreen> {
     if (last == null || !mounted) return;
     final remembered = last;
     setState(() {
-      if (_server.text.isEmpty) _server.text = remembered.place;
-      if (_user.text.isEmpty) _user.text = remembered.username;
+      if (!managed.lockServer && remembered.place.isNotEmpty) {
+        _server.text = remembered.place;
+      }
+      if (remembered.username.isNotEmpty) _user.text = remembered.username;
     });
   }
 
@@ -75,9 +83,10 @@ class _SignInScreenState extends State<SignInScreen> {
 
   String get _place => _server.text.trim();
 
-  /// The username, or the email address typed as the server.
+  /// The username (with the install's login domain after a bare one), or
+  /// the email address typed as the server.
   String get _username {
-    final user = _user.text.trim();
+    final user = _managed.login(_user.text);
     if (user.isEmpty && _place.contains('@') && !_place.contains('://')) {
       return _place;
     }
@@ -95,7 +104,7 @@ class _SignInScreenState extends State<SignInScreen> {
   /// Ask the server how this person signs in, and go on to that.
   Future<void> _continue() async {
     final s = Strings.of(context);
-    if (_place.isEmpty && !_user.text.contains('@')) {
+    if (_place.isEmpty && !_username.contains('@')) {
       setState(() => _error = s.signInServerNeeded);
       return;
     }
@@ -104,6 +113,22 @@ class _SignInScreenState extends State<SignInScreen> {
       return;
     }
     setState(() => _error = null);
+    // The install says how its people sign in: no need to ask.
+    switch (_managed.signIn) {
+      case ManagedSignIn.password:
+        setState(() {
+          _sso = false;
+          _password.clear();
+          _step = _Step.password;
+        });
+        return;
+      case ManagedSignIn.sso when _canUseBrowser:
+        setState(() => _step = _Step.sso);
+        await _browser();
+        return;
+      case ManagedSignIn.sso || ManagedSignIn.auto:
+        break;
+    }
     final SignInMethods methods;
     try {
       methods = await widget.model.signInMethods(
@@ -193,8 +218,21 @@ class _SignInScreenState extends State<SignInScreen> {
             shrinkWrap: true,
             padding: const EdgeInsets.all(24),
             children: [
+              if (widget.model.brandLogo case final logo?)
+                Padding(
+                  padding: const EdgeInsets.only(bottom: 12),
+                  child: SizedBox(
+                    height: 64,
+                    child: Image.memory(
+                      logo,
+                      key: const Key('signInLogo'),
+                      errorBuilder: (_, _, _) => const SizedBox.shrink(),
+                    ),
+                  ),
+                ),
               Text(
-                s.appName,
+                widget.model.brandName ?? s.appName,
+                key: const Key('signInTitle'),
                 style: Theme.of(context).textTheme.displaySmall,
                 textAlign: TextAlign.center,
               ),
@@ -234,9 +272,12 @@ class _SignInScreenState extends State<SignInScreen> {
         controller: _server,
         keyboardType: TextInputType.url,
         autocorrect: false,
+        readOnly: _managed.lockServer,
+        enabled: !_managed.lockServer,
         decoration: InputDecoration(
           labelText: s.signInServer,
           hintText: s.signInServerHint,
+          helperText: _managed.lockServer ? s.signInServerLocked : null,
         ),
       ),
       const SizedBox(height: 12),
@@ -244,7 +285,13 @@ class _SignInScreenState extends State<SignInScreen> {
         key: const Key('username'),
         controller: _user,
         autocorrect: false,
-        decoration: InputDecoration(labelText: s.signInUsername),
+        decoration: InputDecoration(
+          labelText: s.signInUsername,
+          suffixText: _managed.loginDomain != null && !_user.text.contains('@')
+              ? '@${_managed.loginDomain}'
+              : null,
+        ),
+        onChanged: (_) => setState(() {}),
         onSubmitted: (_) {
           if (!busy) _continue();
         },

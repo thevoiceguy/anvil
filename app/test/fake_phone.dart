@@ -111,6 +111,9 @@ class FakePhone implements PhoneApi {
   Future<RememberedSignIn?> lastSignIn() async => remembered;
 
   @override
+  Managed managed = Managed.none;
+
+  @override
   Future<SignInMethods> signInMethods({
     required String place,
     required String username,

@@ -53,6 +53,73 @@ fn phone() -> anyhow::Result<Phone> {
         .ok_or_else(|| anyhow::anyhow!("the phone is not running"))
 }
 
+/// What this install was set up with (`docs/MANAGED_INSTALLS.md`): policy
+/// and the installed profile, read once.
+pub(crate) fn managed() -> &'static anvil_app::managed::Managed {
+    static MANAGED: std::sync::OnceLock<anvil_app::managed::Managed> = std::sync::OnceLock::new();
+    MANAGED.get_or_init(anvil_app::managed::load)
+}
+
+/// What the sign-in screen and the app follow on a managed install.
+pub struct ManagedSettings {
+    /// What the server field holds.
+    pub server: Option<String>,
+    /// The server field cannot be changed.
+    pub lock_server: bool,
+    /// Put after a bare username.
+    pub login_domain: Option<String>,
+    /// `auto`, `sso` or `password`.
+    pub sign_in: String,
+    /// The username to fill in, from the system.
+    pub username: Option<String>,
+    /// `auto`, `notify` or `off`.
+    pub updates: String,
+    /// The installed profile's brand, before FCP's.
+    pub brand_name: Option<String>,
+    /// `#RRGGBB`.
+    pub brand_primary: Option<String>,
+    pub brand_logo: Option<Vec<u8>>,
+    /// Where each setting came from, for Settings.
+    pub sources: Vec<String>,
+}
+
+/// This install's managed settings; an ordinary install's are all open.
+#[frb(sync)]
+pub fn managed_settings() -> ManagedSettings {
+    use anvil_app::managed::{SignInMode, UpdatesMode};
+    let m = managed();
+    ManagedSettings {
+        server: m.server.clone(),
+        lock_server: m.lock_server,
+        login_domain: m.login_domain.clone(),
+        sign_in: match m.sign_in {
+            SignInMode::Auto => "auto",
+            SignInMode::Sso => "sso",
+            SignInMode::Password => "password",
+        }
+        .into(),
+        username: m.username.clone(),
+        updates: match m.updates {
+            UpdatesMode::Auto => "auto",
+            UpdatesMode::Notify => "notify",
+            UpdatesMode::Off => "off",
+        }
+        .into(),
+        brand_name: m.brand.as_ref().map(|b| b.app_name.clone()),
+        brand_primary: m
+            .brand
+            .as_ref()
+            .and_then(|b| b.colors.primary)
+            .map(|c| c.to_hex()),
+        brand_logo: m
+            .brand
+            .as_ref()
+            .and_then(|b| b.logo.as_ref())
+            .map(|a| a.bytes.clone()),
+        sources: m.sources.clone(),
+    }
+}
+
 /// Who is signed in.
 pub struct Account {
     pub username: String,
@@ -322,6 +389,7 @@ pub async fn start_phone(session_path: String) -> anyhow::Result<()> {
             settings_path: Some(settings_path),
             // A phone's system rings for it (CallKit, ConnectionService).
             ring: !cfg!(any(target_os = "android", target_os = "ios")),
+            fallback_brand: managed().brand.clone(),
         })
         .await?;
         // The control socket is the desktop's (`anvil call 1002` from a

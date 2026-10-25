@@ -64,7 +64,7 @@ async fn phone_with(
     audio: Box<dyn AudioHost>,
     settings_path: Option<PathBuf>,
 ) -> Phone {
-    start(user, ip, audio, settings_path, false).await
+    start(user, ip, audio, settings_path, false, None).await
 }
 
 async fn start(
@@ -73,6 +73,7 @@ async fn start(
     audio: Box<dyn AudioHost>,
     settings_path: Option<PathBuf>,
     ring: bool,
+    fallback_brand: Option<anvil_core::brand::BrandProfile>,
 ) -> Phone {
     Phone::start(PhoneConfig {
         anvil: AnvilConfig {
@@ -100,6 +101,7 @@ async fn start(
         register: false,
         settings_path,
         ring,
+        fallback_brand,
     })
     .await
     .expect("the phone starts")
@@ -657,6 +659,7 @@ async fn a_call_rings_until_answered_and_a_second_is_a_tone_in_the_call() {
         Box::new(Listening(Arc::clone(&heard))),
         Some(settings.clone()),
         true,
+        None,
     )
     .await;
     let bob = phone("bob", "127.0.0.37").await;
@@ -760,5 +763,67 @@ async fn a_call_rings_until_answered_and_a_second_is_a_tone_in_the_call() {
     let kept = std::fs::read_to_string(&settings).unwrap();
     assert!(kept.contains("\"ringtone\": \"classic\""), "{kept}");
     assert!(kept.contains("\"ring_output\": \"Speakers\""), "{kept}");
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+/// A WAV file of `samples` of silence, 8 kHz mono 16-bit.
+fn wav(samples: u32) -> Vec<u8> {
+    let data = samples * 2;
+    let mut b = Vec::new();
+    b.extend_from_slice(b"RIFF");
+    b.extend_from_slice(&(36 + data).to_le_bytes());
+    b.extend_from_slice(b"WAVEfmt ");
+    b.extend_from_slice(&16u32.to_le_bytes());
+    b.extend_from_slice(&1u16.to_le_bytes());
+    b.extend_from_slice(&1u16.to_le_bytes());
+    b.extend_from_slice(&8000u32.to_le_bytes());
+    b.extend_from_slice(&16000u32.to_le_bytes());
+    b.extend_from_slice(&2u16.to_le_bytes());
+    b.extend_from_slice(&16u16.to_le_bytes());
+    b.extend_from_slice(b"data");
+    b.extend_from_slice(&data.to_le_bytes());
+    b.resize(b.len() + data as usize, 0);
+    b
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn the_installed_profiles_brand_is_the_phones_while_fcp_has_none() {
+    log();
+    let dir = std::env::temp_dir().join(format!("anvil-app-profile-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).unwrap();
+    std::fs::write(
+        dir.join("profile.json"),
+        r##"{"brand": {"app_name": "Acme Voice", "colors": {"primary": "#AA2200"},
+                       "ringtone": "acme.wav"}}"##,
+    )
+    .unwrap();
+    std::fs::write(dir.join("acme.wav"), wav(800)).unwrap();
+    let managed = anvil_app::managed::load_from(anvil_app::managed::Sources {
+        profile_dir: Some(dir.clone()),
+        ..Default::default()
+    });
+    let alice = start(
+        "alice",
+        "127.0.0.39",
+        Box::new(Quiet),
+        None,
+        false,
+        managed.brand,
+    )
+    .await;
+    let state = alice.state();
+    let brand = state.brand.expect("the profile's brand");
+    assert_eq!(brand.app_name, "Acme Voice");
+    assert_eq!(brand.primary.as_deref(), Some("#AA2200"));
+    let ids: Vec<&str> = state
+        .audio
+        .ringtones
+        .iter()
+        .map(|r| r.id.as_str())
+        .collect();
+    assert!(ids.contains(&"brand:acme"), "{ids:?}");
+    assert_eq!(state.audio.ringtone, "brand:acme", "the brand's rings");
+    alice.shutdown().await;
     let _ = std::fs::remove_dir_all(dir);
 }

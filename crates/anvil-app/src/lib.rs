@@ -7,13 +7,17 @@
 //! [`control`] serves it on a local socket: `anvil run` serves it, and
 //! `anvil call …` drives whatever does.
 
-// Unsafe only where Windows' API needs it, in one module.
+// Unsafe only where Windows' API needs it, in its own modules.
 #![deny(unsafe_code)]
 
 mod clip;
 mod command;
 pub mod control;
 mod data;
+pub mod managed;
+#[cfg(windows)]
+#[allow(unsafe_code)]
+mod managed_windows;
 mod ring;
 mod settings;
 mod state;
@@ -64,6 +68,9 @@ pub struct PhoneConfig {
     /// Ring here for a call ringing in (a desktop); a phone whose system
     /// rings for it (CallKit, ConnectionService) does not.
     pub ring: bool,
+    /// The brand while FCP has none: the installed profile's
+    /// ([`managed::Managed::brand`]).
+    pub fallback_brand: Option<anvil_core::brand::BrandProfile>,
 }
 
 /// The phone: cheap to clone, every clone the same phone.
@@ -99,6 +106,8 @@ struct Inner {
     /// The brand's ringtones that could be played: name, whether the
     /// brand's default, the sound.
     brand_ringtones: Mutex<Vec<(String, bool, ring::Tone)>>,
+    /// The profile's brand, shown while FCP has none.
+    fallback_brand: Option<anvil_core::brand::BrandProfile>,
 }
 
 impl Phone {
@@ -154,7 +163,11 @@ impl Phone {
             ringer: Mutex::new(None),
             sounding: tokio::sync::Mutex::new(()),
             brand_ringtones: Mutex::new(Vec::new()),
+            fallback_brand: cfg.fallback_brand,
         });
+        if let Some(fallback) = &inner.fallback_brand {
+            inner.set_brand(fallback);
+        }
         let follower = tokio::spawn(follow(Arc::downgrade(&inner), events));
         *inner.events.lock() = Some(follower);
         let phone = Self { inner };
@@ -819,6 +832,24 @@ impl Inner {
         });
     }
 
+    /// Show `profile`'s brand: FCP's, or the installed profile's.
+    fn set_brand(&self, profile: &anvil_core::brand::BrandProfile) {
+        let brand = Brand {
+            app_name: profile.app_name.clone(),
+            primary: profile.colors.primary.map(|c| c.to_hex()),
+            accent: profile.colors.accent.map(|c| c.to_hex()),
+            logo: profile
+                .logo
+                .as_ref()
+                .map(|a| a.bytes.clone())
+                .filter(|b| !b.is_empty()),
+        };
+        let app_name = Some(brand.app_name.clone());
+        self.state.lock().brand = Some(brand);
+        let _ = self.changes.send(Change::Brand { app_name });
+        self.set_brand_ringtones(&profile.ringtones);
+    }
+
     fn set_brand_ringtones(&self, ringtones: &[anvil_core::brand::Ringtone]) {
         *self.brand_ringtones.lock() = ring::from_brand(ringtones);
     }
@@ -1057,20 +1088,7 @@ async fn follow(inner: std::sync::Weak<Inner>, mut events: EventStream) {
                 });
             }
             Event::BrandUpdated { profile } => {
-                let brand = Brand {
-                    app_name: profile.app_name.clone(),
-                    primary: profile.colors.primary.map(|c| c.to_hex()),
-                    accent: profile.colors.accent.map(|c| c.to_hex()),
-                    logo: profile
-                        .logo
-                        .as_ref()
-                        .map(|a| a.bytes.clone())
-                        .filter(|b| !b.is_empty()),
-                };
-                let app_name = Some(brand.app_name.clone());
-                inner.state.lock().brand = Some(brand);
-                let _ = inner.changes.send(Change::Brand { app_name });
-                inner.set_brand_ringtones(&profile.ringtones);
+                inner.set_brand(&profile);
                 Phone {
                     inner: Arc::clone(&inner),
                 }
@@ -1078,9 +1096,14 @@ async fn follow(inner: std::sync::Weak<Inner>, mut events: EventStream) {
                 .await;
             }
             Event::BrandCleared => {
-                inner.state.lock().brand = None;
-                let _ = inner.changes.send(Change::Brand { app_name: None });
-                inner.set_brand_ringtones(&[]);
+                match &inner.fallback_brand {
+                    Some(fallback) => inner.set_brand(fallback),
+                    None => {
+                        inner.state.lock().brand = None;
+                        let _ = inner.changes.send(Change::Brand { app_name: None });
+                        inner.set_brand_ringtones(&[]);
+                    }
+                }
                 Phone {
                     inner: Arc::clone(&inner),
                 }
