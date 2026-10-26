@@ -210,7 +210,7 @@ Three PRs, the screens thin over the state as §3 has it:
   start and again when `/me/events` says it changed (a call ended, a
   message, settings changed elsewhere); a status or a lamp changes one
   person in place. New commands: `calling` (forwards, call waiting),
-  `park` (FCP's park code), `heard`, `delete_voicemail`, `favourite`,
+  `park` (the call held and FCP's park code dialled, as a desk phone parks, so the orbit is heard), `heard`, `delete_voicemail`, `favourite`,
   `audio` and `refresh`; a call placed or answered while another is up
   holds that one, as a desk phone does. Favourites and the devices chosen
   are this device's own, kept beside the session (`settings.json`); a

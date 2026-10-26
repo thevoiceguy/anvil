@@ -349,9 +349,32 @@ impl Phone {
                 let code = self.inner.features.lock().get("park").cloned();
                 let code = code
                     .ok_or_else(|| PhoneError::Refused("park needs FCP's feature codes".into()))?;
+                // As a desk phone parks: the call held and the park code
+                // dialled. FCP parks the far party and says the orbit on
+                // this call; a transfer to the code (REFER) left nobody on
+                // the line to hear where it went.
+                let held = self
+                    .inner
+                    .state
+                    .lock()
+                    .calls
+                    .iter()
+                    .any(|c| c.id == id && c.held);
+                if !held {
+                    self.anvil().await?.hold(CallId(id), true).await?;
+                    self.update_call(id, |c| c.held = true, || unreachable_view(id));
+                }
                 let target = self.dial_target(&code);
-                self.anvil().await?.transfer(CallId(id), &target).await?;
-                Ok(Response::ok())
+                let placed = self.anvil().await?.place_call(&target).await?;
+                self.update_call(
+                    placed.0,
+                    |c| c.remote = target.clone(),
+                    || CallView::new(placed.0, Direction::Outgoing, &target, CallState::Dialing),
+                );
+                Ok(Response {
+                    call: Some(placed.0),
+                    ..Response::ok()
+                })
             }
             Command::Heard { id } => {
                 self.mark_heard(&id).await?;
