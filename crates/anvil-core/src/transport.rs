@@ -103,15 +103,29 @@ pub(crate) async fn start_transports(
 )> {
     let (tx, rx) = mpsc::channel::<InboundPacket>(1024);
 
-    let udp_socket = Arc::new(UdpSocket::bind(bind_addr).await?);
+    // TCP on the same address and port as UDP, bound before this returns:
+    // a peer calling the moment Anvil has started must find it listening.
+    // A port the system chose for UDP can be one Windows keeps from TCP (an
+    // excluded range: os error 10013): another is chosen then.
+    let any_port = bind_addr
+        .rsplit_once(':')
+        .is_some_and(|(_, port)| port == "0");
+    let mut attempts = 0;
+    let (udp_socket, tcp_bind, tcp_listener) = loop {
+        attempts += 1;
+        let udp_socket = Arc::new(UdpSocket::bind(bind_addr).await?);
+        let tcp_bind = udp_socket.local_addr()?.to_string();
+        match bind_tcp(&tcp_bind) {
+            Ok(listener) => break (udp_socket, tcp_bind, listener),
+            Err(e) if any_port && attempts < 5 => {
+                tracing::debug!(%e, bind = %tcp_bind, "TCP cannot have UDP's port; choosing another");
+            }
+            Err(e) => return Err(e),
+        }
+    };
     let tcp_pool = Arc::new(ConnectionPool::new());
     // Responses on connections we open come back to the same pump.
     tcp_pool.set_inbound_tx(tx.clone()).await;
-
-    // TCP on the same address and port as UDP, bound before this returns:
-    // a peer calling the moment Anvil has started must find it listening.
-    let tcp_bind = udp_socket.local_addr()?.to_string();
-    let tcp_listener = bind_tcp(&tcp_bind)?;
     tokio::spawn({
         let tx = tx.clone();
         async move {

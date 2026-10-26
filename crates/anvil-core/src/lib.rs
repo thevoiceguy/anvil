@@ -1009,8 +1009,18 @@ impl Anvil {
         }
     }
 
-    /// Gracefully stop the runtime. Aborts background tasks.
+    /// Gracefully stop the runtime: un-register when registered, then
+    /// abort the background tasks.
     pub async fn shutdown(self) -> Result<(), AnvilError> {
+        // Registered: the binding is taken back (Expires: 0), so calls stop
+        // forking to a phone that is gone. One left behind stayed on FCP's
+        // Devices page and rang until it lapsed (FCP's D8). A registrar
+        // that does not answer holds the quit up for two seconds at most.
+        let registered = self.refresh.lock().is_some();
+        if registered {
+            let _ =
+                tokio::time::timeout(std::time::Duration::from_secs(2), self.unregister()).await;
+        }
         self.stop_refresh();
         for watch in self.watches.iter() {
             watch.value().abort();
