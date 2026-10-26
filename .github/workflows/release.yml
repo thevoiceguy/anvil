@@ -180,7 +180,7 @@ jobs:
           grep -qx 'Name=Anvil' "$packaged"
           test -f /etc/anvil/profile/profile.json || { echo "::error::the stock package took the profile away"; exit 1; }
           sudo apt-get purge -y anvil
-          test ! -e /etc/anvil/profile || { echo "::error::the purge left the profile"; exit 1; }
+          test ! -e /etc/anvil/profile || { echo "::error::the purge left the profile"; ls -laR /etc/anvil; exit 1; }
       - name: The AppImage starts
         run: |
           chmod +x dist/Anvil-*.AppImage
