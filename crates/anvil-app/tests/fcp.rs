@@ -411,8 +411,9 @@ async fn the_phone_keeps_the_users_data() {
         tokio::time::sleep(Duration::from_millis(200)).await;
     }
 
-    // `park`: Bob parks Alice's next call with FCP's park code; Bob's leg
-    // ends, Alice waits in the park.
+    // `park`: Bob parks Alice's next call with FCP's park code, dialled as
+    // a desk phone dials it: Bob hears the orbit on that call, then both
+    // his calls end and Alice waits in the park.
     let parked = alice_phone
         .execute(Command::Call {
             target: bob.clone(),
@@ -441,7 +442,12 @@ async fn the_phone_keeps_the_users_data() {
         .await
         .unwrap();
     assert!(park.ok, "{park:?}");
-    until(&bob_phone, "Bob's leg ends once parked", |s| {
+    let told = park.call.expect("the park code dialled");
+    until(&bob_phone, "the park code answers with the orbit", |s| {
+        s.call_state(told) == Some(CallState::Connected)
+    })
+    .await;
+    until(&bob_phone, "Bob's calls end once parked and told", |s| {
         s.calls.is_empty()
     })
     .await;
