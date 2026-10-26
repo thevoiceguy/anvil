@@ -73,8 +73,12 @@ pub(crate) fn build_tls_client_config(extra_ca_pem: Option<&[u8]>) -> Result<Tls
     Ok(Arc::new(config))
 }
 
+/// rustls's process-wide provider, `ring`, installed once. siphon-rs's
+/// transport turns on rustls's `aws-lc-rs` too, and with both compiled in
+/// rustls picks neither: the first TLS client built before this (an HTTPS
+/// request at start-up, before SIP's TLS) panicked. An app calls it first.
 #[cfg(feature = "tls")]
-fn install_default_crypto_provider() {
+pub fn install_default_crypto_provider() {
     use std::sync::Once;
     static ONCE: Once = Once::new();
     ONCE.call_once(|| {
@@ -246,5 +250,17 @@ fn to_sip_transport(kind: TransportKind) -> sip_transport::TransportKind {
         TransportKind::Wss => sip_transport::TransportKind::Wss,
         TransportKind::Sctp => sip_transport::TransportKind::Sctp,
         TransportKind::TlsSctp => sip_transport::TransportKind::TlsSctp,
+    }
+}
+
+#[cfg(all(test, feature = "tls"))]
+mod crypto_tests {
+    /// Both of rustls's providers are compiled in (siphon-rs brings
+    /// aws-lc-rs), so a client built before one is installed panics: the
+    /// brand fetch at start-up did on Windows (D8).
+    #[test]
+    fn https_clients_build_once_the_provider_is_installed() {
+        super::install_default_crypto_provider();
+        reqwest::Client::builder().build().unwrap();
     }
 }

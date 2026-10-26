@@ -1173,6 +1173,7 @@ fn end_reason(reason: &EndReason) -> String {
         EndReason::Timeout => "no answer".into(),
         EndReason::MediaFailure(e) => format!("media failed: {e}"),
         EndReason::Error(e) => e.clone(),
+        EndReason::Parked(orbit) => format!("parked on {orbit}"),
     }
 }
 

@@ -56,6 +56,9 @@ pub(crate) struct CallEntry {
     /// The call's SDES-SRTP keys when its media is encrypted: ours (sent in
     /// every offer and answer, re-INVITEs included) and theirs once known.
     pub srtp: Option<CallSrtp>,
+    /// The orbit FCP parked a call on, when this call was the park code
+    /// and its answer said so (`X-FCP-Parked`): told when the call ends.
+    pub parked: Option<String>,
 }
 
 /// A call's SRTP keys.

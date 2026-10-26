@@ -23,6 +23,8 @@ mod registration;
 mod srtp;
 pub(crate) mod stun;
 pub(crate) mod transport;
+#[cfg(feature = "tls")]
+pub use transport::install_default_crypto_provider;
 pub(crate) mod uas;
 pub mod watch;
 
@@ -595,6 +597,7 @@ impl Anvil {
                 rtp_socket: Arc::clone(&rtp_socket),
                 pipeline: None,
                 srtp: ours.map(|ours| call::CallSrtp { ours, theirs: None }),
+                parked: None,
             },
         );
 
@@ -1524,6 +1527,11 @@ async fn drive_outgoing_call(
             if let Some(mut entry) = calls.get_mut(&call_id) {
                 entry.negotiated_codec = Some(codec);
                 entry.pipeline = pipeline;
+                entry.parked = resp
+                    .headers()
+                    .get("X-FCP-Parked")
+                    .map(|orbit| orbit.trim().to_string())
+                    .filter(|orbit| !orbit.is_empty());
             }
 
             let _ = events

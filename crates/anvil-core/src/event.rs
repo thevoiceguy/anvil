@@ -30,7 +30,7 @@ pub enum PushState {
 }
 
 /// Reason a call ended.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum EndReason {
     LocalHangup,
     RemoteHangup,
@@ -38,6 +38,9 @@ pub enum EndReason {
     Timeout,
     MediaFailure(String),
     Error(String),
+    /// The park code's call, ended by FCP once it parked the other call
+    /// on this orbit.
+    Parked(String),
 }
 
 /// Periodic media statistics for an active call.

@@ -89,6 +89,8 @@ pub enum AnvilEndReason {
     /// Free-form error message lives in `AnvilEvent::reason`.
     MediaFailure = 4,
     Error = 5,
+    /// The orbit lives in `AnvilEvent::reason`.
+    Parked = 6,
 }
 
 /// `MediaStats` payload. All numeric, no string fields.
@@ -257,6 +259,10 @@ pub(crate) fn dispatch(slot: CallbackSlot, event: &Event) {
                     ev.rejected_code = *code;
                 }
                 EndReason::Timeout => ev.end_reason = AnvilEndReason::Timeout,
+                EndReason::Parked(orbit) => {
+                    ev.end_reason = AnvilEndReason::Parked;
+                    ev.reason = push_cstr(&mut keep_alive, orbit);
+                }
                 EndReason::MediaFailure(msg) => {
                     ev.end_reason = AnvilEndReason::MediaFailure;
                     ev.reason = push_cstr(&mut keep_alive, msg);

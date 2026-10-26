@@ -237,6 +237,7 @@ impl UasRequestHandler for AnvilUasHandler {
                 rtp_socket,
                 pipeline: None,
                 srtp: srtp_keys,
+                parked: None,
             },
         );
 
@@ -283,14 +284,13 @@ impl UasRequestHandler for AnvilUasHandler {
         handle.send_final(resp).await;
 
         if let Some(call) = call_id {
-            self.calls.remove(&call);
-            let _ = self
-                .events
-                .send(Event::CallEnded {
-                    call,
-                    reason: EndReason::RemoteHangup,
-                })
-                .await;
+            // The park code's call, ended once the orbit was said: where
+            // the call went, not that the other side hung up.
+            let reason = match self.calls.remove(&call).and_then(|(_, e)| e.parked.clone()) {
+                Some(orbit) => EndReason::Parked(orbit),
+                None => EndReason::RemoteHangup,
+            };
+            let _ = self.events.send(Event::CallEnded { call, reason }).await;
         } else {
             tracing::debug!(call_id = %dialog.id().call_id(), "BYE for unknown call");
         }
