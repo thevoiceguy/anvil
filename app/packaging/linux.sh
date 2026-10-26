@@ -40,6 +40,19 @@ Description: Anvil, the softphone for FCP
  Calls, transfer, voicemail, presence and the directory from an FCP account,
  on the desktop.
 CONTROL
+# A branded package's profile (brand.py) is conffiles in /etc/anvil/profile:
+# a purge removes the files, even under this package, but not the folders,
+# which no package owns once this one has replaced it. Only empty ones go,
+# so a profile put there by hand stays.
+cat > "$root/DEBIAN/postrm" <<'POSTRM'
+#!/bin/sh
+set -e
+if [ "$1" = purge ]; then
+  rmdir /etc/anvil/profile 2>/dev/null || true
+  rmdir /etc/anvil 2>/dev/null || true
+fi
+POSTRM
+chmod 755 "$root/DEBIAN/postrm"
 dpkg-deb --root-owner-group --build "$root" "$out/anvil_${label}_amd64.deb"
 
 # --- AppImage --------------------------------------------------------------
