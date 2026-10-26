@@ -950,13 +950,25 @@ impl Anvil {
         self.audio.processing()
     }
 
+    /// Set the microphone's and the speaker's volume, in the call that is
+    /// up too.
+    pub fn set_audio_volume(&self, volume: audio::Volume) -> Result<(), AnvilError> {
+        self.audio.set_volume(volume)
+    }
+
+    /// The volumes; `None` when the host sets none of its own.
+    pub fn audio_volume(&self) -> Option<audio::Volume> {
+        self.audio.volume()
+    }
+
     /// The microphones and speakers the audio host offers.
     pub fn audio_devices(&self) -> Vec<audio::DeviceInfo> {
         self.audio.devices()
     }
 
     /// Use these devices (by id; `None` for the system's default) for the
-    /// calls set up from now on.
+    /// calls set up from now on and, on a host whose streams follow the
+    /// choice, the call that is up.
     pub fn choose_audio_devices(
         &self,
         input: Option<&str>,

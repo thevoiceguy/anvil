@@ -70,6 +70,8 @@ PhoneSnapshot withData(PhoneSnapshot s) => s.copyWith(
   ringtone: 'anvil',
   echoCancellation: true,
   noiseSuppression: true,
+  microphoneVolume: 100,
+  speakerVolume: 100,
 );
 
 Future<FakePhone> signedIn(
@@ -181,6 +183,43 @@ void main() {
       findsOneWidget,
       reason: 'parked: back to the keypad',
     );
+  });
+
+  testWidgets('a call\'s Audio sheet sets the volumes while it is up', (
+    tester,
+  ) async {
+    final phone = await signedIn(tester);
+    await tester.enterText(find.byKey(const Key('target')), '1002');
+    await tapKey(tester, 'call');
+    phone.set(
+      phone.state.copyWith(
+        calls: [phone.callOf(1).copyWith(state: CallState.connected)],
+      ),
+      'call',
+      call: 1,
+    );
+    await tester.pumpAndSettle();
+
+    await tapKey(tester, 'audio');
+    final sheet = find.byKey(const Key('audioSheet'));
+    expect(sheet, findsOneWidget);
+    for (final key in ['microphone', 'speaker', 'microphoneVolume']) {
+      expect(
+        find.descendant(of: sheet, matching: find.byKey(Key(key))),
+        findsOneWidget,
+      );
+    }
+    final speaker = find.descendant(
+      of: find.byKey(const Key('speakerVolume')),
+      matching: find.byType(Slider),
+    );
+    await tester.drag(speaker, const Offset(200, 0));
+    await tester.pumpAndSettle();
+    final sent = phone.log.lastWhere((l) => l.startsWith('speaker volume '));
+    final percent = int.parse(sent.split(' ').last);
+    expect(percent, greaterThan(100), reason: sent);
+    expect(phone.state.speakerVolume, percent);
+    expect(find.text('$percent%'), findsOneWidget);
   });
 
   testWidgets('the timer counts from when the call connected', (tester) async {
@@ -422,6 +461,18 @@ void main() {
       await tester.tap(find.text('USB Headset').last);
       await tester.pumpAndSettle();
       expect(phone.log, contains('audio in usb'));
+
+      final microphone = find.descendant(
+        of: find.byKey(const Key('microphoneVolume')),
+        matching: find.byType(Slider),
+      );
+      await tester.ensureVisible(microphone);
+      await tester.drag(microphone, const Offset(-200, 0));
+      await tester.pumpAndSettle();
+      final sent = phone.log.lastWhere(
+        (l) => l.startsWith('microphone volume '),
+      );
+      expect(int.parse(sent.split(' ').last), lessThan(100), reason: sent);
 
       await tapKey(tester, 'ringDevice');
       await tester.tap(find.text('Speakers').last);

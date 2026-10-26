@@ -388,7 +388,16 @@ class StringsEn extends Strings {
   String get systemDefault => 'System default';
 
   @override
-  String get audioNote => 'Applies from the next call';
+  String get audioNote => 'A call that is up moves to the devices chosen';
+
+  @override
+  String get microphoneVolume => 'Microphone volume';
+
+  @override
+  String get speakerVolume => 'Speaker volume';
+
+  @override
+  String get audioButton => 'Audio';
 
   @override
   String get ringOn => 'Ring on';

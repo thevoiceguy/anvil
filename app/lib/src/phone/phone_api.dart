@@ -343,6 +343,8 @@ class PhoneSnapshot {
     this.ringtone = '',
     this.echoCancellation,
     this.noiseSuppression,
+    this.microphoneVolume,
+    this.speakerVolume,
     this.playing,
   });
 
@@ -386,6 +388,11 @@ class PhoneSnapshot {
   /// phone's audio does none of its own.
   final bool? echoCancellation;
   final bool? noiseSuppression;
+
+  /// The microphone's and the speaker's volume in percent (100 the sound
+  /// as it is, up to 200); null when the system sets them.
+  final int? microphoneVolume;
+  final int? speakerVolume;
 
   /// The voicemail message playing, by id.
   final String? playing;
@@ -437,6 +444,8 @@ class PhoneSnapshot {
     String? ringtone,
     bool? echoCancellation,
     bool? noiseSuppression,
+    int? microphoneVolume,
+    int? speakerVolume,
     String? playing,
     bool clearPlaying = false,
   }) => PhoneSnapshot(
@@ -462,6 +471,8 @@ class PhoneSnapshot {
     ringtone: ringtone ?? this.ringtone,
     echoCancellation: echoCancellation ?? this.echoCancellation,
     noiseSuppression: noiseSuppression ?? this.noiseSuppression,
+    microphoneVolume: microphoneVolume ?? this.microphoneVolume,
+    speakerVolume: speakerVolume ?? this.speakerVolume,
     playing: clearPlaying ? null : playing ?? this.playing,
   );
 
@@ -675,6 +686,10 @@ abstract class PhoneApi {
     bool? echoCancellation,
     bool? noiseSuppression,
   });
+
+  /// Set the microphone's or the speaker's volume in percent (null leaves
+  /// it as it is), in the call that is up too.
+  Future<void> setAudioVolume({int? microphone, int? speaker});
   Future<void> refresh();
 
   /// The app's log file, once it is written: what a user sends when a call

@@ -438,6 +438,16 @@ class FakePhone implements PhoneApi {
   }
 
   @override
+  Future<void> setAudioVolume({int? microphone, int? speaker}) async {
+    if (microphone != null) log.add('microphone volume $microphone');
+    if (speaker != null) log.add('speaker volume $speaker');
+    set(
+      state.copyWith(microphoneVolume: microphone, speakerVolume: speaker),
+      'audio',
+    );
+  }
+
+  @override
   Future<void> refresh() async => log.add('refresh');
 }
 

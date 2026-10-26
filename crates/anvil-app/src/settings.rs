@@ -28,6 +28,12 @@ pub(crate) struct LocalSettings {
     /// Noise suppression; on unless turned off.
     #[serde(default = "on", skip_serializing_if = "is_on")]
     pub noise_suppression: bool,
+    /// The microphone's volume in percent; 100 unless set.
+    #[serde(default = "hundred", skip_serializing_if = "is_hundred")]
+    pub microphone_volume: u16,
+    /// The speaker's volume in percent; 100 unless set.
+    #[serde(default = "hundred", skip_serializing_if = "is_hundred")]
+    pub speaker_volume: u16,
     /// Recent calls cleared, by account: those that started at or before
     /// this time (RFC 3339) are not shown. FCP keeps their records.
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
@@ -47,6 +53,8 @@ impl Default for LocalSettings {
             ringtone: None,
             echo_cancellation: true,
             noise_suppression: true,
+            microphone_volume: 100,
+            speaker_volume: 100,
             recents_cleared: BTreeMap::new(),
             hidden_recents: BTreeSet::new(),
         }
@@ -59,6 +67,14 @@ fn on() -> bool {
 
 fn is_on(on: &bool) -> bool {
     *on
+}
+
+fn hundred() -> u16 {
+    100
+}
+
+fn is_hundred(v: &u16) -> bool {
+    *v == 100
 }
 
 impl LocalSettings {
@@ -143,6 +159,8 @@ mod tests {
             ringtone: Some("classic".into()),
             echo_cancellation: false,
             noise_suppression: true,
+            microphone_volume: 80,
+            speaker_volume: 100,
             recents_cleared: [("sip:bob@d".to_string(), "2026-10-24T10:00:00Z".to_string())].into(),
             hidden_recents: ["cdr-1".to_string()].into(),
         };

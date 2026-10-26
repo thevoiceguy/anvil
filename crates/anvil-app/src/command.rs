@@ -85,7 +85,7 @@ pub enum Command {
     /// Remove one recent call, by record id, from those shown here.
     HideRecent { id: String },
     /// Use this microphone or speaker (by id; `None` for the system's
-    /// default) for the calls set up from now on, or ring on this speaker.
+    /// default), the call that is up moving to it, or ring on this speaker.
     Audio {
         kind: AudioKind,
         #[serde(default)]
@@ -98,6 +98,15 @@ pub enum Command {
         echo_cancellation: Option<bool>,
         #[serde(default)]
         noise_suppression: Option<bool>,
+    },
+    /// Set the microphone's or the speaker's volume, in percent (0 to 200,
+    /// 100 the sound as it is), in the call that is up too; what is not
+    /// named stays as it is.
+    Volume {
+        #[serde(default)]
+        microphone: Option<u16>,
+        #[serde(default)]
+        speaker: Option<u16>,
     },
     /// Ring with this ringtone (by id; `None` for the brand's, else
     /// Anvil's), heard once now when no call is up.
@@ -302,6 +311,23 @@ impl Command {
                     device: (!device.eq_ignore_ascii_case("default")).then_some(device),
                 }
             }
+            "volume" => {
+                let percent = words
+                    .get(2)
+                    .and_then(|w| w.trim_end_matches('%').parse::<u16>().ok())
+                    .ok_or("volume needs mic or speaker, and a percent")?;
+                match words.get(1).map(|w| w.to_ascii_lowercase()).as_deref() {
+                    Some("mic") | Some("microphone") | Some("in") => Command::Volume {
+                        microphone: Some(percent),
+                        speaker: None,
+                    },
+                    Some("speaker") | Some("out") => Command::Volume {
+                        microphone: None,
+                        speaker: Some(percent),
+                    },
+                    _ => return Err("volume needs mic or speaker, and a percent".into()),
+                }
+            }
             "ringtone" => {
                 let id = rest(&words, 1).ok_or("ringtone needs a ringtone, or default")?;
                 Command::Ringtone {
@@ -394,6 +420,21 @@ mod tests {
             Command::parse_line("ringtone default").unwrap(),
             Command::Ringtone { id: None }
         );
+        assert_eq!(
+            Command::parse_line("volume mic 80").unwrap(),
+            Command::Volume {
+                microphone: Some(80),
+                speaker: None
+            }
+        );
+        assert_eq!(
+            Command::parse_line("volume speaker 150%").unwrap(),
+            Command::Volume {
+                microphone: None,
+                speaker: Some(150)
+            }
+        );
+        assert!(Command::parse_line("volume speaker loud").is_err());
         assert_eq!(
             Command::parse_line("audio echo off").unwrap(),
             Command::Processing {

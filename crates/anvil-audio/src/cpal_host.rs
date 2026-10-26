@@ -29,8 +29,8 @@ use tokio::sync::mpsc;
 #[cfg(feature = "apm")]
 use anvil_core::audio::Processing;
 use anvil_core::audio::{
-    AudioFormat, AudioFrame, AudioHost, AudioProcessor, AudioSink, AudioSource, DeviceInfo,
-    NullProcessor,
+    apply_gain, AudioFormat, AudioFrame, AudioHost, AudioProcessor, AudioSink, AudioSource,
+    DeviceInfo, NullProcessor, Volume,
 };
 use anvil_core::error::AnvilError;
 
@@ -43,8 +43,11 @@ pub struct CpalHost {
     /// Per-call capture-side processor factory. Defaults to a no-op
     /// passthrough; use `with_capture_processor` to attach AGC etc.
     capture_processor: ProcessorFactory,
-    /// The devices chosen by name; `None` is the system's default.
-    chosen: Mutex<(Option<String>, Option<String>)>,
+    /// The devices chosen by name; `None` is the system's default. Read
+    /// by the streams open too: a call moves when another is chosen.
+    chosen: Chosen,
+    /// The microphone's and the speaker's volume, read by every stream.
+    volume: Volumes,
     /// The device chosen for ringing; `None` is the system's default.
     ring: Mutex<Option<String>>,
     /// What is done to the microphone, read by each call's canceller.
@@ -55,6 +58,44 @@ pub struct CpalHost {
     reference: std::sync::Arc<crate::echo::Reference>,
     /// The speaker calls share, while it is open.
     output: Mutex<Option<Arc<CallOutput>>>,
+}
+
+/// The microphone and the speaker chosen, shared with the streams.
+type Chosen = Arc<Mutex<(Option<String>, Option<String>)>>;
+
+/// The volumes, shared with the streams.
+type Volumes = Arc<VolumeState>;
+
+#[derive(Debug)]
+struct VolumeState {
+    microphone: std::sync::atomic::AtomicU16,
+    speaker: std::sync::atomic::AtomicU16,
+}
+
+impl Default for VolumeState {
+    fn default() -> Self {
+        let v = Volume::default();
+        Self {
+            microphone: v.microphone.into(),
+            speaker: v.speaker.into(),
+        }
+    }
+}
+
+impl VolumeState {
+    fn get(&self) -> Volume {
+        use std::sync::atomic::Ordering::Relaxed;
+        Volume {
+            microphone: self.microphone.load(Relaxed),
+            speaker: self.speaker.load(Relaxed),
+        }
+    }
+
+    fn set(&self, volume: Volume) {
+        use std::sync::atomic::Ordering::Relaxed;
+        self.microphone.store(volume.microphone, Relaxed);
+        self.speaker.store(volume.speaker, Relaxed);
+    }
 }
 
 /// What a stream is for, which decides its default device.
@@ -73,7 +114,8 @@ impl CpalHost {
     pub fn new() -> Result<Self, AnvilError> {
         Ok(Self {
             capture_processor: Box::new(|| Box::new(NullProcessor)),
-            chosen: Mutex::new((None, None)),
+            chosen: Chosen::default(),
+            volume: Volumes::default(),
             ring: Mutex::new(None),
             #[cfg(feature = "apm")]
             processing: std::sync::Arc::new(Mutex::new(Processing::default())),
@@ -103,29 +145,28 @@ impl AudioHost for CpalHost {
             std::sync::Arc::clone(&self.processing),
             processor,
         ));
-        let device = self.chosen.lock().0.clone();
-        CpalCapture::open(cfg, processor, device).map(|h| Box::new(h) as Box<dyn AudioSource>)
+        CpalCapture::open(
+            cfg,
+            processor,
+            Arc::clone(&self.chosen),
+            Arc::clone(&self.volume),
+        )
+        .map(|h| Box::new(h) as Box<dyn AudioSource>)
     }
 
     fn make_playback(&self, cfg: AudioFormat) -> Result<Box<dyn AudioSink>, AnvilError> {
-        let device = self.chosen.lock().1.clone();
         #[cfg(feature = "apm")]
         let tap = Some(self.reference.tap(cfg.sample_rate));
         #[cfg(not(feature = "apm"))]
         let tap = None;
-        // A voice in the open speaker, when it is open on the device
-        // wanted; else a new speaker (the old one closes with its calls).
+        // A voice in the open speaker; else a new speaker.
         let mut slot = self.output.lock();
         if let Some(output) = slot.as_ref() {
-            if output.wanted == device {
-                if let Some(voice) = output.join() {
-                    return Ok(Box::new(CallVoice::new(cfg, output, voice, tap)));
-                }
-            } else {
-                output.retire();
+            if let Some(voice) = output.join() {
+                return Ok(Box::new(CallVoice::new(cfg, output, voice, tap)));
             }
         }
-        let output = CallOutput::open(device)?;
+        let output = CallOutput::open(Arc::clone(&self.chosen), Arc::clone(&self.volume))?;
         let voice = output.join().expect("a new speaker takes a voice");
         let sink = CallVoice::new(cfg, &output, voice, tap);
         *slot = Some(output);
@@ -162,6 +203,21 @@ impl AudioHost for CpalHost {
         self.ring.lock().clone()
     }
 
+    fn set_volume(&self, volume: Volume) -> Result<(), AnvilError> {
+        if volume.microphone > Volume::MAX || volume.speaker > Volume::MAX {
+            return Err(AnvilError::AudioDevice(format!(
+                "a volume is 0 to {} percent",
+                Volume::MAX
+            )));
+        }
+        self.volume.set(volume);
+        Ok(())
+    }
+
+    fn volume(&self) -> Option<Volume> {
+        Some(self.volume.get())
+    }
+
     fn choose_devices(&self, input: Option<&str>, output: Option<&str>) -> Result<(), AnvilError> {
         let devices = self.devices();
         let known =
@@ -174,6 +230,7 @@ impl AudioHost for CpalHost {
                 )));
             }
         }
+        // The streams open see it within a moment, and move.
         *self.chosen.lock() = (input.map(String::from), output.map(String::from));
         Ok(())
     }
@@ -327,13 +384,16 @@ struct CpalCapture {
     /// Capture-side processor (AGC etc.). Applied on the async side so
     /// the cpal callback stays lock-free.
     processor: Box<dyn AudioProcessor>,
+    /// The microphone's volume, applied after the processor.
+    volume: Volumes,
 }
 
 impl CpalCapture {
     fn open(
         cfg: AudioFormat,
         processor: Box<dyn AudioProcessor>,
-        device: Option<String>,
+        chosen: Chosen,
+        volume: Volumes,
     ) -> Result<Self, AnvilError> {
         // 8 frames of headroom; beyond that we drop to avoid unbounded memory
         // growth if the RTP send task stalls.
@@ -341,13 +401,14 @@ impl CpalCapture {
 
         let worker = thread::Builder::new()
             .name("anvil-capture".into())
-            .spawn(move || run_capture(cfg, frame_tx, device))
+            .spawn(move || run_capture(cfg, frame_tx, chosen))
             .map_err(|e| AnvilError::AudioDevice(format!("spawn capture thread: {e}")))?;
 
         Ok(Self {
             frame_rx,
             _worker: worker,
             processor,
+            volume,
         })
     }
 }
@@ -357,6 +418,7 @@ impl AudioSource for CpalCapture {
     async fn next_frame(&mut self) -> Option<AudioFrame> {
         let mut frame = self.frame_rx.recv().await?;
         self.processor.process_capture(&mut frame);
+        apply_gain(&mut frame.samples, self.volume.get().microphone);
         Some(frame)
     }
 }
@@ -471,11 +533,12 @@ fn open_capture(
 }
 
 /// Capture for a call until its source is dropped: on the device chosen or
-/// the default, opened again on another when it fails (unplugged) or, on
-/// the default, when the default changes.
-fn run_capture(cfg: AudioFormat, frame_tx: mpsc::Sender<AudioFrame>, wanted: Option<String>) {
+/// the default, opened again on another when it fails (unplugged), when
+/// another is chosen, or, on the default, when the default changes.
+fn run_capture(cfg: AudioFormat, frame_tx: mpsc::Sender<AudioFrame>, chosen: Chosen) {
     let host = cpal::default_host();
     while !frame_tx.is_closed() {
+        let wanted = chosen.lock().0.clone();
         let failed = Arc::new(std::sync::atomic::AtomicBool::new(false));
         let opened = pick(&host, true, wanted.as_deref(), Role::Call)
             .ok_or_else(|| "no input device".to_string())
@@ -507,6 +570,10 @@ fn run_capture(cfg: AudioFormat, frame_tx: mpsc::Sender<AudioFrame>, wanted: Opt
             }
             if failed.load(std::sync::atomic::Ordering::Relaxed) {
                 tracing::warn!(device = %name, "the capture device failed; opening another");
+                break;
+            }
+            if chosen.lock().0 != wanted {
+                tracing::info!(from = %name, "another microphone chosen");
                 break;
             }
             if following && checked.elapsed() >= FOLLOW_EVERY {
@@ -768,14 +835,10 @@ type Voice = Mutex<VecDeque<i16>>;
 /// The speaker calls share: one stream on one device, held by its own
 /// thread, mixing every voice in it.
 struct CallOutput {
-    /// The device chosen when it opened; `None` is the default.
-    wanted: Option<String>,
     /// The voices playing, and whether the speaker has closed.
     voices: Arc<Mutex<Voices>>,
     /// The device's rate, 0 until a device is open.
     device_rate: Arc<std::sync::atomic::AtomicU32>,
-    /// No more voices: another device is wanted. It closes with its last.
-    retired: Arc<std::sync::atomic::AtomicBool>,
 }
 
 #[derive(Default)]
@@ -792,28 +855,22 @@ impl Voices {
 }
 
 impl CallOutput {
-    fn open(wanted: Option<String>) -> Result<Arc<Self>, AnvilError> {
+    fn open(chosen: Chosen, volume: Volumes) -> Result<Arc<Self>, AnvilError> {
         let output = Arc::new(Self {
-            wanted: wanted.clone(),
             voices: Arc::new(Mutex::new(Voices::default())),
             device_rate: Arc::new(std::sync::atomic::AtomicU32::new(0)),
-            retired: Arc::new(std::sync::atomic::AtomicBool::new(false)),
         });
         let voices = Arc::clone(&output.voices);
         let device_rate = Arc::clone(&output.device_rate);
-        let retired = Arc::clone(&output.retired);
         thread::Builder::new()
             .name("anvil-speaker".into())
-            .spawn(move || run_output(wanted, voices, device_rate, retired))
+            .spawn(move || run_output(chosen, volume, voices, device_rate))
             .map_err(|e| AnvilError::AudioDevice(format!("spawn playback thread: {e}")))?;
         Ok(output)
     }
 
-    /// A new voice, unless the speaker has closed or is closing.
+    /// A new voice, unless the speaker has closed.
     fn join(&self) -> Option<Arc<Voice>> {
-        if self.retired.load(std::sync::atomic::Ordering::Relaxed) {
-            return None;
-        }
         let mut voices = self.voices.lock();
         if voices.closed {
             return None;
@@ -821,11 +878,6 @@ impl CallOutput {
         let voice = Arc::new(Mutex::new(VecDeque::new()));
         voices.playing.push(Arc::downgrade(&voice));
         Some(voice)
-    }
-
-    fn retire(&self) {
-        self.retired
-            .store(true, std::sync::atomic::Ordering::Relaxed);
     }
 }
 
@@ -895,8 +947,9 @@ struct Mixer {
 }
 
 impl Mixer {
-    /// The next `frames` samples of every voice in `voices`, summed.
-    fn mix(&mut self, voices: &Mutex<Voices>, frames: usize) -> &[i32] {
+    /// The next `frames` samples of every voice in `voices`, summed and
+    /// made `percent` as loud.
+    fn mix(&mut self, voices: &Mutex<Voices>, frames: usize, percent: u16) -> &[i32] {
         self.playing.clear();
         self.playing.extend(
             voices
@@ -916,6 +969,11 @@ impl Mixer {
         }
         // A voice let go here, not in the next callback's lock.
         self.playing.clear();
+        if percent != 100 {
+            for sum in &mut self.mixed {
+                *sum = *sum * i32::from(percent) / 100;
+            }
+        }
         &self.mixed
     }
 }
@@ -929,6 +987,7 @@ fn clip(sum: i32) -> i16 {
 fn open_output(
     device: &cpal::Device,
     voices: &Arc<Mutex<Voices>>,
+    volume: &Volumes,
     failed: &Arc<std::sync::atomic::AtomicBool>,
 ) -> Result<(cpal::Stream, u32, u16), String> {
     let default_config = device
@@ -944,12 +1003,13 @@ fn open_output(
     let stream = match default_config.sample_format() {
         SampleFormat::F32 => {
             let voices = Arc::clone(voices);
+            let volume = Arc::clone(volume);
             let mut mixer = Mixer::default();
             device.build_output_stream(
                 &stream_config,
                 move |data: &mut [f32], _: &cpal::OutputCallbackInfo| {
                     let frames = data.len() / channels as usize;
-                    let mixed = mixer.mix(&voices, frames);
+                    let mixed = mixer.mix(&voices, frames, volume.get().speaker);
                     for (frame, sum) in data.chunks_mut(channels as usize).zip(mixed) {
                         frame.fill(f32::from(clip(*sum)) / f32::from(i16::MAX));
                     }
@@ -960,12 +1020,13 @@ fn open_output(
         }
         SampleFormat::I16 => {
             let voices = Arc::clone(voices);
+            let volume = Arc::clone(volume);
             let mut mixer = Mixer::default();
             device.build_output_stream(
                 &stream_config,
                 move |data: &mut [i16], _: &cpal::OutputCallbackInfo| {
                     let frames = data.len() / channels as usize;
-                    let mixed = mixer.mix(&voices, frames);
+                    let mixed = mixer.mix(&voices, frames, volume.get().speaker);
                     for (frame, sum) in data.chunks_mut(channels as usize).zip(mixed) {
                         frame.fill(clip(*sum));
                     }
@@ -976,12 +1037,13 @@ fn open_output(
         }
         SampleFormat::U16 => {
             let voices = Arc::clone(voices);
+            let volume = Arc::clone(volume);
             let mut mixer = Mixer::default();
             device.build_output_stream(
                 &stream_config,
                 move |data: &mut [u16], _: &cpal::OutputCallbackInfo| {
                     let frames = data.len() / channels as usize;
-                    let mixed = mixer.mix(&voices, frames);
+                    let mixed = mixer.mix(&voices, frames, volume.get().speaker);
                     for (frame, sum) in data.chunks_mut(channels as usize).zip(mixed) {
                         frame.fill((i32::from(clip(*sum)) + 32768) as u16);
                     }
@@ -1000,13 +1062,13 @@ fn open_output(
 }
 
 /// Hold the calls' speaker open: on the device chosen or the default,
-/// opened again on another when it fails or the default changes, until
-/// it has had no voice for [`OUTPUT_LINGER`] (at once when retired).
+/// opened again on another when it fails, when another is chosen, or when
+/// the default changes, until it has had no voice for [`OUTPUT_LINGER`].
 fn run_output(
-    wanted: Option<String>,
+    chosen: Chosen,
+    volume: Volumes,
     voices: Arc<Mutex<Voices>>,
     device_rate: Arc<std::sync::atomic::AtomicU32>,
-    retired: Arc<std::sync::atomic::AtomicBool>,
 ) {
     use std::sync::atomic::Ordering;
     let host = cpal::default_host();
@@ -1020,19 +1082,20 @@ fn run_output(
             return false;
         }
         let since = *idle_since.get_or_insert_with(std::time::Instant::now);
-        if retired.load(Ordering::Relaxed) || since.elapsed() >= OUTPUT_LINGER {
+        if since.elapsed() >= OUTPUT_LINGER {
             voices.closed = true;
             return true;
         }
         false
     };
     loop {
+        let wanted = chosen.lock().1.clone();
         let failed = Arc::new(std::sync::atomic::AtomicBool::new(false));
         let opened = pick(&host, false, wanted.as_deref(), Role::Call)
             .ok_or_else(|| "no output device".to_string())
             .and_then(|(device, following)| {
                 let name = device.name().unwrap_or_default();
-                open_output(&device, &voices, &failed).map(|s| (s, name, following))
+                open_output(&device, &voices, &volume, &failed).map(|s| (s, name, following))
             });
         let ((stream, rate, channels), name, following) = match opened {
             Ok(opened) => opened,
@@ -1054,6 +1117,10 @@ fn run_output(
             thread::sleep(std::time::Duration::from_millis(100));
             if failed.load(Ordering::Relaxed) {
                 tracing::warn!(device = %name, "the playback device failed; opening another");
+                break true;
+            }
+            if chosen.lock().1 != wanted {
+                tracing::info!(from = %name, "another speaker chosen");
                 break true;
             }
             if following && checked.elapsed() >= FOLLOW_EVERY {
@@ -1126,14 +1193,12 @@ fn push_frames(
 #[cfg(test)]
 mod output_tests {
     use super::*;
-    use std::sync::atomic::{AtomicBool, AtomicU32};
+    use std::sync::atomic::AtomicU32;
 
     fn output() -> CallOutput {
         CallOutput {
-            wanted: None,
             voices: Arc::new(Mutex::new(Voices::default())),
             device_rate: Arc::new(AtomicU32::new(48_000)),
-            retired: Arc::new(AtomicBool::new(false)),
         }
     }
 
@@ -1145,10 +1210,49 @@ mod output_tests {
         a.lock().extend([100, 200, 300]);
         b.lock().extend([1, 2]);
         let mut mixer = Mixer::default();
-        assert_eq!(mixer.mix(&output.voices, 4), &[101, 202, 300, 0]);
+        assert_eq!(mixer.mix(&output.voices, 4, 100), &[101, 202, 300, 0]);
         assert!(a.lock().is_empty() && b.lock().is_empty());
         assert_eq!(clip(40_000), i16::MAX);
         assert_eq!(clip(-40_000), i16::MIN);
+    }
+
+    #[test]
+    fn the_speakers_volume_scales_the_mix() {
+        let output = output();
+        let a = output.join().unwrap();
+        a.lock().extend([100, -200, 1000]);
+        assert_eq!(
+            Mixer::default().mix(&output.voices, 3, 50),
+            &[50, -100, 500]
+        );
+        a.lock().extend([100]);
+        assert_eq!(Mixer::default().mix(&output.voices, 1, 200), &[200]);
+    }
+
+    #[test]
+    fn the_microphones_volume_scales_and_clips() {
+        let mut samples = [1000i16, -1000, 30_000];
+        apply_gain(&mut samples, 150);
+        assert_eq!(samples, [1500, -1500, i16::MAX]);
+        apply_gain(&mut samples, 0);
+        assert_eq!(samples, [0, 0, 0]);
+    }
+
+    #[test]
+    fn a_volume_past_the_most_is_refused() {
+        let host = CpalHost::new().unwrap();
+        assert!(host
+            .set_volume(Volume {
+                microphone: 201,
+                speaker: 100
+            })
+            .is_err());
+        let v = Volume {
+            microphone: 80,
+            speaker: 150,
+        };
+        host.set_volume(v).unwrap();
+        assert_eq!(host.volume(), Some(v));
     }
 
     #[test]
@@ -1158,17 +1262,14 @@ mod output_tests {
         a.lock().extend([5; 4]);
         drop(a);
         assert_eq!(output.voices.lock().live(), 0);
-        assert_eq!(Mixer::default().mix(&output.voices, 2), &[0, 0]);
+        assert_eq!(Mixer::default().mix(&output.voices, 2, 100), &[0, 0]);
     }
 
     #[test]
-    fn a_closed_or_retired_speaker_takes_no_voice() {
+    fn a_closed_speaker_takes_no_voice() {
         let closed = output();
         closed.voices.lock().closed = true;
         assert!(closed.join().is_none());
-        let retired = output();
-        retired.retire();
-        assert!(retired.join().is_none());
     }
 
     #[tokio::test]

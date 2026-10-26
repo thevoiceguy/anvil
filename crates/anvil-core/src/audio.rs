@@ -42,8 +42,9 @@ pub trait AudioHost: Send + Sync {
     /// Enumerate devices. Returns an empty vec on hosts that don't expose enumeration.
     fn devices(&self) -> Vec<DeviceInfo>;
     /// Use these devices (by [`DeviceInfo::id`]; `None` is the system's
-    /// default) for the streams opened from now on. A host with no choice
-    /// of device refuses.
+    /// default) for the streams opened from now on, and those open when the
+    /// host's streams follow the choice. A host with no choice of device
+    /// refuses.
     fn choose_devices(&self, input: Option<&str>, output: Option<&str>) -> Result<(), AnvilError> {
         let _ = (input, output);
         Err(AnvilError::AudioDevice(
@@ -86,6 +87,52 @@ pub trait AudioHost: Send + Sync {
     /// its own.
     fn processing(&self) -> Option<Processing> {
         None
+    }
+    /// Set the microphone's and the speaker's volume, from now on and in
+    /// the calls already up. A host whose platform sets them (a phone's own
+    /// volume keys) refuses.
+    fn set_volume(&self, volume: Volume) -> Result<(), AnvilError> {
+        let _ = volume;
+        Err(AnvilError::AudioDevice(
+            "this audio host sets no volume of its own".into(),
+        ))
+    }
+    /// The volumes; `None` when the host sets none of its own.
+    fn volume(&self) -> Option<Volume> {
+        None
+    }
+}
+
+/// How loud the microphone is sent and the speaker plays, in percent of
+/// the sound as it is: 100 leaves it, 0 is silence, up to 200 doubles it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Volume {
+    pub microphone: u16,
+    pub speaker: u16,
+}
+
+impl Volume {
+    /// The most a volume may be: twice the sound as it is.
+    pub const MAX: u16 = 200;
+}
+
+impl Default for Volume {
+    fn default() -> Self {
+        Self {
+            microphone: 100,
+            speaker: 100,
+        }
+    }
+}
+
+/// `samples` made `percent` as loud, clipped.
+pub fn apply_gain(samples: &mut [i16], percent: u16) {
+    if percent == 100 {
+        return;
+    }
+    for s in samples {
+        *s = (i32::from(*s) * i32::from(percent) / 100)
+            .clamp(i32::from(i16::MIN), i32::from(i16::MAX)) as i16;
     }
 }
 

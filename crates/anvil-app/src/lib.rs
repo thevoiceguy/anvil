@@ -40,8 +40,9 @@ pub use anvil_fcp::{CallingSettings, CallingUpdate};
 pub use clip::{decode_wav, Clip};
 pub use command::{AudioKind, Command, Response};
 pub use state::{
-    AudioDevice, AudioDevices, AudioProcessing, Brand, CallState, CallView, Change, Direction,
-    MessageWaiting, Person, Push, Quality, Recent, Registration, Ringtone, State, Voicemail,
+    AudioDevice, AudioDevices, AudioProcessing, AudioVolume, Brand, CallState, CallView, Change,
+    Direction, MessageWaiting, Person, Push, Quality, Recent, Registration, Ringtone, State,
+    Voicemail,
 };
 
 use settings::LocalSettings;
@@ -138,6 +139,15 @@ impl Phone {
         if anvil.audio_processing().is_some_and(|p| p != processing) {
             if let Err(e) = anvil.set_audio_processing(processing) {
                 tracing::warn!(%e, "the microphone's cleaning was not set");
+            }
+        }
+        let volume = anvil_core::audio::Volume {
+            microphone: local.microphone_volume,
+            speaker: local.speaker_volume,
+        };
+        if anvil.audio_volume().is_some_and(|v| v != volume) {
+            if let Err(e) = anvil.set_audio_volume(volume) {
+                tracing::warn!(%e, "the volumes were not set");
             }
         }
         if local.audio_input.is_some() || local.audio_output.is_some() {
@@ -475,6 +485,33 @@ impl Phone {
                 self.read_audio_devices().await;
                 Ok(Response::ok())
             }
+            Command::Volume {
+                microphone,
+                speaker,
+            } => {
+                let anvil = self.anvil().await?;
+                let Some(mut volume) = anvil.audio_volume() else {
+                    return Err(PhoneError::Refused(
+                        "this phone's volume is set by the system".into(),
+                    ));
+                };
+                if let Some(percent) = microphone {
+                    volume.microphone = percent;
+                }
+                if let Some(percent) = speaker {
+                    volume.speaker = percent;
+                }
+                anvil.set_audio_volume(volume)?;
+                drop(anvil);
+                {
+                    let mut local = self.inner.local.lock();
+                    local.microphone_volume = volume.microphone;
+                    local.speaker_volume = volume.speaker;
+                }
+                self.inner.save_settings();
+                self.read_audio_devices().await;
+                Ok(Response::ok())
+            }
             Command::Processing {
                 echo_cancellation,
                 noise_suppression,
@@ -704,6 +741,10 @@ impl Phone {
             processing: anvil.audio_processing().map(|p| AudioProcessing {
                 echo_cancellation: p.echo_cancellation,
                 noise_suppression: p.noise_suppression,
+            }),
+            volume: anvil.audio_volume().map(|v| AudioVolume {
+                microphone: v.microphone,
+                speaker: v.speaker,
             }),
             ..Default::default()
         };
