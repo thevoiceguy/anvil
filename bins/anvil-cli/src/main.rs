@@ -883,6 +883,7 @@ async fn fcp_account(
 
 #[tokio::main]
 async fn main() -> Result<()> {
+    anvil_core::install_default_crypto_provider();
     tracing_subscriber::fmt()
         .with_env_filter(
             tracing_subscriber::EnvFilter::try_from_default_env()

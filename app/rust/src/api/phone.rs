@@ -1166,6 +1166,8 @@ pub fn log_path() -> Option<String> {
 #[frb(init)]
 pub fn init_app() {
     flutter_rust_bridge::setup_default_user_utils();
+    // Before any HTTPS request: the brand, the profile, an update check.
+    anvil_core::install_default_crypto_provider();
 }
 
 #[cfg(test)]

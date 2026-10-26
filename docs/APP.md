@@ -210,7 +210,7 @@ Three PRs, the screens thin over the state as §3 has it:
   start and again when `/me/events` says it changed (a call ended, a
   message, settings changed elsewhere); a status or a lamp changes one
   person in place. New commands: `calling` (forwards, call waiting),
-  `park` (the call held and FCP's park code dialled, as a desk phone parks, so the orbit is heard), `heard`, `delete_voicemail`, `favourite`,
+  `park` (the call held and FCP's park code dialled, as a desk phone parks, so the orbit is heard; the call ends "parked on <orbit>" when FCP's answer names it in `X-FCP-Parked`), `heard`, `delete_voicemail`, `favourite`,
   `audio` and `refresh`; a call placed or answered while another is up
   holds that one, as a desk phone does. Favourites and the devices chosen
   are this device's own, kept beside the session (`settings.json`); a
@@ -357,6 +357,12 @@ Three PRs, the screens thin over the state as §3 has it:
   never; a stream on the default moves when the default changes (a headset
   plugged in, a new default chosen), and back to the device the user chose
   when it returns; checked every two seconds.
+- Calls share one speaker stream: each call is a voice in it, mixed, and it
+  stays open fifteen seconds after the last call ends (at once when another
+  speaker is chosen). A network speaker or a Bluetooth headset wakes for a
+  second or two on a new stream: a second call opening its own (the park
+  code dialled from a held call) lost its first words, the whole of "Parked
+  on 7 0 1" on a Sonos (FCP's D8).
 - Not proved by a test: CI's runners have no audio devices to unplug.
 
 ### W4c: a ringtone of the app's own
