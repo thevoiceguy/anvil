@@ -120,7 +120,7 @@ pub(crate) async fn start_transports(
             Err(e) if any_port && attempts < 5 => {
                 tracing::debug!(%e, bind = %tcp_bind, "TCP cannot have UDP's port; choosing another");
             }
-            Err(e) => return Err(e.into()),
+            Err(e) => return Err(e),
         }
     };
     let tcp_pool = Arc::new(ConnectionPool::new());
