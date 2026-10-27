@@ -810,10 +810,14 @@ async fn contacts_on_the_account_reach_every_app_the_user_signs_in_to() {
             .ok
     );
 
-    // The first sees the change when it reads again, and deletes it.
-    assert!(laptop.execute(Command::Refresh).await.unwrap().ok);
-    let seen = laptop.state().contacts;
-    assert_eq!(seen[0].company.as_deref(), Some("Clark & Co"));
+    // The first hears of the change as it is made (FCP v0.25.469's
+    // `user.contact_changed`), reads again by itself, and deletes it.
+    until(&laptop, "the other install's change heard", |s| {
+        s.contacts
+            .first()
+            .is_some_and(|c| c.company.as_deref() == Some("Clark & Co"))
+    })
+    .await;
     assert!(
         laptop
             .execute(Command::DeleteContact { id: cy.id.clone() })
@@ -821,7 +825,7 @@ async fn contacts_on_the_account_reach_every_app_the_user_signs_in_to() {
             .unwrap()
             .ok
     );
-    assert!(mobile.execute(Command::Refresh).await.unwrap().ok);
+    until(&mobile, "the delete heard", |s| s.contacts.len() == 1).await;
     let left: Vec<_> = mobile
         .state()
         .contacts

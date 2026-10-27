@@ -172,12 +172,7 @@ pub unsafe extern "C" fn anvil_fcp_sign_in(
         };
         let store = Arc::new(FileTokenStore::new(path));
         // The same install signing in again keeps its device.
-        let install = store
-            .load()
-            .ok()
-            .flatten()
-            .map(|s| s.client.install_id)
-            .unwrap_or_else(anvil_fcp::AppClient::new_install_id);
+        let install = anvil_fcp::AppClient::install_id_beside(store.path());
         let signed_in = runtime.block_on(async {
             let server = anvil_fcp::discover(&place).await?;
             anvil_fcp::password_sign_in(

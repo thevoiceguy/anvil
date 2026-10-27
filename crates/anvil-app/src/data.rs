@@ -264,6 +264,7 @@ fn on_event(inner: &Arc<Inner>, fcp: &Arc<FcpClient>, event: &UserEvent) {
                 }
                 Refresh::Voicemail => refresh_voicemail(&inner, &fcp).await,
                 Refresh::Calling => refresh_calling(&inner, &fcp).await,
+                Refresh::Contacts => refresh_contacts(&inner, &fcp).await,
             }
         });
     };
@@ -271,7 +272,8 @@ fn on_event(inner: &Arc<Inner>, fcp: &Arc<FcpClient>, event: &UserEvent) {
     match event.name.as_str() {
         "call.ended" | "call.failed" => spawn(Refresh::Recents),
         name if name.starts_with("voicemail.") => spawn(Refresh::Voicemail),
-        "user.calling_settings_changed" => spawn(Refresh::Calling),
+        "user.calling_changed" => spawn(Refresh::Calling),
+        "user.contact_changed" => spawn(Refresh::Contacts),
         "presence.status_changed" => {
             if let (Some(aor), Some(state)) = (text("aor"), text("new_state")) {
                 inner.update_person(aor, |p| p.presence = Some(state.to_string()));
@@ -291,6 +293,7 @@ enum Refresh {
     Recents,
     Voicemail,
     Calling,
+    Contacts,
 }
 
 /// The user part of an address (`sip:alice@example.com` → `alice`).

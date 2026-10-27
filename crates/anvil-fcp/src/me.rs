@@ -134,7 +134,7 @@ pub struct CallQuery {
 
 /// One of the user's live events (`/me/events`): FCP's event as it came,
 /// named `{event_type}.{type}` — `call.answered`, `voicemail.mwi_updated`,
-/// `user.calling_settings_changed`, `presence.dialog_changed`, …. FCP
+/// `user.calling_changed`, `user.contact_changed`, `presence.dialog_changed`, …. FCP
 /// sends each flat: `{"event_type": "call", "type": "answered",
 /// "call_id": …}`.
 #[derive(Debug, Clone, PartialEq)]
