@@ -246,6 +246,7 @@ class RustPhone implements PhoneApi {
         for (final c in s.contacts)
           Contact(
             id: c.id,
+            onAccount: c.onAccount,
             name: c.name,
             company: c.company,
             numbers: [
@@ -344,6 +345,7 @@ class RustPhone implements PhoneApi {
   Future<void> saveContact(Contact contact) => rust.saveContact(
     contact: rust.Contact(
       id: contact.id,
+      onAccount: contact.onAccount,
       name: contact.name,
       company: contact.company,
       numbers: [

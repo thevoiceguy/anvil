@@ -37,18 +37,24 @@ pub struct State {
     /// button shows only then.
     #[serde(default)]
     pub may_record: bool,
-    /// The contacts kept on this device, by name.
+    /// The user's contacts, by name: those kept on this device and, signed
+    /// in to FCP, those kept on their account.
     #[serde(default)]
     pub contacts: Vec<Contact>,
 }
 
-/// A contact kept on this device: with any account, FCP's or not, and on
-/// this device only (`docs/APP.md` §Contacts).
+/// A contact the user keeps: on this device, with any account, FCP's or
+/// not; or on their FCP account, where every app they sign in to has it
+/// (`docs/APP.md` §Contacts).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Contact {
     /// Made when the contact is first saved; empty in a new one.
     #[serde(default)]
     pub id: String,
+    /// Kept on the user's FCP account, not on this device. Saving a
+    /// device's contact with this set moves it to the account.
+    #[serde(default)]
+    pub on_account: bool,
     pub name: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub company: Option<String>,
@@ -456,7 +462,7 @@ pub enum Change {
     MayRecord {
         on: bool,
     },
-    /// The contacts on this device changed.
+    /// The contacts changed, on this device or on the account.
     Contacts {
         count: u32,
     },

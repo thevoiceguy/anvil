@@ -612,10 +612,13 @@ pub struct Person {
     pub dial: String,
 }
 
-/// A contact kept on this device.
+/// A contact the user keeps, on this device or on their FCP account.
 pub struct Contact {
-    /// Empty in a new one; the phone gives it one when saved.
+    /// Empty in a new one; the phone (or FCP) gives it one when saved.
     pub id: String,
+    /// Kept on the user's FCP account: every app they sign in to has it.
+    /// Saving a device's contact with this set moves it there.
+    pub on_account: bool,
     pub name: String,
     pub company: Option<String>,
     pub numbers: Vec<ContactNumber>,
@@ -741,7 +744,7 @@ pub struct PhoneState {
     pub playing: Option<String>,
     /// The user may record calls (FCP says so): the record button shows.
     pub may_record: bool,
-    /// The contacts on this device, by name.
+    /// The user's contacts, by name: on this device and on their account.
     pub contacts: Vec<Contact>,
 }
 
@@ -908,6 +911,7 @@ pub fn phone_state() -> anyhow::Result<PhoneState> {
             .into_iter()
             .map(|c| Contact {
                 id: c.id,
+                on_account: c.on_account,
                 name: c.name,
                 company: c.company,
                 numbers: c
@@ -1110,11 +1114,13 @@ pub async fn record(call: Option<u64>, on: bool) -> anyhow::Result<()> {
     execute(Command::Record { call, on }).await.map(|_| ())
 }
 
-/// Keep a contact on this device: a new one (empty id) or a change to one.
+/// Keep a contact: a new one (empty id) or a change to one, on this device
+/// or on the account (`on_account`; a device's contact saved so moves).
 pub async fn save_contact(contact: Contact) -> anyhow::Result<()> {
     execute(Command::SaveContact {
         contact: anvil_app::Contact {
             id: contact.id,
+            on_account: contact.on_account,
             name: contact.name,
             company: contact.company,
             numbers: contact
@@ -1133,7 +1139,7 @@ pub async fn save_contact(contact: Contact) -> anyhow::Result<()> {
     .map(|_| ())
 }
 
-/// Forget a contact kept on this device.
+/// Delete a contact, from this device or from the account.
 pub async fn delete_contact(id: String) -> anyhow::Result<()> {
     execute(Command::DeleteContact { id }).await.map(|_| ())
 }

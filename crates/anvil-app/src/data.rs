@@ -1,13 +1,19 @@
 //! The user's data from FCP (`docs/APP.md` §3): recent calls, the directory
-//! with presence, voicemail and calling settings — read when the phone
-//! starts, and again when FCP's live events (`/me/events`) say they changed.
+//! with presence, voicemail, calling settings and the user's own contacts —
+//! read when the phone starts, and again when FCP's live events
+//! (`/me/events`) say they changed. FCP says nothing when a contact changes
+//! elsewhere, so contacts are read again when the events reconnect and when
+//! the app asks (`refresh`).
 
 use std::sync::{Arc, Weak};
 use std::time::Duration;
 
-use anvil_fcp::{CallQuery, CallRecord, DirectoryEntry, FcpClient, UserEvent, VoicemailMessage};
+use anvil_fcp::{
+    CallQuery, CallRecord, ContactFields, DirectoryEntry, FcpClient, PersonalContact, UserEvent,
+    VoicemailMessage,
+};
 
-use crate::state::{Change, Direction, Person, Recent, Voicemail};
+use crate::state::{Change, Contact, ContactNumber, Direction, Person, Recent, Voicemail};
 use crate::Inner;
 
 /// How many recent calls the phone keeps.
@@ -17,6 +23,8 @@ const MESSAGES: u32 = 100;
 /// The directory is read a page at a time, up to this many people.
 const PAGE: u32 = 200;
 const PEOPLE: usize = 5000;
+/// The most contacts FCP keeps for one user.
+const CONTACTS: usize = 5000;
 /// A call's record is written a moment after the call ends: the recents are
 /// read again after this long.
 pub(crate) const RECORD_LAG: Duration = Duration::from_millis(1500);
@@ -68,6 +76,44 @@ pub(crate) fn voicemail(m: &VoicemailMessage) -> Voicemail {
     }
 }
 
+/// One of the account's contacts, as the phone shows it.
+pub(crate) fn contact(c: &PersonalContact) -> Contact {
+    Contact {
+        id: c.id.clone(),
+        on_account: true,
+        name: c.name.clone(),
+        company: c.company.clone(),
+        numbers: c
+            .numbers
+            .iter()
+            .map(|n| ContactNumber {
+                label: n.label.clone(),
+                number: n.number.clone(),
+            })
+            .collect(),
+        email: c.email.clone(),
+        notes: c.notes.clone(),
+    }
+}
+
+/// A contact as FCP takes it.
+pub(crate) fn contact_fields(c: &Contact) -> ContactFields {
+    ContactFields {
+        name: c.name.clone(),
+        company: c.company.clone(),
+        numbers: c
+            .numbers
+            .iter()
+            .map(|n| anvil_fcp::ContactNumber {
+                label: n.label.clone(),
+                number: n.number.clone(),
+            })
+            .collect(),
+        email: c.email.clone(),
+        notes: c.notes.clone(),
+    }
+}
+
 /// Read everything again.
 pub(crate) async fn refresh_all(inner: &Inner, fcp: &FcpClient) {
     tokio::join!(
@@ -75,6 +121,7 @@ pub(crate) async fn refresh_all(inner: &Inner, fcp: &FcpClient) {
         refresh_recents(inner, fcp),
         refresh_people(inner, fcp),
         refresh_voicemail(inner, fcp),
+        refresh_contacts(inner, fcp),
     );
 }
 
@@ -135,6 +182,29 @@ pub(crate) async fn refresh_people(inner: &Inner, fcp: &FcpClient) {
         state.people = people;
     }
     let _ = inner.changes.send(Change::People { count });
+}
+
+/// The account's contacts, a page at a time. An FCP before v0.25.467
+/// keeps none (404): the account has none to show.
+pub(crate) async fn refresh_contacts(inner: &Inner, fcp: &FcpClient) {
+    let mut contacts = Vec::new();
+    let mut cursor: Option<String> = None;
+    loop {
+        match fcp.contacts(None, Some(PAGE), cursor.as_deref()).await {
+            Ok(page) => {
+                contacts.extend(page.data.iter().map(contact));
+                cursor = page.next_cursor;
+                if cursor.is_none() || contacts.len() >= CONTACTS {
+                    break;
+                }
+            }
+            Err(e) => {
+                tracing::debug!(%e, "contacts not read");
+                return;
+            }
+        }
+    }
+    inner.set_account_contacts(contacts);
 }
 
 pub(crate) async fn refresh_voicemail(inner: &Inner, fcp: &FcpClient) {

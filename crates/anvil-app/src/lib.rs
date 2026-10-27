@@ -95,6 +95,8 @@ struct Inner {
     fcp_events: Mutex<Option<tokio::task::JoinHandle<()>>>,
     settings_path: Option<PathBuf>,
     local: Mutex<LocalSettings>,
+    /// The contacts on the user's FCP account, as last read or written.
+    account_contacts: Mutex<Vec<Contact>>,
     /// FCP's feature codes by name (`park`, `retrieve`, …).
     features: Mutex<BTreeMap<String, String>>,
     /// The voicemail message playing: stopped by aborting it.
@@ -172,6 +174,7 @@ impl Phone {
             fcp_events: Mutex::new(None),
             settings_path: cfg.settings_path,
             local: Mutex::new(local),
+            account_contacts: Mutex::new(Vec::new()),
             features: Mutex::new(BTreeMap::new()),
             playback: Mutex::new(None),
             ring: cfg.ring,
@@ -210,6 +213,7 @@ impl Phone {
                     data::refresh_recents(&inner, &first),
                     data::refresh_people(&inner, &first),
                     data::refresh_voicemail(&inner, &first),
+                    data::refresh_contacts(&inner, &first),
                 );
             });
             let task = tokio::spawn(data::follow(Arc::downgrade(&phone.inner), fcp));
@@ -484,34 +488,87 @@ impl Phone {
                         .map(|v| v.trim().to_string())
                         .filter(|v| !v.is_empty());
                 }
+                let on_device = !contact.id.is_empty()
+                    && self
+                        .inner
+                        .local
+                        .lock()
+                        .contacts
+                        .iter()
+                        .any(|c| c.id == contact.id);
+                let on_account = !contact.id.is_empty()
+                    && self
+                        .inner
+                        .account_contacts
+                        .lock()
+                        .iter()
+                        .any(|c| c.id == contact.id);
+                if on_account && !contact.on_account {
+                    return Err(PhoneError::Refused(
+                        "a contact on the account stays on the account".into(),
+                    ));
+                }
+                if contact.on_account {
+                    let fcp = self.fcp("contacts on the account")?;
+                    let fields = data::contact_fields(&contact);
+                    let kept = if on_account {
+                        fcp.update_contact(&contact.id, &fields).await?
+                    } else {
+                        fcp.create_contact(&fields).await?
+                    };
+                    self.inner.keep_account_contact(data::contact(&kept));
+                    // Moved to the account: the device's copy goes once
+                    // FCP has it.
+                    if on_device {
+                        self.inner
+                            .local
+                            .lock()
+                            .contacts
+                            .retain(|c| c.id != contact.id);
+                        self.inner.save_settings();
+                    }
+                    self.inner.show_contacts();
+                    return Ok(Response::ok());
+                }
                 if contact.id.is_empty() {
                     contact.id = new_contact_id();
                 }
-                let contacts = {
+                {
                     let mut local = self.inner.local.lock();
                     match local.contacts.iter_mut().find(|c| c.id == contact.id) {
                         Some(kept) => *kept = contact,
                         None => local.contacts.push(contact),
                     }
                     local.contacts.sort_by_key(|c| c.name.to_lowercase());
-                    local.contacts.clone()
-                };
+                }
                 self.inner.save_settings();
-                self.inner.set_contacts(contacts);
+                self.inner.show_contacts();
                 Ok(Response::ok())
             }
             Command::DeleteContact { id } => {
-                let contacts = {
-                    let mut local = self.inner.local.lock();
-                    let before = local.contacts.len();
-                    local.contacts.retain(|c| c.id != id);
-                    if local.contacts.len() == before {
-                        return Err(PhoneError::Refused(format!("no contact {id}")));
+                let on_account = self
+                    .inner
+                    .account_contacts
+                    .lock()
+                    .iter()
+                    .any(|c| c.id == id);
+                if on_account {
+                    self.fcp("contacts on the account")?
+                        .delete_contact(&id)
+                        .await?;
+                    self.inner.account_contacts.lock().retain(|c| c.id != id);
+                } else {
+                    {
+                        let mut local = self.inner.local.lock();
+                        let before = local.contacts.len();
+                        local.contacts.retain(|c| c.id != id);
+                        if local.contacts.len() == before {
+                            return Err(PhoneError::Refused(format!("no contact {id}")));
+                        }
                     }
-                    local.contacts.clone()
-                };
-                self.inner.save_settings();
-                self.inner.set_contacts(contacts);
+                    self.inner.save_settings();
+                }
+                self.inner.show_contacts();
                 Ok(Response::ok())
             }
             Command::Favourite { who, on } => {
@@ -1076,10 +1133,29 @@ impl Inner {
         }
     }
 
-    fn set_contacts(&self, contacts: Vec<Contact>) {
+    /// Show the device's contacts and the account's together, by name.
+    fn show_contacts(&self) {
+        let mut contacts = self.local.lock().contacts.clone();
+        contacts.extend(self.account_contacts.lock().iter().cloned());
+        contacts.sort_by_key(|c| c.name.to_lowercase());
         let count = contacts.len() as u32;
         self.state.lock().contacts = contacts;
         let _ = self.changes.send(Change::Contacts { count });
+    }
+
+    /// The account's contacts as FCP has them now.
+    fn set_account_contacts(&self, contacts: Vec<Contact>) {
+        *self.account_contacts.lock() = contacts;
+        self.show_contacts();
+    }
+
+    /// One of the account's contacts as FCP kept it, new or changed.
+    fn keep_account_contact(&self, contact: Contact) {
+        let mut kept = self.account_contacts.lock();
+        match kept.iter_mut().find(|c| c.id == contact.id) {
+            Some(old) => *old = contact,
+            None => kept.push(contact),
+        }
     }
 
     fn set_recents(&self, mut recents: Vec<Recent>) {

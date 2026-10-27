@@ -303,8 +303,20 @@
   "removeNumberButton": "Remove this number",
   "contactsHeading": "My contacts",
   "contactOnDevice": "On this device",
+  "contactOnAccount": "On your account",
+  "contactPlaceAccount": "My account",
+  "contactPlaceDevice": "This device",
+  "moveContactToAccountButton": "Move to my account",
   "deleteContactConfirm": "Delete {name} from your contacts?",
   "@deleteContactConfirm": {
+    "placeholders": {
+      "name": {
+        "type": "String"
+      }
+    }
+  },
+  "deleteAccountContactConfirm": "Delete {name} from your contacts? They go from every app you sign in to.",
+  "@deleteAccountContactConfirm": {
     "placeholders": {
       "name": {
         "type": "String"

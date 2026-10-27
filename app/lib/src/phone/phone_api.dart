@@ -124,10 +124,12 @@ class PhoneCall {
   );
 }
 
-/// A contact kept on this device.
+/// A contact the user keeps: on this device, or on their FCP account where
+/// every app they sign in to has it.
 class Contact {
   const Contact({
     this.id = '',
+    this.onAccount = false,
     required this.name,
     this.company,
     this.numbers = const [],
@@ -135,8 +137,12 @@ class Contact {
     this.notes,
   });
 
-  /// Empty in a new one; the phone gives it one when saved.
+  /// Empty in a new one; the phone (or FCP) gives it one when saved.
   final String id;
+
+  /// Kept on the user's FCP account. Saving a device's contact with this
+  /// set moves it there.
+  final bool onAccount;
   final String name;
   final String? company;
   final List<ContactNumber> numbers;
@@ -145,6 +151,17 @@ class Contact {
 
   /// What to dial: the first number, when it has one.
   String? get dial => numbers.isEmpty ? null : numbers.first.number;
+
+  /// The same contact, kept on the account.
+  Contact toAccount() => Contact(
+    id: id,
+    onAccount: true,
+    name: name,
+    company: company,
+    numbers: numbers,
+    email: email,
+    notes: notes,
+  );
 }
 
 /// One of a contact's numbers: what it is (mobile, work, …) and what to
@@ -440,8 +457,12 @@ class PhoneSnapshot {
   /// The user may record calls (FCP says so): the record button shows.
   final bool mayRecord;
 
-  /// The contacts on this device, by name.
+  /// The user's contacts, by name: on this device and, signed in to FCP,
+  /// on their account.
   final List<Contact> contacts;
+
+  /// Signed in to FCP, so a contact can be kept on the account.
+  bool get hasAccount => calling != null;
 
   /// The contact one of whose numbers a call's address is.
   Contact? contactFor(String remote) {
@@ -718,10 +739,11 @@ abstract class PhoneApi {
   /// plays the recording announcement to both parties first.
   Future<void> record(int call, bool on);
 
-  /// Keep a contact on this device: a new one (empty id) or a change.
+  /// Keep a contact: a new one (empty id) or a change, on this device or
+  /// on the account (`onAccount`; a device's contact saved so moves).
   Future<void> saveContact(Contact contact);
 
-  /// Forget a contact kept on this device.
+  /// Delete a contact, from this device or from the account.
   Future<void> deleteContact(String id);
 
   Future<void> setDnd(bool on);

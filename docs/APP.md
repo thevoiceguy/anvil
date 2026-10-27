@@ -153,12 +153,20 @@ share sheet.
   the row's menu.
 - **Contacts.** The user's own contacts (**My contacts**), then the tenant's
   directory with presence, searchable, busy lamps for favourites. A contact
-  has a name, a company, numbers with labels, an email and notes; it is kept
-  on this device (`settings.json`, with any account, FCP's or not), made by
-  hand, from a call or from a recent call, changed and deleted from its
-  menu. A call or a recent call from one of its numbers shows its name.
-  Contacts kept by FCP, and synced with a site, come with FCP's
-  `/me/contacts` (`docs/RECORD_AND_CONTACTS.md` §3).
+  has a name, a company, numbers with labels, an email and notes. Signed in
+  to FCP, a new contact goes on the user's account (FCP's `/me/contacts`,
+  v0.25.467: every app they sign in to has it, and so does their site;
+  `docs/RECORD_AND_CONTACTS.md` §3) unless they pick **This device**; each
+  contact is marked with where it is kept, and one on the device can be
+  moved to the account from its menu (FCP takes it, then the device's copy
+  goes). With any other account, contacts are kept on this device
+  (`settings.json`). Made by hand, from a call or from a recent call,
+  changed and deleted from its menu. A call or a recent call from one of its
+  numbers shows its name; the match is made by the app, so FCP's caller ID
+  is never rewritten. FCP says nothing when a contact changes in another
+  app: the account's contacts are read when the phone starts, when its
+  events reconnect, and on `refresh`. The CLI's `contact add account
+  <number> <name>` puts one on the account.
 - **Voicemail.** Messages with transcription, play, mark heard, delete, the
   count on the tab.
 - **Settings.** Do not disturb, forwarding, call waiting, audio devices and

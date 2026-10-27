@@ -1167,11 +1167,41 @@ abstract class Strings {
   /// **'On this device'**
   String get contactOnDevice;
 
+  /// No description provided for @contactOnAccount.
+  ///
+  /// In en, this message translates to:
+  /// **'On your account'**
+  String get contactOnAccount;
+
+  /// No description provided for @contactPlaceAccount.
+  ///
+  /// In en, this message translates to:
+  /// **'My account'**
+  String get contactPlaceAccount;
+
+  /// No description provided for @contactPlaceDevice.
+  ///
+  /// In en, this message translates to:
+  /// **'This device'**
+  String get contactPlaceDevice;
+
+  /// No description provided for @moveContactToAccountButton.
+  ///
+  /// In en, this message translates to:
+  /// **'Move to my account'**
+  String get moveContactToAccountButton;
+
   /// No description provided for @deleteContactConfirm.
   ///
   /// In en, this message translates to:
   /// **'Delete {name} from your contacts?'**
   String deleteContactConfirm(String name);
+
+  /// No description provided for @deleteAccountContactConfirm.
+  ///
+  /// In en, this message translates to:
+  /// **'Delete {name} from your contacts? They go from every app you sign in to.'**
+  String deleteAccountContactConfirm(String name);
 }
 
 class _StringsDelegate extends LocalizationsDelegate<Strings> {

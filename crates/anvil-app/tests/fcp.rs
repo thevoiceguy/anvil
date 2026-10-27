@@ -712,3 +712,124 @@ async fn a_user_records_a_call_they_placed_when_fcp_lets_them() {
     );
     until(&bob_phone, "Bob's call ends", |s| s.calls.is_empty()).await;
 }
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn contacts_on_the_account_reach_every_app_the_user_signs_in_to() {
+    let (Ok(admin), Ok(token)) = (
+        std::env::var("ANVIL_FCP_ADMIN"),
+        std::env::var("ANVIL_FCP_TOKEN"),
+    ) else {
+        eprintln!("ANVIL_FCP_ADMIN and ANVIL_FCP_TOKEN not set; skipping");
+        return;
+    };
+    let (laptop_fcp, user) = signed_in(&admin, &token, "contacts").await;
+    if let Err(e) = laptop_fcp.contacts(None, None, None).await {
+        eprintln!("this FCP keeps no contacts (before v0.25.467: {e}); skipping");
+        return;
+    }
+    // The same user on a second install: `signed_in` names the user and
+    // the password by one number.
+    let n = user.rsplit('-').next().unwrap();
+    let mobile_fcp = Arc::new(FcpClient::new(
+        password_sign_in(
+            discover(&admin).await.unwrap(),
+            AppClient::this_machine(AppClient::new_install_id()),
+            &user,
+            &format!("Anvil-{n}-pw!"),
+            None,
+        )
+        .await
+        .unwrap(),
+        None,
+    ));
+    let dir = std::env::temp_dir().join(format!("anvil-contacts-{n}"));
+    std::fs::create_dir_all(&dir).unwrap();
+    let settings = dir.join("settings.json");
+    let laptop = phone_with(laptop_fcp, "127.0.0.124", Some(settings.clone())).await;
+
+    for line in [
+        "contact add account 1003 Cy Clark",
+        "contact add 1004 Dee Dunn",
+    ] {
+        let done = laptop
+            .execute(Command::parse_line(line).unwrap())
+            .await
+            .unwrap();
+        assert!(done.ok, "{line}: {done:?}");
+    }
+    let contacts = laptop.state().contacts;
+    let placed: Vec<_> = contacts
+        .iter()
+        .map(|c| (c.name.as_str(), c.on_account))
+        .collect();
+    assert_eq!(placed, [("Cy Clark", true), ("Dee Dunn", false)]);
+    assert!(contacts[0].id.starts_with("contact-"), "FCP named it");
+
+    // The device's contact moved to the account: FCP has it, the device
+    // does not.
+    let mut dee = contacts[1].clone();
+    dee.on_account = true;
+    let moved = laptop
+        .execute(Command::SaveContact { contact: dee })
+        .await
+        .unwrap();
+    assert!(moved.ok, "{moved:?}");
+    let contacts = laptop.state().contacts;
+    assert!(contacts.iter().all(|c| c.on_account), "{contacts:?}");
+    assert_eq!(contacts.len(), 2);
+    assert!(
+        !std::fs::read_to_string(&settings)
+            .unwrap()
+            .contains("Dee Dunn"),
+        "the device's copy is gone"
+    );
+    // An account's contact stays there.
+    let mut cy = contacts[0].clone();
+    cy.on_account = false;
+    assert!(laptop
+        .execute(Command::SaveContact { contact: cy })
+        .await
+        .is_err());
+
+    // The other install reads them when it starts, and changes one.
+    let mobile = phone_with(mobile_fcp, "127.0.0.125", None).await;
+    until(&mobile, "the account's contacts are read", |s| {
+        s.contacts.len() == 2
+    })
+    .await;
+    let mut cy = mobile.state().contacts[0].clone();
+    assert_eq!(cy.name, "Cy Clark");
+    cy.company = Some("Clark & Co".into());
+    assert!(
+        mobile
+            .execute(Command::SaveContact {
+                contact: cy.clone()
+            })
+            .await
+            .unwrap()
+            .ok
+    );
+
+    // The first sees the change when it reads again, and deletes it.
+    assert!(laptop.execute(Command::Refresh).await.unwrap().ok);
+    let seen = laptop.state().contacts;
+    assert_eq!(seen[0].company.as_deref(), Some("Clark & Co"));
+    assert!(
+        laptop
+            .execute(Command::DeleteContact { id: cy.id.clone() })
+            .await
+            .unwrap()
+            .ok
+    );
+    assert!(mobile.execute(Command::Refresh).await.unwrap().ok);
+    let left: Vec<_> = mobile
+        .state()
+        .contacts
+        .into_iter()
+        .map(|c| c.name)
+        .collect();
+    assert_eq!(left, ["Dee Dunn"]);
+    laptop.shutdown().await;
+    mobile.shutdown().await;
+    let _ = std::fs::remove_dir_all(&dir);
+}

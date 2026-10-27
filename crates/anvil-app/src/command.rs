@@ -76,9 +76,11 @@ pub enum Command {
         call: Option<u64>,
         on: bool,
     },
-    /// Keep a contact on this device: a new one (no id) or a change to one.
+    /// Keep a contact: a new one (no id) or a change to one, on this device
+    /// or, with `on_account`, on the FCP account (a device's contact saved
+    /// so moves there).
     SaveContact { contact: crate::state::Contact },
-    /// Forget a contact kept on this device.
+    /// Delete a contact, from this device or from the account.
     DeleteContact { id: String },
     /// Mark a voicemail message heard.
     Heard { id: String },
@@ -185,7 +187,7 @@ impl Command {
     /// `mute`, `unmute`, `dtmf 123#`, `transfer 1003`, `attended 1 2`,
     /// `park`, `record on`, `record off`, `dnd on`, `forward busy 1003`,
     /// `forward all off`, `contact add 0412345678 Jo Smith`,
-    /// `contact delete <id>`,
+    /// `contact add account 0412345678 Jo Smith`, `contact delete <id>`,
     /// `waiting off`, `heard <id>`, `delete <id>`, `play <id>`, `stop`,
     /// `favourite alice`,
     /// `unfavourite alice`, `recents clear`, `recents hide <id>`, `audio in USB Headset`, `audio out default`,
@@ -282,23 +284,36 @@ impl Command {
                 call: id(words.get(2))?,
             },
             "contact" => match words.get(1).map(|w| w.to_ascii_lowercase()).as_deref() {
-                Some("add") => Command::SaveContact {
-                    contact: crate::state::Contact {
-                        id: String::new(),
-                        name: rest(&words, 3).ok_or("contact add needs a number and a name")?,
-                        company: None,
-                        numbers: vec![crate::state::ContactNumber {
-                            label: String::new(),
-                            number: need(words.get(2), "a number")?,
-                        }],
-                        email: None,
-                        notes: None,
-                    },
-                },
+                Some("add") => {
+                    // `contact add account …` keeps it on the FCP account.
+                    let on_account = words
+                        .get(2)
+                        .is_some_and(|w| w.eq_ignore_ascii_case("account"));
+                    let at = if on_account { 3 } else { 2 };
+                    Command::SaveContact {
+                        contact: crate::state::Contact {
+                            id: String::new(),
+                            on_account,
+                            name: rest(&words, at + 1)
+                                .ok_or("contact add needs a number and a name")?,
+                            company: None,
+                            numbers: vec![crate::state::ContactNumber {
+                                label: String::new(),
+                                number: need(words.get(at), "a number")?,
+                            }],
+                            email: None,
+                            notes: None,
+                        },
+                    }
+                }
                 Some("delete") => Command::DeleteContact {
                     id: need(words.get(2), "a contact id")?,
                 },
-                _ => return Err("contact add <number> <name>, or contact delete <id>".into()),
+                _ => {
+                    return Err(
+                        "contact add [account] <number> <name>, or contact delete <id>".into(),
+                    )
+                }
             },
             "heard" => Command::Heard {
                 id: need(words.get(1), "a message id")?,
@@ -494,6 +509,15 @@ mod tests {
         assert_eq!(contact.name, "Jo Smith");
         assert_eq!(contact.numbers[0].number, "0412345678");
         assert!(contact.id.is_empty(), "the phone gives it one");
+        assert!(!contact.on_account, "on this device unless asked");
+        let Command::SaveContact { contact } =
+            Command::parse_line("contact add account 0412345678 Jo Smith").unwrap()
+        else {
+            panic!("a contact");
+        };
+        assert!(contact.on_account);
+        assert_eq!(contact.name, "Jo Smith");
+        assert_eq!(contact.numbers[0].number, "0412345678");
         assert_eq!(
             Command::parse_line("contact delete c1").unwrap(),
             Command::DeleteContact { id: "c1".into() }

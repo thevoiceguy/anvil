@@ -2035,6 +2035,7 @@ impl SseDecode for crate::api::phone::Contact {
     // Codec=Sse (Serialization based), see doc to use other codecs
     fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
         let mut var_id = <String>::sse_decode(deserializer);
+        let mut var_onAccount = <bool>::sse_decode(deserializer);
         let mut var_name = <String>::sse_decode(deserializer);
         let mut var_company = <Option<String>>::sse_decode(deserializer);
         let mut var_numbers = <Vec<crate::api::phone::ContactNumber>>::sse_decode(deserializer);
@@ -2042,6 +2043,7 @@ impl SseDecode for crate::api::phone::Contact {
         let mut var_notes = <Option<String>>::sse_decode(deserializer);
         return crate::api::phone::Contact {
             id: var_id,
+            on_account: var_onAccount,
             name: var_name,
             company: var_company,
             numbers: var_numbers,
@@ -2932,6 +2934,7 @@ impl flutter_rust_bridge::IntoDart for crate::api::phone::Contact {
     fn into_dart(self) -> flutter_rust_bridge::for_generated::DartAbi {
         [
             self.id.into_into_dart().into_dart(),
+            self.on_account.into_into_dart().into_dart(),
             self.name.into_into_dart().into_dart(),
             self.company.into_into_dart().into_dart(),
             self.numbers.into_into_dart().into_dart(),
@@ -3451,6 +3454,7 @@ impl SseEncode for crate::api::phone::Contact {
     // Codec=Sse (Serialization based), see doc to use other codecs
     fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
         <String>::sse_encode(self.id, serializer);
+        <bool>::sse_encode(self.on_account, serializer);
         <String>::sse_encode(self.name, serializer);
         <Option<String>>::sse_encode(self.company, serializer);
         <Vec<crate::api::phone::ContactNumber>>::sse_encode(self.numbers, serializer);

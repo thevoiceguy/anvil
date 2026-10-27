@@ -645,6 +645,13 @@ async fn contacts_are_kept_on_the_device() {
         .await
         .is_err());
 
+    // Without FCP there is no account to keep a contact on.
+    assert!(alice
+        .execute(Command::parse_line("contact add account 1003 Cy Clark").unwrap())
+        .await
+        .is_err());
+    assert_eq!(alice.state().contacts.len(), 1);
+
     // Without FCP there is nothing to record with.
     assert!(!alice.state().may_record);
     assert!(alice
