@@ -614,3 +614,101 @@ fn half_a_second_wav() -> Vec<u8> {
     assert_eq!((clip.samples.len(), clip.sample_rate), (4000, 8000));
     wav
 }
+
+/// A user FCP lets record (`record_on_demand`, set by an administrator)
+/// records a call they placed: the server names the call in its answer,
+/// `record on` and `record off` go to `/me/calls/{id}/recording`, and the
+/// call shows it. Against an FCP before v0.25.466, which has no such
+/// setting, it says so and passes.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_user_records_a_call_they_placed_when_fcp_lets_them() {
+    let (Ok(admin), Ok(token)) = (
+        std::env::var("ANVIL_FCP_ADMIN"),
+        std::env::var("ANVIL_FCP_TOKEN"),
+    ) else {
+        eprintln!("ANVIL_FCP_ADMIN and ANVIL_FCP_TOKEN not set; skipping");
+        return;
+    };
+    let (alice_fcp, alice_name) = signed_in(&admin, &token, "rec-alice").await;
+    let (bob_fcp, bob) = signed_in(&admin, &token, "rec-bob").await;
+    let tenant = anvil_tenant(&admin, &token).await;
+    let allowed = reqwest::Client::new()
+        .put(format!("{admin}/api/v1/users/{alice_name}"))
+        .bearer_auth(&token)
+        .header("X-FCP-Tenant-Id", &tenant)
+        .json(&serde_json::json!({"media_preferences": {"record_on_demand": true}}))
+        .send()
+        .await
+        .unwrap();
+    assert!(allowed.status().is_success(), "{allowed:?}");
+    if !alice_fcp.softphone().await.unwrap().may_record {
+        eprintln!("this FCP does not let users record (before v0.25.466); skipping");
+        return;
+    }
+
+    let alice = phone(alice_fcp, "127.0.0.122").await;
+    let bob_phone = phone(bob_fcp, "127.0.0.123").await;
+    until(&alice, "Alice may record", |s| s.may_record).await;
+    until(&bob_phone, "Bob registers", |s| {
+        s.registration == Registration::Registered
+    })
+    .await;
+    until(&alice, "Alice registers", |s| {
+        s.registration == Registration::Registered
+    })
+    .await;
+
+    let placed = alice.execute(Command::Call { target: bob }).await.unwrap();
+    let call = placed.call.unwrap();
+    until(&bob_phone, "Bob rings", |s| {
+        s.calls.iter().any(|c| c.state == CallState::Ringing)
+    })
+    .await;
+    assert!(
+        bob_phone
+            .execute(Command::Answer { call: None })
+            .await
+            .unwrap()
+            .ok
+    );
+    until(&alice, "the call is up and named", |s| {
+        s.calls
+            .iter()
+            .any(|c| c.id == call && c.state == CallState::Connected && c.server_call.is_some())
+    })
+    .await;
+
+    let on = alice
+        .execute(Command::Record {
+            call: None,
+            on: true,
+        })
+        .await
+        .unwrap();
+    assert!(on.ok, "{on:?}");
+    let recording = |phone: &Phone| {
+        phone
+            .state()
+            .calls
+            .iter()
+            .any(|c| c.id == call && c.recording)
+    };
+    assert!(recording(&alice));
+    let off = alice
+        .execute(Command::Record {
+            call: None,
+            on: false,
+        })
+        .await
+        .unwrap();
+    assert!(off.ok, "{off:?}");
+    assert!(!recording(&alice));
+    assert!(
+        alice
+            .execute(Command::Hangup { call: None })
+            .await
+            .unwrap()
+            .ok
+    );
+    until(&bob_phone, "Bob's call ends", |s| s.calls.is_empty()).await;
+}

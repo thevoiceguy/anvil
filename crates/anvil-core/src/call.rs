@@ -59,6 +59,10 @@ pub(crate) struct CallEntry {
     /// The orbit FCP parked a call on, when this call was the park code
     /// and its answer said so (`X-FCP-Parked`): told when the call ends.
     pub parked: Option<String>,
+    /// The server's id for the call (FCP's `X-FCP-Call-Id`), from the
+    /// INVITE of an incoming call or the 200 OK of one we placed: what
+    /// the server's API names it by.
+    pub server_call: Option<String>,
 }
 
 /// A call's SRTP keys.

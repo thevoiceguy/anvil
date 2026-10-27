@@ -241,6 +241,21 @@ class RustPhone implements PhoneApi {
       microphoneVolume: s.microphoneVolume,
       speakerVolume: s.speakerVolume,
       playing: s.playing,
+      mayRecord: s.mayRecord,
+      contacts: [
+        for (final c in s.contacts)
+          Contact(
+            id: c.id,
+            name: c.name,
+            company: c.company,
+            numbers: [
+              for (final n in c.numbers)
+                ContactNumber(label: n.label, number: n.number),
+            ],
+            email: c.email,
+            notes: c.notes,
+          ),
+      ],
     );
   }
 
@@ -273,6 +288,7 @@ class RustPhone implements PhoneApi {
       connectedAt: at == null
           ? null
           : DateTime.fromMillisecondsSinceEpoch(at.toInt() * 1000),
+      recording: c.recording,
     );
   }
 
@@ -319,6 +335,28 @@ class RustPhone implements PhoneApi {
 
   @override
   Future<void> park(int call) => rust.park(call: _id(call));
+
+  @override
+  Future<void> record(int call, bool on) =>
+      rust.record(call: _id(call), on_: on);
+
+  @override
+  Future<void> saveContact(Contact contact) => rust.saveContact(
+    contact: rust.Contact(
+      id: contact.id,
+      name: contact.name,
+      company: contact.company,
+      numbers: [
+        for (final n in contact.numbers)
+          rust.ContactNumber(label: n.label, number: n.number),
+      ],
+      email: contact.email,
+      notes: contact.notes,
+    ),
+  );
+
+  @override
+  Future<void> deleteContact(String id) => rust.deleteContact(id: id);
 
   @override
   Future<void> setDnd(bool on) => rust.setDnd(on_: on);

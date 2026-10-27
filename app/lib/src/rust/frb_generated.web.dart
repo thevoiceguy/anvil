@@ -57,6 +57,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   CallingSettings dco_decode_box_autoadd_calling_settings(dynamic raw);
 
   @protected
+  Contact dco_decode_box_autoadd_contact(dynamic raw);
+
+  @protected
   Quality dco_decode_box_autoadd_quality(dynamic raw);
 
   @protected
@@ -93,6 +96,12 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   CallingSettings dco_decode_calling_settings(dynamic raw);
 
   @protected
+  Contact dco_decode_contact(dynamic raw);
+
+  @protected
+  ContactNumber dco_decode_contact_number(dynamic raw);
+
+  @protected
   Direction dco_decode_direction(dynamic raw);
 
   @protected
@@ -106,6 +115,12 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   List<Call> dco_decode_list_call(dynamic raw);
+
+  @protected
+  List<Contact> dco_decode_list_contact(dynamic raw);
+
+  @protected
+  List<ContactNumber> dco_decode_list_contact_number(dynamic raw);
 
   @protected
   List<Person> dco_decode_list_person(dynamic raw);
@@ -261,6 +276,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   );
 
   @protected
+  Contact sse_decode_box_autoadd_contact(SseDeserializer deserializer);
+
+  @protected
   Quality sse_decode_box_autoadd_quality(SseDeserializer deserializer);
 
   @protected
@@ -299,6 +317,12 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   CallingSettings sse_decode_calling_settings(SseDeserializer deserializer);
 
   @protected
+  Contact sse_decode_contact(SseDeserializer deserializer);
+
+  @protected
+  ContactNumber sse_decode_contact_number(SseDeserializer deserializer);
+
+  @protected
   Direction sse_decode_direction(SseDeserializer deserializer);
 
   @protected
@@ -312,6 +336,14 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   List<Call> sse_decode_list_call(SseDeserializer deserializer);
+
+  @protected
+  List<Contact> sse_decode_list_contact(SseDeserializer deserializer);
+
+  @protected
+  List<ContactNumber> sse_decode_list_contact_number(
+    SseDeserializer deserializer,
+  );
 
   @protected
   List<Person> sse_decode_list_person(SseDeserializer deserializer);
@@ -481,6 +513,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   );
 
   @protected
+  void sse_encode_box_autoadd_contact(Contact self, SseSerializer serializer);
+
+  @protected
   void sse_encode_box_autoadd_quality(Quality self, SseSerializer serializer);
 
   @protected
@@ -529,6 +564,12 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   );
 
   @protected
+  void sse_encode_contact(Contact self, SseSerializer serializer);
+
+  @protected
+  void sse_encode_contact_number(ContactNumber self, SseSerializer serializer);
+
+  @protected
   void sse_encode_direction(Direction self, SseSerializer serializer);
 
   @protected
@@ -545,6 +586,15 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   void sse_encode_list_call(List<Call> self, SseSerializer serializer);
+
+  @protected
+  void sse_encode_list_contact(List<Contact> self, SseSerializer serializer);
+
+  @protected
+  void sse_encode_list_contact_number(
+    List<ContactNumber> self,
+    SseSerializer serializer,
+  );
 
   @protected
   void sse_encode_list_person(List<Person> self, SseSerializer serializer);

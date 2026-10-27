@@ -41,6 +41,9 @@ pub(crate) struct LocalSettings {
     /// Recent calls removed one at a time, by record id.
     #[serde(default, skip_serializing_if = "BTreeSet::is_empty")]
     pub hidden_recents: BTreeSet<String>,
+    /// The contacts kept on this device, by name.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub contacts: Vec<crate::Contact>,
 }
 
 impl Default for LocalSettings {
@@ -57,6 +60,7 @@ impl Default for LocalSettings {
             speaker_volume: 100,
             recents_cleared: BTreeMap::new(),
             hidden_recents: BTreeSet::new(),
+            contacts: Vec::new(),
         }
     }
 }
@@ -163,6 +167,17 @@ mod tests {
             speaker_volume: 100,
             recents_cleared: [("sip:bob@d".to_string(), "2026-10-24T10:00:00Z".to_string())].into(),
             hidden_recents: ["cdr-1".to_string()].into(),
+            contacts: vec![crate::Contact {
+                id: "c1".into(),
+                name: "Jo Smith".into(),
+                company: Some("Acme".into()),
+                numbers: vec![crate::ContactNumber {
+                    label: "mobile".into(),
+                    number: "0412345678".into(),
+                }],
+                email: None,
+                notes: None,
+            }],
         };
         saved.save(&path).unwrap();
         assert_eq!(LocalSettings::load(&path), saved);

@@ -157,6 +157,19 @@ Future<void> transferAttended({required BigInt call, required BigInt to}) =>
 Future<void> park({BigInt? call}) =>
     RustLib.instance.api.crateApiPhonePark(call: call);
 
+/// Record a call the user is on (`on`), or stop the recording they
+/// started. FCP plays the recording announcement to both parties first.
+Future<void> record({BigInt? call, required bool on_}) =>
+    RustLib.instance.api.crateApiPhoneRecord(call: call, on_: on_);
+
+/// Keep a contact on this device: a new one (empty id) or a change to one.
+Future<void> saveContact({required Contact contact}) =>
+    RustLib.instance.api.crateApiPhoneSaveContact(contact: contact);
+
+/// Forget a contact kept on this device.
+Future<void> deleteContact({required String id}) =>
+    RustLib.instance.api.crateApiPhoneDeleteContact(id: id);
+
 Future<void> setDnd({required bool on_}) =>
     RustLib.instance.api.crateApiPhoneSetDnd(on_: on_);
 
@@ -295,6 +308,9 @@ class Call {
   /// When it connected, in Unix seconds.
   final BigInt? connectedAt;
 
+  /// The user is recording it.
+  final bool recording;
+
   const Call({
     required this.id,
     required this.direction,
@@ -307,6 +323,7 @@ class Call {
     required this.encrypted,
     this.quality,
     this.connectedAt,
+    required this.recording,
   });
 
   @override
@@ -321,7 +338,8 @@ class Call {
       codec.hashCode ^
       encrypted.hashCode ^
       quality.hashCode ^
-      connectedAt.hashCode;
+      connectedAt.hashCode ^
+      recording.hashCode;
 
   @override
   bool operator ==(Object other) =>
@@ -338,7 +356,8 @@ class Call {
           codec == other.codec &&
           encrypted == other.encrypted &&
           quality == other.quality &&
-          connectedAt == other.connectedAt;
+          connectedAt == other.connectedAt &&
+          recording == other.recording;
 }
 
 /// Where a call is.
@@ -427,6 +446,67 @@ class CallingSettings {
           forwardNoAnswer == other.forwardNoAnswer &&
           forwardUnreachable == other.forwardUnreachable &&
           noAnswerSecs == other.noAnswerSecs;
+}
+
+/// A contact kept on this device.
+class Contact {
+  /// Empty in a new one; the phone gives it one when saved.
+  final String id;
+  final String name;
+  final String? company;
+  final List<ContactNumber> numbers;
+  final String? email;
+  final String? notes;
+
+  const Contact({
+    required this.id,
+    required this.name,
+    this.company,
+    required this.numbers,
+    this.email,
+    this.notes,
+  });
+
+  @override
+  int get hashCode =>
+      id.hashCode ^
+      name.hashCode ^
+      company.hashCode ^
+      numbers.hashCode ^
+      email.hashCode ^
+      notes.hashCode;
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is Contact &&
+          runtimeType == other.runtimeType &&
+          id == other.id &&
+          name == other.name &&
+          company == other.company &&
+          numbers == other.numbers &&
+          email == other.email &&
+          notes == other.notes;
+}
+
+/// One of a contact's numbers: what it is (`mobile`, `work`, …) and what
+/// to dial.
+class ContactNumber {
+  final String label;
+  final String number;
+
+  const ContactNumber({required this.label, required this.number});
+
+  @override
+  int get hashCode => label.hashCode ^ number.hashCode;
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is ContactNumber &&
+          runtimeType == other.runtimeType &&
+          label == other.label &&
+          number == other.number;
 }
 
 /// Which way a call goes.
@@ -577,7 +657,8 @@ class Person {
 class PhoneChange {
   /// `registration`, `call`, `call_ended`, `message_waiting`, `dnd`,
   /// `brand`, `transfer_progress`, `calling`, `recents`, `people`,
-  /// `person`, `voicemail`, `audio`, `playing`.
+  /// `person`, `voicemail`, `audio`, `playing`, `push`, `may_record`,
+  /// `contacts`.
   final String kind;
 
   /// The call it is about, if any.
@@ -651,6 +732,12 @@ class PhoneState {
   /// The voicemail message playing.
   final String? playing;
 
+  /// The user may record calls (FCP says so): the record button shows.
+  final bool mayRecord;
+
+  /// The contacts on this device, by name.
+  final List<Contact> contacts;
+
   const PhoneState({
     required this.aor,
     required this.registration,
@@ -677,6 +764,8 @@ class PhoneState {
     this.microphoneVolume,
     this.speakerVolume,
     this.playing,
+    required this.mayRecord,
+    required this.contacts,
   });
 
   @override
@@ -705,7 +794,9 @@ class PhoneState {
       noiseSuppression.hashCode ^
       microphoneVolume.hashCode ^
       speakerVolume.hashCode ^
-      playing.hashCode;
+      playing.hashCode ^
+      mayRecord.hashCode ^
+      contacts.hashCode;
 
   @override
   bool operator ==(Object other) =>
@@ -736,7 +827,9 @@ class PhoneState {
           noiseSuppression == other.noiseSuppression &&
           microphoneVolume == other.microphoneVolume &&
           speakerVolume == other.speakerVolume &&
-          playing == other.playing;
+          playing == other.playing &&
+          mayRecord == other.mayRecord &&
+          contacts == other.contacts;
 }
 
 /// A connected call's media, as last measured.

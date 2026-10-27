@@ -328,6 +328,33 @@ impl FcpClient {
         Ok(())
     }
 
+    /// Record a call the user is on, by the server's id for it
+    /// (`X-FCP-Call-Id`). Returns once the parties have heard the
+    /// recording announcement and the recorder runs. FCP refuses (403)
+    /// when the user may not record, 404 for a call not theirs, 409 when
+    /// it cannot be recorded or already is.
+    pub async fn start_recording(&self, server_call: &str) -> Result<(), FcpError> {
+        self.api_with(
+            reqwest::Method::POST,
+            &format!("/me/calls/{server_call}/recording/start"),
+            None,
+        )
+        .await?;
+        Ok(())
+    }
+
+    /// Stop a recording the user started; any other recording of the call
+    /// goes on (409).
+    pub async fn stop_recording(&self, server_call: &str) -> Result<(), FcpError> {
+        self.api_with(
+            reqwest::Method::POST,
+            &format!("/me/calls/{server_call}/recording/stop"),
+            None,
+        )
+        .await?;
+        Ok(())
+    }
+
     /// Open the user's live events (`/me/events`): the WebSocket signed in
     /// with the session's access token.
     pub async fn events(&self) -> Result<UserEvents, FcpError> {

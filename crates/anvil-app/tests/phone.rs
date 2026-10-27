@@ -561,6 +561,100 @@ async fn the_volumes_are_kept_for_the_next_start() {
     let _ = std::fs::remove_dir_all(&dir);
 }
 
+/// Contacts kept on the device: made with an id of the phone's, changed,
+/// sorted by name, kept for the next start, and deleted. A contact needs a
+/// name; numbers left empty are dropped. Recording needs FCP.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn contacts_are_kept_on_the_device() {
+    log();
+    let dir = std::env::temp_dir().join(format!("anvil-app-contacts-{}", std::process::id()));
+    let settings = dir.join("settings.json");
+    let _ = std::fs::remove_dir_all(&dir);
+
+    let alice = phone_with(
+        "alice",
+        "127.0.0.41",
+        Box::new(Quiet),
+        Some(settings.clone()),
+    )
+    .await;
+    assert!(alice.state().contacts.is_empty());
+    for line in [
+        "contact add 0412345678 Zed Zulu",
+        "contact add 1002 Bob Brown",
+    ] {
+        let done = alice
+            .execute(Command::parse_line(line).unwrap())
+            .await
+            .unwrap();
+        assert!(done.ok, "{line}: {done:?}");
+    }
+    let contacts = alice.state().contacts;
+    let names: Vec<_> = contacts.iter().map(|c| c.name.as_str()).collect();
+    assert_eq!(names, ["Bob Brown", "Zed Zulu"], "by name");
+    assert!(contacts.iter().all(|c| !c.id.is_empty()));
+    assert_ne!(contacts[0].id, contacts[1].id);
+
+    let mut bob = contacts[0].clone();
+    bob.company = Some("  Acme ".into());
+    bob.numbers.push(anvil_app::ContactNumber {
+        label: "mobile".into(),
+        number: "0499 000 111".into(),
+    });
+    bob.numbers.push(anvil_app::ContactNumber {
+        label: "fax".into(),
+        number: " ".into(),
+    });
+    assert!(
+        alice
+            .execute(Command::SaveContact {
+                contact: bob.clone()
+            })
+            .await
+            .unwrap()
+            .ok
+    );
+    let mut nameless = bob.clone();
+    nameless.name = " ".into();
+    assert!(alice
+        .execute(Command::SaveContact { contact: nameless })
+        .await
+        .is_err());
+    alice.shutdown().await;
+
+    let alice = phone_with("alice", "127.0.0.41", Box::new(Quiet), Some(settings)).await;
+    let contacts = alice.state().contacts;
+    assert_eq!(contacts.len(), 2);
+    assert_eq!(contacts[0].id, bob.id, "changed, not added");
+    assert_eq!(contacts[0].company.as_deref(), Some("Acme"));
+    let numbers: Vec<_> = contacts[0]
+        .numbers
+        .iter()
+        .map(|n| n.number.as_str())
+        .collect();
+    assert_eq!(numbers, ["1002", "0499 000 111"], "the empty one dropped");
+
+    let gone = alice
+        .execute(Command::DeleteContact { id: bob.id.clone() })
+        .await
+        .unwrap();
+    assert!(gone.ok);
+    assert_eq!(alice.state().contacts.len(), 1);
+    assert!(alice
+        .execute(Command::DeleteContact { id: bob.id })
+        .await
+        .is_err());
+
+    // Without FCP there is nothing to record with.
+    assert!(!alice.state().may_record);
+    assert!(alice
+        .execute(Command::parse_line("record on").unwrap())
+        .await
+        .is_err());
+    alice.shutdown().await;
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn answering_a_second_call_holds_the_first_and_resuming_swaps() {
     log();

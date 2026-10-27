@@ -41,6 +41,10 @@ pub struct SoftphoneConfig {
     pub feature_codes: std::collections::BTreeMap<String, String>,
     pub api_url: Option<String>,
     pub device_id: String,
+    /// The user may record a call they are on (FCP v0.25.466); absent from
+    /// an older FCP, which has no such route.
+    #[serde(default)]
+    pub may_record: bool,
 }
 
 impl SoftphoneConfig {

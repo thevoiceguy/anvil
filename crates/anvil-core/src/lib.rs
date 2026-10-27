@@ -598,6 +598,7 @@ impl Anvil {
                 pipeline: None,
                 srtp: ours.map(|ours| call::CallSrtp { ours, theirs: None }),
                 parked: None,
+                server_call: None,
             },
         );
 
@@ -954,6 +955,13 @@ impl Anvil {
     /// up too.
     pub fn set_audio_volume(&self, volume: audio::Volume) -> Result<(), AnvilError> {
         self.audio.set_volume(volume)
+    }
+
+    /// The server's id for `call` (FCP's `X-FCP-Call-Id`), once the server
+    /// has named it: from the INVITE of an incoming call, the 200 OK of
+    /// one placed. `None` from a server that does not name its calls.
+    pub fn server_call_id(&self, call: CallId) -> Option<String> {
+        self.calls.get(&call).and_then(|e| e.server_call.clone())
     }
 
     /// The volumes; `None` when the host sets none of its own.
@@ -1554,6 +1562,11 @@ async fn drive_outgoing_call(
                     .get("X-FCP-Parked")
                     .map(|orbit| orbit.trim().to_string())
                     .filter(|orbit| !orbit.is_empty());
+                entry.server_call = resp
+                    .headers()
+                    .get(uas::SERVER_CALL_HEADER)
+                    .map(|id| id.trim().to_string())
+                    .filter(|id| !id.is_empty());
             }
 
             let _ = events

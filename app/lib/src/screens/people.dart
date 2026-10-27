@@ -8,6 +8,7 @@ import '../design/format.dart';
 import '../design/theme.dart';
 import '../phone/phone_api.dart';
 import '../phone/phone_model.dart';
+import 'contacts.dart';
 
 class PeoplePage extends StatefulWidget {
   const PeoplePage({super.key, required this.model, required this.onDial});
@@ -27,6 +28,16 @@ class _PeoplePageState extends State<PeoplePage> {
     final people = widget.model.snapshot.people
         .where((p) => p.matches(_query))
         .toList();
+    final query = _query.trim().toLowerCase();
+    final contacts = widget.model.snapshot.contacts
+        .where(
+          (c) =>
+              query.isEmpty ||
+              c.name.toLowerCase().contains(query) ||
+              (c.company ?? '').toLowerCase().contains(query) ||
+              c.numbers.any((n) => n.number.contains(query)),
+        )
+        .toList();
     final favourites = people.where((p) => p.favourite).toList();
     final rest = people.where((p) => !p.favourite).toList();
     final theme = Theme.of(context);
@@ -38,25 +49,48 @@ class _PeoplePageState extends State<PeoplePage> {
       children: [
         Padding(
           padding: const EdgeInsets.all(12),
-          child: TextField(
-            key: const Key('peopleSearch'),
-            decoration: InputDecoration(
-              prefixIcon: const Icon(Icons.search),
-              hintText: s.peopleSearch,
-            ),
-            onChanged: (q) => setState(() => _query = q),
+          child: Row(
+            children: [
+              Expanded(
+                child: TextField(
+                  key: const Key('peopleSearch'),
+                  decoration: InputDecoration(
+                    prefixIcon: const Icon(Icons.search),
+                    hintText: s.peopleSearch,
+                  ),
+                  onChanged: (q) => setState(() => _query = q),
+                ),
+              ),
+              IconButton(
+                key: const Key('newContact'),
+                tooltip: s.contactNewTitle,
+                icon: const Icon(Icons.person_add_alt_1),
+                onPressed: () => editContact(context, widget.model),
+              ),
+            ],
           ),
         ),
         Expanded(
-          child: people.isEmpty
+          child: people.isEmpty && contacts.isEmpty
               ? Center(child: Text(s.peopleEmpty))
               : ListView(
                   children: [
+                    if (contacts.isNotEmpty) ...[
+                      header(s.contactsHeading),
+                      for (final c in contacts)
+                        ContactTile(
+                          model: widget.model,
+                          contact: c,
+                          onDial: widget.onDial,
+                        ),
+                    ],
                     if (favourites.isNotEmpty) ...[
                       header(s.favourites),
                       for (final p in favourites) _tile(context, p),
-                      header(s.everyone),
                     ],
+                    if ((favourites.isNotEmpty || contacts.isNotEmpty) &&
+                        rest.isNotEmpty)
+                      header(s.everyone),
                     for (final p in rest) _tile(context, p),
                   ],
                 ),

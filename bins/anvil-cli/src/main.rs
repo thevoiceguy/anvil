@@ -500,6 +500,9 @@ fn call_line(c: &anvil_app::CallView) -> String {
     if c.encrypted {
         flags.push("encrypted");
     }
+    if c.recording {
+        flags.push("recording");
+    }
     format!(
         "call {}  {:?} {:?}  {}{}{}",
         c.id,
@@ -582,6 +585,15 @@ fn print_change(change: &anvil_app::Change) {
                 }
             ),
         },
+        C::MayRecord { on } => println!(
+            "[record] {}",
+            if *on {
+                "this user may record calls (record on)"
+            } else {
+                "this user may not record calls"
+            }
+        ),
+        C::Contacts { count } => println!("[contacts] {count} on this device"),
     }
 }
 

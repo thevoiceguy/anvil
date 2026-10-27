@@ -33,6 +33,40 @@ pub struct State {
     /// Whether the server can wake this phone by push.
     #[serde(default)]
     pub push: Push,
+    /// The user may record a call they are on (FCP says so); the record
+    /// button shows only then.
+    #[serde(default)]
+    pub may_record: bool,
+    /// The contacts kept on this device, by name.
+    #[serde(default)]
+    pub contacts: Vec<Contact>,
+}
+
+/// A contact kept on this device: with any account, FCP's or not, and on
+/// this device only (`docs/APP.md` §Contacts).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Contact {
+    /// Made when the contact is first saved; empty in a new one.
+    #[serde(default)]
+    pub id: String,
+    pub name: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub company: Option<String>,
+    #[serde(default)]
+    pub numbers: Vec<ContactNumber>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub email: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub notes: Option<String>,
+}
+
+/// One of a contact's numbers: what it is (`mobile`, `work`, …) and what
+/// to dial.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ContactNumber {
+    #[serde(default)]
+    pub label: String,
+    pub number: String,
 }
 
 /// The tenant's brand, as a screen applies it (`docs/BRANDING.md`).
@@ -69,6 +103,8 @@ impl State {
             audio: AudioDevices::default(),
             playing: None,
             push: Push::Off,
+            may_record: false,
+            contacts: Vec::new(),
         }
     }
 
@@ -157,6 +193,9 @@ pub struct CallView {
     /// that woke the app named it.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub server_call: Option<String>,
+    /// The user is recording the call (they asked; FCP said yes).
+    #[serde(default)]
+    pub recording: bool,
 }
 
 impl CallView {
@@ -175,6 +214,7 @@ impl CallView {
             quality: None,
             connected_at: None,
             server_call: None,
+            recording: false,
         }
     }
 }
@@ -411,5 +451,13 @@ pub enum Change {
     /// What the server made of the phone's push address.
     Push {
         push: Push,
+    },
+    /// Whether the user may record calls, as FCP said.
+    MayRecord {
+        on: bool,
+    },
+    /// The contacts on this device changed.
+    Contacts {
+        count: u32,
     },
 }

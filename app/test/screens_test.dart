@@ -404,6 +404,176 @@ void main() {
     expect(phone.log, contains('call 1002'));
   });
 
+  testWidgets('a call is recorded when FCP lets the user, and stopped', (
+    tester,
+  ) async {
+    final phone = await signedIn(tester);
+    await tester.enterText(find.byKey(const Key('target')), '1002');
+    await tapKey(tester, 'call');
+    phone.set(
+      phone.state.copyWith(
+        calls: [phone.callOf(1).copyWith(state: CallState.connected)],
+      ),
+      'call',
+      call: 1,
+    );
+    await tester.pumpAndSettle();
+    expect(
+      find.byKey(const Key('record')),
+      findsNothing,
+      reason: 'FCP has not said the user may record',
+    );
+
+    // The icon: under it, the label may run to two lines.
+    Future<void> tapRecord() async {
+      await tester.tap(
+        find.descendant(
+          of: find.byKey(const Key('record')),
+          matching: find.byType(IconButton),
+        ),
+      );
+      await tester.pumpAndSettle();
+    }
+
+    phone.set(phone.state.copyWith(mayRecord: true), 'may_record');
+    await tester.pumpAndSettle();
+    await tapRecord();
+    expect(phone.log, contains('record 1 true'));
+    expect(find.byKey(const Key('recordingNow')), findsOneWidget);
+    expect(find.text('Stop recording'), findsOneWidget);
+
+    await tapRecord();
+    expect(phone.log, contains('record 1 false'));
+    expect(find.byKey(const Key('recordingNow')), findsNothing);
+
+    // A refusal (FCP's 403 or 409) is said, and the call is not marked.
+    phone.refuseWith = 'FCP refused: 409 the call is not anchored';
+    await tapRecord();
+    expect(find.textContaining('not anchored'), findsOneWidget);
+    expect(find.byKey(const Key('recordingNow')), findsNothing);
+  });
+
+  testWidgets('a call\'s More menu makes a contact, which then names it', (
+    tester,
+  ) async {
+    final phone = await signedIn(tester);
+    await tester.enterText(find.byKey(const Key('target')), '0412345678');
+    await tapKey(tester, 'call');
+    phone.set(
+      phone.state.copyWith(
+        calls: [phone.callOf(1).copyWith(state: CallState.connected)],
+      ),
+      'call',
+      call: 1,
+    );
+    await tester.pumpAndSettle();
+
+    await tapKey(tester, 'more');
+    await tapKey(tester, 'createContact');
+    expect(find.text('New contact'), findsOneWidget);
+    final number = tester.widget<TextFormField>(
+      find.byKey(const Key('contactNumber-0')),
+    );
+    expect(number.controller!.text, '0412345678', reason: 'filled in');
+
+    await tapKey(tester, 'saveContact');
+    expect(find.text('Enter a name'), findsOneWidget, reason: 'needs a name');
+    await tester.enterText(find.byKey(const Key('contactName')), 'Jo Smith');
+    await tester.enterText(find.byKey(const Key('contactLabel-0')), 'mobile');
+    await tapKey(tester, 'saveContact');
+    expect(phone.log, contains('contact c1 Jo Smith 0412345678'));
+    expect(phone.state.contacts.single.numbers.single.label, 'mobile');
+    expect(find.byKey(const Key('callName')), findsOneWidget);
+    expect(
+      tester.widget<Text>(find.byKey(const Key('callName'))).data,
+      'Jo Smith',
+    );
+
+    // Now a contact: More has nothing more to offer.
+    expect(
+      tester
+          .widget<IconButton>(
+            find.descendant(
+              of: find.byKey(const Key('more')),
+              matching: find.byType(IconButton),
+            ),
+          )
+          .onPressed,
+      isNull,
+    );
+  });
+
+  testWidgets('a recent call becomes a contact', (tester) async {
+    final phone = await signedIn(tester);
+    await go(tester, 'Recents');
+    await tapKey(tester, 'recentMenu-r2');
+    await tapKey(tester, 'createContact-r2');
+    await tester.enterText(find.byKey(const Key('contactName')), 'Carol');
+    await tapKey(tester, 'saveContact');
+    expect(phone.log, contains('contact c1 Carol +15125550100'));
+    expect(
+      find.descendant(
+        of: find.byKey(const Key('recent-r2')),
+        matching: find.text('Carol'),
+      ),
+      findsOneWidget,
+    );
+    await tapKey(tester, 'recentMenu-r2');
+    expect(find.byKey(const Key('createContact-r2')), findsNothing);
+  });
+
+  testWidgets('my contacts are made, changed, called and deleted', (
+    tester,
+  ) async {
+    final phone = await signedIn(tester);
+    await go(tester, 'Contacts');
+    await tapKey(tester, 'newContact');
+    await tester.enterText(find.byKey(const Key('contactName')), 'Zed Zulu');
+    await tester.enterText(
+      find.byKey(const Key('contactNumber-0')),
+      '0400111222',
+    );
+    await tapKey(tester, 'addNumber');
+    await tester.enterText(
+      find.byKey(const Key('contactNumber-1')),
+      '0299998888',
+    );
+    await tester.enterText(find.byKey(const Key('contactLabel-1')), 'work');
+    await tester.enterText(find.byKey(const Key('contactCompany')), 'Acme');
+    await tapKey(tester, 'saveContact');
+    expect(phone.log, contains('contact c1 Zed Zulu 0400111222'));
+    expect(find.text('My contacts'), findsOneWidget);
+    expect(find.byKey(const Key('contact-c1')), findsOneWidget);
+    expect(find.textContaining('0299998888 (work)'), findsOneWidget);
+
+    await tester.enterText(find.byKey(const Key('peopleSearch')), 'acme');
+    await tester.pumpAndSettle();
+    expect(find.byKey(const Key('contact-c1')), findsOneWidget);
+    expect(find.byKey(const Key('person-ann')), findsNothing);
+    await tester.enterText(find.byKey(const Key('peopleSearch')), '');
+    await tester.pumpAndSettle();
+
+    await tapKey(tester, 'dialContact-c1');
+    expect(phone.log, contains('call 0400111222'));
+    phone.set(phone.state.copyWith(calls: const []), 'call_ended', call: 1);
+    await tester.pumpAndSettle();
+    await go(tester, 'Contacts');
+
+    await tapKey(tester, 'contactMenu-c1');
+    await tapKey(tester, 'editContact-c1');
+    expect(find.text('Edit contact'), findsOneWidget);
+    await tapKey(tester, 'removeNumber-0');
+    await tapKey(tester, 'saveContact');
+    expect(phone.state.contacts.single.dial, '0299998888');
+
+    await tapKey(tester, 'contactMenu-c1');
+    await tapKey(tester, 'deleteContact-c1');
+    expect(find.text('Delete Zed Zulu from your contacts?'), findsOneWidget);
+    await tapKey(tester, 'confirmDeleteContact');
+    expect(phone.log, contains('delete contact c1'));
+    expect(find.text('My contacts'), findsNothing);
+  });
+
   testWidgets('voicemail plays, stops, is marked heard and deleted', (
     tester,
   ) async {

@@ -69,6 +69,17 @@ pub enum Command {
         #[serde(default)]
         call: Option<u64>,
     },
+    /// Record a call the user is on, or stop the recording they started
+    /// (needs FCP, and its administrator's leave: `may_record`).
+    Record {
+        #[serde(default)]
+        call: Option<u64>,
+        on: bool,
+    },
+    /// Keep a contact on this device: a new one (no id) or a change to one.
+    SaveContact { contact: crate::state::Contact },
+    /// Forget a contact kept on this device.
+    DeleteContact { id: String },
     /// Mark a voicemail message heard.
     Heard { id: String },
     /// Delete a voicemail message.
@@ -172,7 +183,9 @@ impl Response {
 impl Command {
     /// A prompt line: `call 1002`, `answer`, `hangup 3`, `hold`, `resume`,
     /// `mute`, `unmute`, `dtmf 123#`, `transfer 1003`, `attended 1 2`,
-    /// `park`, `dnd on`, `forward busy 1003`, `forward all off`,
+    /// `park`, `record on`, `record off`, `dnd on`, `forward busy 1003`,
+    /// `forward all off`, `contact add 0412345678 Jo Smith`,
+    /// `contact delete <id>`,
     /// `waiting off`, `heard <id>`, `delete <id>`, `play <id>`, `stop`,
     /// `favourite alice`,
     /// `unfavourite alice`, `recents clear`, `recents hide <id>`, `audio in USB Headset`, `audio out default`,
@@ -263,6 +276,29 @@ impl Command {
             }
             "park" => Command::Park {
                 call: id(words.get(1))?,
+            },
+            "record" => Command::Record {
+                on: on_off(words.get(1)).ok_or("record needs on or off")?,
+                call: id(words.get(2))?,
+            },
+            "contact" => match words.get(1).map(|w| w.to_ascii_lowercase()).as_deref() {
+                Some("add") => Command::SaveContact {
+                    contact: crate::state::Contact {
+                        id: String::new(),
+                        name: rest(&words, 3).ok_or("contact add needs a number and a name")?,
+                        company: None,
+                        numbers: vec![crate::state::ContactNumber {
+                            label: String::new(),
+                            number: need(words.get(2), "a number")?,
+                        }],
+                        email: None,
+                        notes: None,
+                    },
+                },
+                Some("delete") => Command::DeleteContact {
+                    id: need(words.get(2), "a contact id")?,
+                },
+                _ => return Err("contact add <number> <name>, or contact delete <id>".into()),
             },
             "heard" => Command::Heard {
                 id: need(words.get(1), "a message id")?,
@@ -435,6 +471,34 @@ mod tests {
             }
         );
         assert!(Command::parse_line("volume speaker loud").is_err());
+        assert_eq!(
+            Command::parse_line("record on").unwrap(),
+            Command::Record {
+                call: None,
+                on: true
+            }
+        );
+        assert_eq!(
+            Command::parse_line("record off 2").unwrap(),
+            Command::Record {
+                call: Some(2),
+                on: false
+            }
+        );
+        assert!(Command::parse_line("record").is_err());
+        let Command::SaveContact { contact } =
+            Command::parse_line("contact add 0412345678 Jo Smith").unwrap()
+        else {
+            panic!("a contact");
+        };
+        assert_eq!(contact.name, "Jo Smith");
+        assert_eq!(contact.numbers[0].number, "0412345678");
+        assert!(contact.id.is_empty(), "the phone gives it one");
+        assert_eq!(
+            Command::parse_line("contact delete c1").unwrap(),
+            Command::DeleteContact { id: "c1".into() }
+        );
+        assert!(Command::parse_line("contact add 0412345678").is_err());
         assert_eq!(
             Command::parse_line("audio echo off").unwrap(),
             Command::Processing {
