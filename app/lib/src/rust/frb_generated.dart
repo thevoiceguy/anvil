@@ -1893,15 +1893,16 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   Contact dco_decode_contact(dynamic raw) {
     // Codec=Dco (DartCObject based), see doc to use other codecs
     final arr = raw as List<dynamic>;
-    if (arr.length != 6)
-      throw Exception('unexpected arr length: expect 6 but see ${arr.length}');
+    if (arr.length != 7)
+      throw Exception('unexpected arr length: expect 7 but see ${arr.length}');
     return Contact(
       id: dco_decode_String(arr[0]),
-      name: dco_decode_String(arr[1]),
-      company: dco_decode_opt_String(arr[2]),
-      numbers: dco_decode_list_contact_number(arr[3]),
-      email: dco_decode_opt_String(arr[4]),
-      notes: dco_decode_opt_String(arr[5]),
+      onAccount: dco_decode_bool(arr[1]),
+      name: dco_decode_String(arr[2]),
+      company: dco_decode_opt_String(arr[3]),
+      numbers: dco_decode_list_contact_number(arr[4]),
+      email: dco_decode_opt_String(arr[5]),
+      notes: dco_decode_opt_String(arr[6]),
     );
   }
 
@@ -2554,6 +2555,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   Contact sse_decode_contact(SseDeserializer deserializer) {
     // Codec=Sse (Serialization based), see doc to use other codecs
     var var_id = sse_decode_String(deserializer);
+    var var_onAccount = sse_decode_bool(deserializer);
     var var_name = sse_decode_String(deserializer);
     var var_company = sse_decode_opt_String(deserializer);
     var var_numbers = sse_decode_list_contact_number(deserializer);
@@ -2561,6 +2563,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     var var_notes = sse_decode_opt_String(deserializer);
     return Contact(
       id: var_id,
+      onAccount: var_onAccount,
       name: var_name,
       company: var_company,
       numbers: var_numbers,
@@ -3371,6 +3374,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   void sse_encode_contact(Contact self, SseSerializer serializer) {
     // Codec=Sse (Serialization based), see doc to use other codecs
     sse_encode_String(self.id, serializer);
+    sse_encode_bool(self.onAccount, serializer);
     sse_encode_String(self.name, serializer);
     sse_encode_opt_String(self.company, serializer);
     sse_encode_list_contact_number(self.numbers, serializer);

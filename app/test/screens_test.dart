@@ -77,13 +77,14 @@ PhoneSnapshot withData(PhoneSnapshot s) => s.copyWith(
 Future<FakePhone> signedIn(
   WidgetTester tester, {
   Size size = const Size(1000, 1400),
+  PhoneSnapshot Function(PhoneSnapshot) seed = withData,
 }) async {
   tester.view.physicalSize = size;
   tester.view.devicePixelRatio = 1;
   addTearDown(tester.view.reset);
   final phone = FakePhone()
     ..saved = const SignedInAccountFake()
-    ..seed = withData;
+    ..seed = seed;
   await tester.pumpWidget(AnvilApp(phone: phone));
   await tester.pumpAndSettle();
   return phone;
@@ -542,6 +543,12 @@ void main() {
     await tester.enterText(find.byKey(const Key('contactCompany')), 'Acme');
     await tapKey(tester, 'saveContact');
     expect(phone.log, contains('contact c1 Zed Zulu 0400111222'));
+    expect(
+      phone.state.contacts.single.onAccount,
+      isTrue,
+      reason: 'on the account when there is one',
+    );
+    expect(find.byKey(const Key('contactPlace-c1')), findsOneWidget);
     expect(find.text('My contacts'), findsOneWidget);
     expect(find.byKey(const Key('contact-c1')), findsOneWidget);
     expect(find.textContaining('0299998888 (work)'), findsOneWidget);
@@ -560,18 +567,82 @@ void main() {
     await go(tester, 'Contacts');
 
     await tapKey(tester, 'contactMenu-c1');
+    expect(
+      find.byKey(const Key('moveContact-c1')),
+      findsNothing,
+      reason: 'already on the account',
+    );
     await tapKey(tester, 'editContact-c1');
     expect(find.text('Edit contact'), findsOneWidget);
+    expect(
+      find.byKey(const Key('contactPlace')),
+      findsNothing,
+      reason: 'chosen when made',
+    );
     await tapKey(tester, 'removeNumber-0');
     await tapKey(tester, 'saveContact');
     expect(phone.state.contacts.single.dial, '0299998888');
 
     await tapKey(tester, 'contactMenu-c1');
     await tapKey(tester, 'deleteContact-c1');
-    expect(find.text('Delete Zed Zulu from your contacts?'), findsOneWidget);
+    expect(
+      find.text(
+        'Delete Zed Zulu from your contacts? '
+        'They go from every app you sign in to.',
+      ),
+      findsOneWidget,
+    );
     await tapKey(tester, 'confirmDeleteContact');
     expect(phone.log, contains('delete contact c1'));
     expect(find.text('My contacts'), findsNothing);
+  });
+
+  testWidgets('a contact kept on this device moves to the account', (
+    tester,
+  ) async {
+    final phone = await signedIn(tester);
+    await go(tester, 'Contacts');
+    await tapKey(tester, 'newContact');
+    await tapKey(tester, 'contactPlace-device');
+    await tester.enterText(find.byKey(const Key('contactName')), 'Dee Dunn');
+    await tester.enterText(find.byKey(const Key('contactNumber-0')), '1004');
+    await tapKey(tester, 'saveContact');
+    expect(phone.state.contacts.single.onAccount, isFalse);
+    expect(
+      tester
+          .widget<Icon>(find.byKey(const Key('contactPlace-c1')))
+          .semanticLabel,
+      'On this device',
+    );
+
+    await tapKey(tester, 'contactMenu-c1');
+    await tapKey(tester, 'moveContact-c1');
+    expect(phone.state.contacts.single.onAccount, isTrue);
+    expect(phone.state.contacts.single.dial, '1004');
+    expect(
+      tester
+          .widget<Icon>(find.byKey(const Key('contactPlace-c1')))
+          .semanticLabel,
+      'On your account',
+    );
+  });
+
+  testWidgets('without an account, contacts stay on the device unmarked', (
+    tester,
+  ) async {
+    final phone = await signedIn(
+      tester,
+      seed: (s) => s.copyWith(people: const [ann]),
+    );
+    await go(tester, 'Contacts');
+    await tapKey(tester, 'newContact');
+    expect(find.byKey(const Key('contactPlace')), findsNothing);
+    await tester.enterText(find.byKey(const Key('contactName')), 'Dee Dunn');
+    await tapKey(tester, 'saveContact');
+    expect(phone.state.contacts.single.onAccount, isFalse);
+    expect(find.byKey(const Key('contactPlace-c1')), findsNothing);
+    await tapKey(tester, 'contactMenu-c1');
+    expect(find.byKey(const Key('moveContact-c1')), findsNothing);
   });
 
   testWidgets('voicemail plays, stops, is marked heard and deleted', (

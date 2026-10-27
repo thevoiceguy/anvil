@@ -292,6 +292,7 @@ class FakePhone implements PhoneApi {
     _refuse();
     final saved = Contact(
       id: contact.id.isEmpty ? 'c${++_contacts}' : contact.id,
+      onAccount: contact.onAccount,
       name: contact.name.trim(),
       company: contact.company,
       numbers: contact.numbers,

@@ -1,6 +1,6 @@
 //! What a user sees through FCP's API, beyond what SIP carries (FCP's
 //! `docs/SOFTPHONE.md` §2.7): call history, the directory with presence,
-//! voicemail, and the user's own live events.
+//! voicemail, the user's own contacts, and the user's own live events.
 
 use futures_util::{SinkExt, StreamExt};
 use serde::{Deserialize, Serialize};
@@ -84,6 +84,43 @@ pub struct MailboxStats {
     pub new_messages: u64,
     pub heard_messages: u64,
     pub saved_messages: u64,
+}
+
+/// One of a contact's numbers (`/me/contacts`): what it is (`mobile`,
+/// `work`, …) and what to dial.
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize)]
+pub struct ContactNumber {
+    #[serde(default)]
+    pub label: String,
+    pub number: String,
+}
+
+/// A contact the user keeps on their account (`/me/contacts`, FCP
+/// v0.25.467): every app they sign in to has it, and so does their site.
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize)]
+pub struct PersonalContact {
+    /// `contact-` and a UUID; FCP makes it.
+    pub id: String,
+    pub name: String,
+    pub company: Option<String>,
+    #[serde(default)]
+    pub numbers: Vec<ContactNumber>,
+    pub email: Option<String>,
+    pub notes: Option<String>,
+    /// RFC 3339.
+    pub created_at: String,
+    pub updated_at: String,
+}
+
+/// A contact as written: [`FcpClient::create_contact`] and
+/// [`FcpClient::update_contact`].
+#[derive(Debug, Clone, Default, PartialEq, Eq, Deserialize, Serialize)]
+pub struct ContactFields {
+    pub name: String,
+    pub company: Option<String>,
+    pub numbers: Vec<ContactNumber>,
+    pub email: Option<String>,
+    pub notes: Option<String>,
 }
 
 /// Which calls [`FcpClient::calls`] lists.
@@ -325,6 +362,71 @@ impl FcpClient {
             None,
         )
         .await?;
+        Ok(())
+    }
+
+    /// The user's contacts, by name, matching `search` when given (a word
+    /// in a name, company, email or number).
+    pub async fn contacts(
+        &self,
+        search: Option<&str>,
+        limit: Option<u32>,
+        cursor: Option<&str>,
+    ) -> Result<Page<PersonalContact>, FcpError> {
+        let path = with_query(
+            "/me/contacts",
+            &[
+                ("q", search.map(str::to_string)),
+                ("limit", limit.map(|l| l.to_string())),
+                ("cursor", cursor.map(str::to_string)),
+            ],
+        );
+        json(
+            self.api_with(reqwest::Method::GET, &path, None).await?,
+            "/me/contacts",
+        )
+        .await
+    }
+
+    /// Keep a new contact on the user's account; FCP gives it its id.
+    pub async fn create_contact(
+        &self,
+        contact: &ContactFields,
+    ) -> Result<PersonalContact, FcpError> {
+        let body = serde_json::to_value(contact)
+            .map_err(|e| FcpError::Invalid(format!("a contact: {e}")))?;
+        json(
+            self.api_with(reqwest::Method::POST, "/me/contacts", Some(&body))
+                .await?,
+            "/me/contacts",
+        )
+        .await
+    }
+
+    /// Change one of the user's contacts: every field as given.
+    pub async fn update_contact(
+        &self,
+        id: &str,
+        contact: &ContactFields,
+    ) -> Result<PersonalContact, FcpError> {
+        let body = serde_json::to_value(contact)
+            .map_err(|e| FcpError::Invalid(format!("a contact: {e}")))?;
+        json(
+            self.api_with(
+                reqwest::Method::PUT,
+                &format!("/me/contacts/{id}"),
+                Some(&body),
+            )
+            .await?,
+            "/me/contacts",
+        )
+        .await
+    }
+
+    /// Delete one of the user's contacts, from every app and their site.
+    pub async fn delete_contact(&self, id: &str) -> Result<(), FcpError> {
+        self.api_with(reqwest::Method::DELETE, &format!("/me/contacts/{id}"), None)
+            .await?;
         Ok(())
     }
 

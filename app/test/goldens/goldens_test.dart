@@ -29,6 +29,12 @@ PhoneSnapshot seeded(PhoneSnapshot s) => s.copyWith(
       company: 'Acme Plumbing',
       numbers: [ContactNumber(label: 'mobile', number: '0412345678')],
     ),
+    Contact(
+      id: 'contact-2',
+      onAccount: true,
+      name: 'Kim Park',
+      numbers: [ContactNumber(label: 'work', number: '0298765432')],
+    ),
   ],
   people: const [
     Person(

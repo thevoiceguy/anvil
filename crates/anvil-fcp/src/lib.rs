@@ -38,8 +38,8 @@ pub use discovery::{
     discover, discovery_login, sign_in_methods, Server, SignInMethods, SsoProvider,
 };
 pub use me::{
-    CallQuery, CallRecord, DirectoryEntry, MailboxStats, Page, UserEvent, UserEvents,
-    VoicemailMessage,
+    CallQuery, CallRecord, ContactFields, ContactNumber, DirectoryEntry, MailboxStats, Page,
+    PersonalContact, UserEvent, UserEvents, VoicemailMessage,
 };
 pub use remember::LastSignIn;
 pub use session::{AppClient, DeviceCredentials, FileTokenStore, Session, TokenStore};

@@ -162,11 +162,12 @@ Future<void> park({BigInt? call}) =>
 Future<void> record({BigInt? call, required bool on_}) =>
     RustLib.instance.api.crateApiPhoneRecord(call: call, on_: on_);
 
-/// Keep a contact on this device: a new one (empty id) or a change to one.
+/// Keep a contact: a new one (empty id) or a change to one, on this device
+/// or on the account (`on_account`; a device's contact saved so moves).
 Future<void> saveContact({required Contact contact}) =>
     RustLib.instance.api.crateApiPhoneSaveContact(contact: contact);
 
-/// Forget a contact kept on this device.
+/// Delete a contact, from this device or from the account.
 Future<void> deleteContact({required String id}) =>
     RustLib.instance.api.crateApiPhoneDeleteContact(id: id);
 
@@ -448,10 +449,14 @@ class CallingSettings {
           noAnswerSecs == other.noAnswerSecs;
 }
 
-/// A contact kept on this device.
+/// A contact the user keeps, on this device or on their FCP account.
 class Contact {
-  /// Empty in a new one; the phone gives it one when saved.
+  /// Empty in a new one; the phone (or FCP) gives it one when saved.
   final String id;
+
+  /// Kept on the user's FCP account: every app they sign in to has it.
+  /// Saving a device's contact with this set moves it there.
+  final bool onAccount;
   final String name;
   final String? company;
   final List<ContactNumber> numbers;
@@ -460,6 +465,7 @@ class Contact {
 
   const Contact({
     required this.id,
+    required this.onAccount,
     required this.name,
     this.company,
     required this.numbers,
@@ -470,6 +476,7 @@ class Contact {
   @override
   int get hashCode =>
       id.hashCode ^
+      onAccount.hashCode ^
       name.hashCode ^
       company.hashCode ^
       numbers.hashCode ^
@@ -482,6 +489,7 @@ class Contact {
       other is Contact &&
           runtimeType == other.runtimeType &&
           id == other.id &&
+          onAccount == other.onAccount &&
           name == other.name &&
           company == other.company &&
           numbers == other.numbers &&
@@ -735,7 +743,7 @@ class PhoneState {
   /// The user may record calls (FCP says so): the record button shows.
   final bool mayRecord;
 
-  /// The contacts on this device, by name.
+  /// The user's contacts, by name: on this device and on their account.
   final List<Contact> contacts;
 
   const PhoneState({

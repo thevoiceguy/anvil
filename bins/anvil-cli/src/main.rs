@@ -593,7 +593,7 @@ fn print_change(change: &anvil_app::Change) {
                 "this user may not record calls"
             }
         ),
-        C::Contacts { count } => println!("[contacts] {count} on this device"),
+        C::Contacts { count } => println!("[contacts] {count}"),
     }
 }
 

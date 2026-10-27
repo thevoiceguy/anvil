@@ -1,6 +1,7 @@
-// Contacts kept on this device (`docs/APP.md` §4, Contacts): made from a
-// call, a recent call or by hand, changed and deleted; and the "More"
-// menu that offers "Create contact" and whatever comes after it.
+// The user's contacts (`docs/APP.md` §4, Contacts): kept on this device or,
+// signed in to FCP, on their account; made from a call, a recent call or
+// by hand, changed, moved to the account and deleted; and the "More" menu
+// that offers "Create contact" and whatever comes after it.
 
 import 'package:flutter/material.dart';
 
@@ -78,7 +79,8 @@ Future<void> showMoreMenu(BuildContext anchor, List<MoreAction> actions) async {
 }
 
 /// Make a contact (from `number` and `name`, when known) or change
-/// `contact`, and keep it on this device.
+/// `contact`. A new one goes on the account when there is one, unless the
+/// user picks this device.
 Future<void> editContact(
   BuildContext context,
   PhoneModel model, {
@@ -92,13 +94,19 @@ Future<void> editContact(
       contact:
           contact ??
           Contact(
+            onAccount: model.snapshot.hasAccount,
             name: name ?? '',
             numbers: [if (number != null) ContactNumber(number: number)],
           ),
+      canUseAccount: model.snapshot.hasAccount,
     ),
   );
   if (made != null) await model.run(() => model.api.saveContact(made));
 }
+
+/// Move a device's `contact` to the account.
+Future<void> moveContactToAccount(PhoneModel model, Contact contact) =>
+    model.run(() => model.api.saveContact(contact.toAccount()));
 
 /// Delete `contact` once the user says so.
 Future<void> deleteContact(
@@ -110,7 +118,11 @@ Future<void> deleteContact(
   final sure = await showDialog<bool>(
     context: context,
     builder: (context) => AlertDialog(
-      content: Text(s.deleteContactConfirm(contact.name)),
+      content: Text(
+        contact.onAccount
+            ? s.deleteAccountContactConfirm(contact.name)
+            : s.deleteContactConfirm(contact.name),
+      ),
       actions: [
         TextButton(
           onPressed: () => Navigator.pop(context, false),
@@ -127,10 +139,16 @@ Future<void> deleteContact(
   if (sure == true) await model.run(() => model.api.deleteContact(contact.id));
 }
 
-/// A contact's name, company, numbers, email and notes.
+/// A contact's name, company, numbers, email and notes; and, for a new one
+/// when there is an account, where it is kept.
 class ContactDialog extends StatefulWidget {
-  const ContactDialog({super.key, required this.contact});
+  const ContactDialog({
+    super.key,
+    required this.contact,
+    this.canUseAccount = false,
+  });
   final Contact contact;
+  final bool canUseAccount;
 
   @override
   State<ContactDialog> createState() => _ContactDialogState();
@@ -142,6 +160,7 @@ class _ContactDialogState extends State<ContactDialog> {
   late final _company = TextEditingController(text: widget.contact.company);
   late final _email = TextEditingController(text: widget.contact.email);
   late final _notes = TextEditingController(text: widget.contact.notes);
+  late bool _onAccount = widget.contact.onAccount;
   late final List<(TextEditingController, TextEditingController)> _numbers = [
     for (final n in widget.contact.numbers)
       (
@@ -175,6 +194,7 @@ class _ContactDialogState extends State<ContactDialog> {
       context,
       Contact(
         id: widget.contact.id,
+        onAccount: _onAccount,
         name: _name.text.trim(),
         company: _text(_company),
         numbers: [
@@ -206,6 +226,34 @@ class _ContactDialogState extends State<ContactDialog> {
             child: Column(
               mainAxisSize: MainAxisSize.min,
               children: [
+                if (widget.canUseAccount && widget.contact.id.isEmpty)
+                  Padding(
+                    padding: const EdgeInsets.only(bottom: 8),
+                    child: SegmentedButton<bool>(
+                      key: const Key('contactPlace'),
+                      segments: [
+                        ButtonSegment(
+                          value: true,
+                          icon: const Icon(Icons.cloud_outlined),
+                          label: Text(
+                            s.contactPlaceAccount,
+                            key: const Key('contactPlace-account'),
+                          ),
+                        ),
+                        ButtonSegment(
+                          value: false,
+                          icon: const Icon(Icons.smartphone),
+                          label: Text(
+                            s.contactPlaceDevice,
+                            key: const Key('contactPlace-device'),
+                          ),
+                        ),
+                      ],
+                      selected: {_onAccount},
+                      onSelectionChanged: (v) =>
+                          setState(() => _onAccount = v.first),
+                    ),
+                  ),
                 TextFormField(
                   key: const Key('contactName'),
                   controller: _name,
@@ -301,7 +349,8 @@ class _ContactDialogState extends State<ContactDialog> {
 }
 
 /// A contact in a list: tapped, its first number is dialled; its menu
-/// edits or deletes it.
+/// edits, moves to the account or deletes it. With an account, each is
+/// marked with where it is kept.
 class ContactTile extends StatelessWidget {
   const ContactTile({
     super.key,
@@ -327,10 +376,29 @@ class ContactTile extends StatelessWidget {
         .map((n) => n.label.isEmpty ? n.number : '${n.number} (${n.label})')
         .join(' · ');
     final dial = contact.dial;
+    final hasAccount = model.snapshot.hasAccount;
+    final place = contact.onAccount ? s.contactOnAccount : s.contactOnDevice;
     return ListTile(
       key: Key('contact-${contact.id}'),
       leading: CircleAvatar(radius: 20, child: Text(initials)),
-      title: Text(contact.name),
+      title: Row(
+        children: [
+          Flexible(child: Text(contact.name, overflow: TextOverflow.ellipsis)),
+          if (hasAccount)
+            Padding(
+              padding: const EdgeInsets.only(left: 6),
+              child: Tooltip(
+                message: place,
+                child: Icon(
+                  contact.onAccount ? Icons.cloud_outlined : Icons.smartphone,
+                  key: Key('contactPlace-${contact.id}'),
+                  size: 16,
+                  semanticLabel: place,
+                ),
+              ),
+            ),
+        ],
+      ),
       subtitle: Text(
         [?contact.company, if (numbers.isNotEmpty) numbers].join(' — '),
       ),
@@ -353,6 +421,12 @@ class ContactTile extends StatelessWidget {
                 onTap: () => editContact(context, model, contact: contact),
                 child: Text(s.editContactButton),
               ),
+              if (hasAccount && !contact.onAccount)
+                PopupMenuItem(
+                  key: Key('moveContact-${contact.id}'),
+                  onTap: () => moveContactToAccount(model, contact),
+                  child: Text(s.moveContactToAccountButton),
+                ),
               PopupMenuItem(
                 key: Key('deleteContact-${contact.id}'),
                 onTap: () => deleteContact(context, model, contact),

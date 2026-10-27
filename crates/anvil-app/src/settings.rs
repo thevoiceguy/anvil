@@ -169,6 +169,7 @@ mod tests {
             hidden_recents: ["cdr-1".to_string()].into(),
             contacts: vec![crate::Contact {
                 id: "c1".into(),
+                on_account: false,
                 name: "Jo Smith".into(),
                 company: Some("Acme".into()),
                 numbers: vec![crate::ContactNumber {

@@ -593,7 +593,24 @@ class StringsEn extends Strings {
   String get contactOnDevice => 'On this device';
 
   @override
+  String get contactOnAccount => 'On your account';
+
+  @override
+  String get contactPlaceAccount => 'My account';
+
+  @override
+  String get contactPlaceDevice => 'This device';
+
+  @override
+  String get moveContactToAccountButton => 'Move to my account';
+
+  @override
   String deleteContactConfirm(String name) {
     return 'Delete $name from your contacts?';
+  }
+
+  @override
+  String deleteAccountContactConfirm(String name) {
+    return 'Delete $name from your contacts? They go from every app you sign in to.';
   }
 }
