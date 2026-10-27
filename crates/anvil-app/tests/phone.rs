@@ -6,9 +6,11 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use anvil_app::control::{Client, Endpoint};
-use anvil_app::{AudioKind, AudioProcessing, CallState, Change, Command, Phone, PhoneConfig};
+use anvil_app::{
+    AudioKind, AudioProcessing, AudioVolume, CallState, Change, Command, Phone, PhoneConfig,
+};
 use anvil_core::audio::{
-    AudioFormat, AudioFrame, AudioHost, AudioSink, AudioSource, DeviceInfo, Processing,
+    AudioFormat, AudioFrame, AudioHost, AudioSink, AudioSource, DeviceInfo, Processing, Volume,
 };
 use anvil_core::config::{AccountConfig, MediaConfig};
 use anvil_core::{AnvilConfig, AnvilError, BrandConfig, Transport};
@@ -464,6 +466,95 @@ async fn echo_cancellation_and_noise_suppression_are_kept_for_the_next_start() {
     assert_eq!(alice.state().audio.processing, None);
     assert!(alice
         .execute(Command::parse_line("audio noise off").unwrap())
+        .await
+        .is_err());
+    alice.shutdown().await;
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// A host with volumes of its own, keeping what it is told.
+struct Loudness(Arc<parking_lot::Mutex<Volume>>);
+
+impl AudioHost for Loudness {
+    fn make_capture(&self, cfg: AudioFormat) -> Result<Box<dyn AudioSource>, AnvilError> {
+        Quiet.make_capture(cfg)
+    }
+    fn make_playback(&self, cfg: AudioFormat) -> Result<Box<dyn AudioSink>, AnvilError> {
+        Quiet.make_playback(cfg)
+    }
+    fn devices(&self) -> Vec<DeviceInfo> {
+        Vec::new()
+    }
+    fn set_volume(&self, volume: Volume) -> Result<(), AnvilError> {
+        *self.0.lock() = volume;
+        Ok(())
+    }
+    fn volume(&self) -> Option<Volume> {
+        Some(*self.0.lock())
+    }
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn the_volumes_are_kept_for_the_next_start() {
+    log();
+    let dir = std::env::temp_dir().join(format!("anvil-app-volume-{}", std::process::id()));
+    let settings = dir.join("settings.json");
+    let _ = std::fs::remove_dir_all(&dir);
+
+    let told = Arc::new(parking_lot::Mutex::new(Volume::default()));
+    let alice = phone_with(
+        "alice",
+        "127.0.0.40",
+        Box::new(Loudness(Arc::clone(&told))),
+        Some(settings.clone()),
+    )
+    .await;
+    assert_eq!(
+        alice.state().audio.volume,
+        Some(AudioVolume {
+            microphone: 100,
+            speaker: 100
+        }),
+        "the sound as it is unless set"
+    );
+    for line in ["volume mic 70", "volume speaker 140"] {
+        let done = alice
+            .execute(Command::parse_line(line).unwrap())
+            .await
+            .unwrap();
+        assert!(done.ok, "{line}: {done:?}");
+    }
+    let set = Volume {
+        microphone: 70,
+        speaker: 140,
+    };
+    assert_eq!(*told.lock(), set);
+    assert_eq!(
+        alice.state().audio.volume,
+        Some(AudioVolume {
+            microphone: 70,
+            speaker: 140
+        })
+    );
+    alice.shutdown().await;
+
+    // Started again: the host is told before any call.
+    let again = Arc::new(parking_lot::Mutex::new(Volume::default()));
+    let alice = phone_with(
+        "alice",
+        "127.0.0.40",
+        Box::new(Loudness(Arc::clone(&again))),
+        Some(settings.clone()),
+    )
+    .await;
+    assert_eq!(*again.lock(), set);
+    alice.shutdown().await;
+
+    // A host whose volume the system sets: nothing to show, and refused.
+    let alice = phone_with("alice", "127.0.0.40", Box::new(Quiet), Some(settings)).await;
+    assert_eq!(alice.state().audio.volume, None);
+    assert!(alice
+        .execute(Command::parse_line("volume mic 50").unwrap())
         .await
         .is_err());
     alice.shutdown().await;

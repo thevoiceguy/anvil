@@ -13,6 +13,7 @@ import '../mobile/bridge.dart';
 import '../mobile/platform.dart';
 import '../phone/phone_api.dart';
 import '../phone/phone_model.dart';
+import 'audio_controls.dart';
 
 /// The call the in-call screen is about: the one up, else one being placed,
 /// else a held one.
@@ -111,6 +112,26 @@ class _InCallPanelState extends State<InCallPanel> {
 
   PhoneModel get model => widget.model;
 
+  /// The call's microphone and speaker, and how loud: changed while it is
+  /// up (a headset plugged in, a speaker too quiet).
+  Future<void> _audio(BuildContext context) => showModalBottomSheet<void>(
+    context: context,
+    isScrollControlled: true,
+    builder: (context) => SafeArea(
+      child: Padding(
+        padding: const EdgeInsets.symmetric(vertical: 16),
+        child: ListenableBuilder(
+          listenable: model,
+          builder: (context, _) => AudioControls(
+            key: const Key('audioSheet'),
+            snap: model.snapshot,
+            model: model,
+          ),
+        ),
+      ),
+    ),
+  );
+
   Future<void> _transfer(PhoneCall call) async {
     final s = Strings.of(context);
     final choice = await showDialog<(String, bool)>(
@@ -196,7 +217,14 @@ class _InCallPanelState extends State<InCallPanel> {
                           : null,
                     ),
                     if (MobileScope.maybeOf(context) case final mobile?)
-                      _AudioRouteButton(mobile: mobile),
+                      _AudioRouteButton(mobile: mobile)
+                    else
+                      _RoundButton(
+                        key: const Key('audio'),
+                        icon: Icons.headset_mic,
+                        label: s.audioButton,
+                        onPressed: () => _audio(context),
+                      ),
                     _RoundButton(
                       key: const Key('hold'),
                       icon: call.held ? Icons.play_arrow : Icons.pause,

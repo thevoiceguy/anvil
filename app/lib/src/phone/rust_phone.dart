@@ -238,6 +238,8 @@ class RustPhone implements PhoneApi {
       ringtone: s.ringtone,
       echoCancellation: s.echoCancellation,
       noiseSuppression: s.noiseSuppression,
+      microphoneVolume: s.microphoneVolume,
+      speakerVolume: s.speakerVolume,
       playing: s.playing,
     );
   }
@@ -374,6 +376,10 @@ class RustPhone implements PhoneApi {
     echoCancellation: echoCancellation,
     noiseSuppression: noiseSuppression,
   );
+
+  @override
+  Future<void> setAudioVolume({int? microphone, int? speaker}) =>
+      rust.setAudioVolume(microphone: microphone, speaker: speaker);
 
   @override
   Future<void> refresh() => rust.refresh();

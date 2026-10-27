@@ -135,7 +135,9 @@ share sheet.
   such as `alice` is dialled as it is.
 - **In a call.** Mute, hold, keypad (DTMF), speaker or headset, blind and
   attended transfer, park, add a second call and swap, end. Call quality and
-  encryption shown.
+  encryption shown. On a desktop, **Audio** opens the microphone and the
+  speaker and their volumes (0–200 %, 100 the sound as it is): the call
+  moves to a device chosen at once (D8 findings 18 and 19).
 - **Incoming.** Answer, decline, send to voicemail, the caller's name from the
   directory. A second call while one is up.
 - **Recents.** History, missed calls marked, call back. Clear them all, or

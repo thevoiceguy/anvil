@@ -188,7 +188,7 @@ Future<void> hideRecent({required String id}) =>
     RustLib.instance.api.crateApiPhoneHideRecent(id: id);
 
 /// Use this microphone (`input`) or speaker by id, `None` for the system's
-/// default, for the calls set up from now on.
+/// default; the call that is up moves to it.
 Future<void> chooseAudio({required bool input, String? device}) =>
     RustLib.instance.api.crateApiPhoneChooseAudio(input: input, device: device);
 
@@ -210,6 +210,13 @@ Future<void> setAudioProcessing({
   echoCancellation: echoCancellation,
   noiseSuppression: noiseSuppression,
 );
+
+/// Set the microphone's or the speaker's volume in percent (`None` leaves
+/// it as it is), in the call that is up too.
+Future<void> setAudioVolume({int? microphone, int? speaker}) => RustLib
+    .instance
+    .api
+    .crateApiPhoneSetAudioVolume(microphone: microphone, speaker: speaker);
 
 /// Read the user's data from FCP again.
 Future<void> refresh() => RustLib.instance.api.crateApiPhoneRefresh();
@@ -636,6 +643,11 @@ class PhoneState {
   final bool? echoCancellation;
   final bool? noiseSuppression;
 
+  /// The microphone's and the speaker's volume in percent (100 the sound
+  /// as it is, up to 200); `None` when the system sets them.
+  final int? microphoneVolume;
+  final int? speakerVolume;
+
   /// The voicemail message playing.
   final String? playing;
 
@@ -662,6 +674,8 @@ class PhoneState {
     required this.ringtone,
     this.echoCancellation,
     this.noiseSuppression,
+    this.microphoneVolume,
+    this.speakerVolume,
     this.playing,
   });
 
@@ -689,6 +703,8 @@ class PhoneState {
       ringtone.hashCode ^
       echoCancellation.hashCode ^
       noiseSuppression.hashCode ^
+      microphoneVolume.hashCode ^
+      speakerVolume.hashCode ^
       playing.hashCode;
 
   @override
@@ -718,6 +734,8 @@ class PhoneState {
           ringtone == other.ringtone &&
           echoCancellation == other.echoCancellation &&
           noiseSuppression == other.noiseSuppression &&
+          microphoneVolume == other.microphoneVolume &&
+          speakerVolume == other.speakerVolume &&
           playing == other.playing;
 }
 

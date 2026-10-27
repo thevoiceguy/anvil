@@ -15,6 +15,7 @@ import '../update/update_banner.dart';
 import '../update/updates.dart';
 import '../phone/phone_api.dart';
 import '../phone/phone_model.dart';
+import 'audio_controls.dart';
 
 class SettingsPage extends StatelessWidget {
   const SettingsPage({super.key, required this.model});
@@ -94,30 +95,12 @@ class SettingsPage extends StatelessWidget {
         // A phone chooses where a call's audio goes in the call itself.
         if (MobileScope.maybeOf(context) == null) ...[
           header(s.settingsAudio),
-          _DevicePicker(
-            key: const Key('microphone'),
-            label: s.microphone,
-            icon: Icons.mic,
-            devices: snap.inputs,
-            chosen: snap.input,
-            onChosen: (id) =>
-                model.run(() => model.api.chooseAudio(input: true, device: id)),
-          ),
-          _DevicePicker(
-            key: const Key('speaker'),
-            label: s.speaker,
-            icon: Icons.volume_up,
-            devices: snap.outputs,
-            chosen: snap.output,
-            onChosen: (id) => model.run(
-              () => model.api.chooseAudio(input: false, device: id),
-            ),
-          ),
+          AudioControls(snap: snap, model: model),
           Padding(
             padding: const EdgeInsets.symmetric(horizontal: 16),
             child: Text(s.audioNote, style: theme.textTheme.bodySmall),
           ),
-          _DevicePicker(
+          DevicePicker(
             key: const Key('ringDevice'),
             label: s.ringOn,
             icon: Icons.notifications_active,
@@ -196,50 +179,6 @@ class SettingsPage extends StatelessWidget {
 }
 
 /// A microphone or speaker: the system's default, or one by name.
-class _DevicePicker extends StatelessWidget {
-  const _DevicePicker({
-    super.key,
-    required this.label,
-    required this.icon,
-    required this.devices,
-    required this.chosen,
-    required this.onChosen,
-  });
-
-  final String label;
-  final IconData icon;
-  final List<AudioDevice> devices;
-  final String? chosen;
-  final ValueChanged<String?> onChosen;
-
-  // DropdownMenu's entries need a value; the system's default is ''.
-  static const _system = '';
-
-  @override
-  Widget build(BuildContext context) {
-    final s = Strings.of(context);
-    final known = devices.any((d) => d.id == chosen);
-    return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-      child: DropdownMenu<String>(
-        expandedInsets: EdgeInsets.zero,
-        leadingIcon: Icon(icon),
-        label: Text(label),
-        initialSelection: known ? chosen : _system,
-        dropdownMenuEntries: [
-          DropdownMenuEntry(value: _system, label: s.systemDefault),
-          for (final d in devices)
-            DropdownMenuEntry(value: d.id, label: d.name),
-        ],
-        onSelected: (id) {
-          if (id == null) return;
-          onChosen(id == _system ? null : id);
-        },
-      ),
-    );
-  }
-}
-
 /// The ringtone: Anvil's own, or the brand's; choosing one plays it.
 class _RingtonePicker extends StatelessWidget {
   const _RingtonePicker({required this.snap, required this.model});

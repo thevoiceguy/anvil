@@ -713,6 +713,10 @@ pub struct PhoneState {
     /// phone's audio does none of its own.
     pub echo_cancellation: Option<bool>,
     pub noise_suppression: Option<bool>,
+    /// The microphone's and the speaker's volume in percent (100 the sound
+    /// as it is, up to 200); `None` when the system sets them.
+    pub microphone_volume: Option<u16>,
+    pub speaker_volume: Option<u16>,
     /// The voicemail message playing.
     pub playing: Option<String>,
 }
@@ -869,6 +873,8 @@ pub fn phone_state() -> anyhow::Result<PhoneState> {
         ringtone: s.audio.ringtone,
         echo_cancellation: s.audio.processing.map(|p| p.echo_cancellation),
         noise_suppression: s.audio.processing.map(|p| p.noise_suppression),
+        microphone_volume: s.audio.volume.map(|v| v.microphone),
+        speaker_volume: s.audio.volume.map(|v| v.speaker),
         playing: s.playing,
     })
 }
@@ -1104,7 +1110,7 @@ pub async fn hide_recent(id: String) -> anyhow::Result<()> {
 }
 
 /// Use this microphone (`input`) or speaker by id, `None` for the system's
-/// default, for the calls set up from now on.
+/// default; the call that is up moves to it.
 pub async fn choose_audio(input: bool, device: Option<String>) -> anyhow::Result<()> {
     let kind = if input {
         anvil_app::AudioKind::Input
@@ -1139,6 +1145,17 @@ pub async fn set_audio_processing(
     execute(Command::Processing {
         echo_cancellation,
         noise_suppression,
+    })
+    .await
+    .map(|_| ())
+}
+
+/// Set the microphone's or the speaker's volume in percent (`None` leaves
+/// it as it is), in the call that is up too.
+pub async fn set_audio_volume(microphone: Option<u16>, speaker: Option<u16>) -> anyhow::Result<()> {
+    execute(Command::Volume {
+        microphone,
+        speaker,
     })
     .await
     .map(|_| ())

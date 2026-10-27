@@ -798,8 +798,26 @@ abstract class Strings {
   /// No description provided for @audioNote.
   ///
   /// In en, this message translates to:
-  /// **'Applies from the next call'**
+  /// **'A call that is up moves to the devices chosen'**
   String get audioNote;
+
+  /// No description provided for @microphoneVolume.
+  ///
+  /// In en, this message translates to:
+  /// **'Microphone volume'**
+  String get microphoneVolume;
+
+  /// No description provided for @speakerVolume.
+  ///
+  /// In en, this message translates to:
+  /// **'Speaker volume'**
+  String get speakerVolume;
+
+  /// No description provided for @audioButton.
+  ///
+  /// In en, this message translates to:
+  /// **'Audio'**
+  String get audioButton;
 
   /// No description provided for @ringOn.
   ///

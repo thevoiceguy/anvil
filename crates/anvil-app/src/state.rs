@@ -283,6 +283,18 @@ pub struct AudioDevices {
     /// does).
     #[serde(default)]
     pub processing: Option<AudioProcessing>,
+    /// The microphone's and the speaker's volume; `None` when the audio
+    /// host sets none of its own (a phone's own volume keys do).
+    #[serde(default)]
+    pub volume: Option<AudioVolume>,
+}
+
+/// How loud the microphone is sent and the speaker plays, in percent: 100
+/// the sound as it is, 0 silence, up to 200 twice as loud.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub struct AudioVolume {
+    pub microphone: u16,
+    pub speaker: u16,
 }
 
 /// Echo cancellation and noise suppression, each on or off.
