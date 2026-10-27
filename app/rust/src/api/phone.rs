@@ -354,12 +354,7 @@ pub async fn sign_in_with_code(code: String, session_path: String) -> anyhow::Re
 /// This install as FCP knows it: the same install signing in again keeps
 /// its device.
 fn this_install(store: &FileTokenStore) -> anvil_fcp::AppClient {
-    let install = store
-        .load()
-        .ok()
-        .flatten()
-        .map(|s| s.client.install_id)
-        .unwrap_or_else(anvil_fcp::AppClient::new_install_id);
+    let install = anvil_fcp::AppClient::install_id_beside(store.path());
     let mut client = anvil_fcp::AppClient::this_machine(install);
     if let Some(model) = crate::device::phone_model() {
         client.client_name = format!("Anvil on {model}");

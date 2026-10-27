@@ -43,6 +43,32 @@ impl AppClient {
         let bytes: [u8; 16] = rand::thread_rng().gen();
         bytes.iter().map(|b| format!("{b:02x}")).collect()
     }
+
+    /// This install's id, kept in `install_id` beside the session at
+    /// `session_path`. It outlives the session, so signing out and in
+    /// again, or as someone else, is the same install to FCP, which finds
+    /// its device instead of making another. A session from before the
+    /// file gives its id; a new one is made only when there is neither.
+    pub fn install_id_beside(session_path: &Path) -> String {
+        let path = session_path.with_file_name("install_id");
+        let kept = std::fs::read_to_string(&path)
+            .ok()
+            .map(|s| s.trim().to_string())
+            .filter(|s| !s.is_empty());
+        if let Some(id) = kept {
+            return id;
+        }
+        let id = FileTokenStore::new(session_path)
+            .load()
+            .ok()
+            .flatten()
+            .map(|s| s.client.install_id)
+            .unwrap_or_else(Self::new_install_id);
+        if let Err(e) = std::fs::write(&path, &id) {
+            tracing::debug!(%e, "the install id not kept");
+        }
+        id
+    }
 }
 
 /// The install's device and its SIP account, as the sign-in gave them.
@@ -209,6 +235,25 @@ impl TokenStore for FileTokenStore {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_install_id_outlives_a_sign_out() {
+        let dir = dir();
+        let path = dir.join("session.json");
+        let store = FileTokenStore::new(&path);
+        // A session from before the file: its id is the install's.
+        store.save(&session()).unwrap();
+        assert_eq!(AppClient::install_id_beside(&path), "install");
+        // Signed out: the session gone, the install the same.
+        store.clear().unwrap();
+        assert_eq!(AppClient::install_id_beside(&path), "install");
+        // A fresh machine makes one and keeps it.
+        let other = dir.join("fresh").join("session.json");
+        std::fs::create_dir_all(other.parent().unwrap()).unwrap();
+        let made = AppClient::install_id_beside(&other);
+        assert_eq!(made.len(), 32);
+        assert_eq!(AppClient::install_id_beside(&other), made);
+    }
 
     fn session() -> Session {
         Session {
