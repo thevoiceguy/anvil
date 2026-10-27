@@ -534,4 +534,66 @@ class StringsEn extends Strings {
 
   @override
   String get logFileOpenFolder => 'Open the folder';
+
+  @override
+  String get recordButton => 'Record';
+
+  @override
+  String get stopRecordingButton => 'Stop recording';
+
+  @override
+  String get recordingNow => 'Recording';
+
+  @override
+  String get moreButton => 'More';
+
+  @override
+  String get createContactButton => 'Create contact';
+
+  @override
+  String get editContactButton => 'Edit';
+
+  @override
+  String get contactNewTitle => 'New contact';
+
+  @override
+  String get contactEditTitle => 'Edit contact';
+
+  @override
+  String get contactNameField => 'Name';
+
+  @override
+  String get contactCompanyField => 'Company';
+
+  @override
+  String get contactNumberField => 'Number';
+
+  @override
+  String get contactLabelField => 'Label (mobile, work…)';
+
+  @override
+  String get contactEmailField => 'Email';
+
+  @override
+  String get contactNotesField => 'Notes';
+
+  @override
+  String get contactNeedsName => 'Enter a name';
+
+  @override
+  String get addNumberButton => 'Add a number';
+
+  @override
+  String get removeNumberButton => 'Remove this number';
+
+  @override
+  String get contactsHeading => 'My contacts';
+
+  @override
+  String get contactOnDevice => 'On this device';
+
+  @override
+  String deleteContactConfirm(String name) {
+    return 'Delete $name from your contacts?';
+  }
 }

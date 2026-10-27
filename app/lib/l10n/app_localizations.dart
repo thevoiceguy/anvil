@@ -1052,6 +1052,126 @@ abstract class Strings {
   /// In en, this message translates to:
   /// **'Open the folder'**
   String get logFileOpenFolder;
+
+  /// No description provided for @recordButton.
+  ///
+  /// In en, this message translates to:
+  /// **'Record'**
+  String get recordButton;
+
+  /// No description provided for @stopRecordingButton.
+  ///
+  /// In en, this message translates to:
+  /// **'Stop recording'**
+  String get stopRecordingButton;
+
+  /// No description provided for @recordingNow.
+  ///
+  /// In en, this message translates to:
+  /// **'Recording'**
+  String get recordingNow;
+
+  /// No description provided for @moreButton.
+  ///
+  /// In en, this message translates to:
+  /// **'More'**
+  String get moreButton;
+
+  /// No description provided for @createContactButton.
+  ///
+  /// In en, this message translates to:
+  /// **'Create contact'**
+  String get createContactButton;
+
+  /// No description provided for @editContactButton.
+  ///
+  /// In en, this message translates to:
+  /// **'Edit'**
+  String get editContactButton;
+
+  /// No description provided for @contactNewTitle.
+  ///
+  /// In en, this message translates to:
+  /// **'New contact'**
+  String get contactNewTitle;
+
+  /// No description provided for @contactEditTitle.
+  ///
+  /// In en, this message translates to:
+  /// **'Edit contact'**
+  String get contactEditTitle;
+
+  /// No description provided for @contactNameField.
+  ///
+  /// In en, this message translates to:
+  /// **'Name'**
+  String get contactNameField;
+
+  /// No description provided for @contactCompanyField.
+  ///
+  /// In en, this message translates to:
+  /// **'Company'**
+  String get contactCompanyField;
+
+  /// No description provided for @contactNumberField.
+  ///
+  /// In en, this message translates to:
+  /// **'Number'**
+  String get contactNumberField;
+
+  /// No description provided for @contactLabelField.
+  ///
+  /// In en, this message translates to:
+  /// **'Label (mobile, work…)'**
+  String get contactLabelField;
+
+  /// No description provided for @contactEmailField.
+  ///
+  /// In en, this message translates to:
+  /// **'Email'**
+  String get contactEmailField;
+
+  /// No description provided for @contactNotesField.
+  ///
+  /// In en, this message translates to:
+  /// **'Notes'**
+  String get contactNotesField;
+
+  /// No description provided for @contactNeedsName.
+  ///
+  /// In en, this message translates to:
+  /// **'Enter a name'**
+  String get contactNeedsName;
+
+  /// No description provided for @addNumberButton.
+  ///
+  /// In en, this message translates to:
+  /// **'Add a number'**
+  String get addNumberButton;
+
+  /// No description provided for @removeNumberButton.
+  ///
+  /// In en, this message translates to:
+  /// **'Remove this number'**
+  String get removeNumberButton;
+
+  /// No description provided for @contactsHeading.
+  ///
+  /// In en, this message translates to:
+  /// **'My contacts'**
+  String get contactsHeading;
+
+  /// No description provided for @contactOnDevice.
+  ///
+  /// In en, this message translates to:
+  /// **'On this device'**
+  String get contactOnDevice;
+
+  /// No description provided for @deleteContactConfirm.
+  ///
+  /// In en, this message translates to:
+  /// **'Delete {name} from your contacts?'**
+  String deleteContactConfirm(String name);
 }
 
 class _StringsDelegate extends LocalizationsDelegate<Strings> {

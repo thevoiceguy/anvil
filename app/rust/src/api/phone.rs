@@ -562,6 +562,8 @@ pub struct Call {
     pub quality: Option<Quality>,
     /// When it connected, in Unix seconds.
     pub connected_at: Option<u64>,
+    /// The user is recording it.
+    pub recording: bool,
 }
 
 /// A connected call's media, as last measured.
@@ -608,6 +610,24 @@ pub struct Person {
     pub favourite: bool,
     /// What to dial.
     pub dial: String,
+}
+
+/// A contact kept on this device.
+pub struct Contact {
+    /// Empty in a new one; the phone gives it one when saved.
+    pub id: String,
+    pub name: String,
+    pub company: Option<String>,
+    pub numbers: Vec<ContactNumber>,
+    pub email: Option<String>,
+    pub notes: Option<String>,
+}
+
+/// One of a contact's numbers: what it is (`mobile`, `work`, …) and what
+/// to dial.
+pub struct ContactNumber {
+    pub label: String,
+    pub number: String,
 }
 
 /// One voicemail message.
@@ -719,6 +739,10 @@ pub struct PhoneState {
     pub speaker_volume: Option<u16>,
     /// The voicemail message playing.
     pub playing: Option<String>,
+    /// The user may record calls (FCP says so): the record button shows.
+    pub may_record: bool,
+    /// The contacts on this device, by name.
+    pub contacts: Vec<Contact>,
 }
 
 /// A ringtone to choose: `anvil`, `classic`, or `brand:` and its name.
@@ -748,7 +772,8 @@ fn devices(list: Vec<anvil_app::AudioDevice>) -> Vec<AudioDevice> {
 pub struct PhoneChange {
     /// `registration`, `call`, `call_ended`, `message_waiting`, `dnd`,
     /// `brand`, `transfer_progress`, `calling`, `recents`, `people`,
-    /// `person`, `voicemail`, `audio`, `playing`.
+    /// `person`, `voicemail`, `audio`, `playing`, `push`, `may_record`,
+    /// `contacts`.
     pub kind: String,
     /// The call it is about, if any.
     pub call: Option<u64>,
@@ -797,6 +822,7 @@ pub fn phone_state() -> anyhow::Result<PhoneState> {
                     last_source: q.last_source.map(|a| a.to_string()),
                 }),
                 connected_at: c.connected_at,
+                recording: c.recording,
             })
             .collect(),
         voicemail_new: s.message_waiting.map(|m| m.new).unwrap_or(0),
@@ -876,6 +902,26 @@ pub fn phone_state() -> anyhow::Result<PhoneState> {
         microphone_volume: s.audio.volume.map(|v| v.microphone),
         speaker_volume: s.audio.volume.map(|v| v.speaker),
         playing: s.playing,
+        may_record: s.may_record,
+        contacts: s
+            .contacts
+            .into_iter()
+            .map(|c| Contact {
+                id: c.id,
+                name: c.name,
+                company: c.company,
+                numbers: c
+                    .numbers
+                    .into_iter()
+                    .map(|n| ContactNumber {
+                        label: n.label,
+                        number: n.number,
+                    })
+                    .collect(),
+                email: c.email,
+                notes: c.notes,
+            })
+            .collect(),
     })
 }
 
@@ -935,6 +981,8 @@ pub fn phone_changes(sink: StreamSink<PhoneChange>) -> anyhow::Result<()> {
                 C::Audio { .. } => kind_only("audio"),
                 C::Playing { .. } => kind_only("playing"),
                 C::Push { .. } => kind_only("push"),
+                C::MayRecord { .. } => kind_only("may_record"),
+                C::Contacts { .. } => kind_only("contacts"),
             };
             if sink.add(out).is_err() {
                 return;
@@ -1054,6 +1102,40 @@ pub async fn transfer_attended(call: u64, to: u64) -> anyhow::Result<()> {
 /// Park a call with FCP's park code.
 pub async fn park(call: Option<u64>) -> anyhow::Result<()> {
     execute(Command::Park { call }).await.map(|_| ())
+}
+
+/// Record a call the user is on (`on`), or stop the recording they
+/// started. FCP plays the recording announcement to both parties first.
+pub async fn record(call: Option<u64>, on: bool) -> anyhow::Result<()> {
+    execute(Command::Record { call, on }).await.map(|_| ())
+}
+
+/// Keep a contact on this device: a new one (empty id) or a change to one.
+pub async fn save_contact(contact: Contact) -> anyhow::Result<()> {
+    execute(Command::SaveContact {
+        contact: anvil_app::Contact {
+            id: contact.id,
+            name: contact.name,
+            company: contact.company,
+            numbers: contact
+                .numbers
+                .into_iter()
+                .map(|n| anvil_app::ContactNumber {
+                    label: n.label,
+                    number: n.number,
+                })
+                .collect(),
+            email: contact.email,
+            notes: contact.notes,
+        },
+    })
+    .await
+    .map(|_| ())
+}
+
+/// Forget a contact kept on this device.
+pub async fn delete_contact(id: String) -> anyhow::Result<()> {
+    execute(Command::DeleteContact { id }).await.map(|_| ())
 }
 
 pub async fn set_dnd(on: bool) -> anyhow::Result<()> {

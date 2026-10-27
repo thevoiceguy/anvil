@@ -72,6 +72,7 @@ class PhoneCall {
     this.encrypted = false,
     this.quality,
     this.connectedAt,
+    this.recording = false,
   });
 
   final int id;
@@ -88,6 +89,9 @@ class PhoneCall {
   /// When it connected: what the call's timer counts from.
   final DateTime? connectedAt;
 
+  /// The user is recording it.
+  final bool recording;
+
   /// Who the call is with, as a person reads it.
   String get who => displayName ?? shortAddress(remote);
 
@@ -103,6 +107,7 @@ class PhoneCall {
     bool? encrypted,
     CallQuality? quality,
     DateTime? connectedAt,
+    bool? recording,
   }) => PhoneCall(
     id: id,
     direction: direction,
@@ -115,7 +120,40 @@ class PhoneCall {
     encrypted: encrypted ?? this.encrypted,
     quality: quality ?? this.quality,
     connectedAt: connectedAt ?? this.connectedAt,
+    recording: recording ?? this.recording,
   );
+}
+
+/// A contact kept on this device.
+class Contact {
+  const Contact({
+    this.id = '',
+    required this.name,
+    this.company,
+    this.numbers = const [],
+    this.email,
+    this.notes,
+  });
+
+  /// Empty in a new one; the phone gives it one when saved.
+  final String id;
+  final String name;
+  final String? company;
+  final List<ContactNumber> numbers;
+  final String? email;
+  final String? notes;
+
+  /// What to dial: the first number, when it has one.
+  String? get dial => numbers.isEmpty ? null : numbers.first.number;
+}
+
+/// One of a contact's numbers: what it is (mobile, work, …) and what to
+/// dial.
+class ContactNumber {
+  const ContactNumber({this.label = '', required this.number});
+
+  final String label;
+  final String number;
 }
 
 /// `sip:1002@pbx.example.com` as a person reads it: `1002`.
@@ -346,6 +384,8 @@ class PhoneSnapshot {
     this.microphoneVolume,
     this.speakerVolume,
     this.playing,
+    this.mayRecord = false,
+    this.contacts = const [],
   });
 
   final String aor;
@@ -396,6 +436,21 @@ class PhoneSnapshot {
 
   /// The voicemail message playing, by id.
   final String? playing;
+
+  /// The user may record calls (FCP says so): the record button shows.
+  final bool mayRecord;
+
+  /// The contacts on this device, by name.
+  final List<Contact> contacts;
+
+  /// The contact one of whose numbers a call's address is.
+  Contact? contactFor(String remote) {
+    final dialled = shortAddress(remote);
+    for (final c in contacts) {
+      if (c.numbers.any((n) => n.number == dialled)) return c;
+    }
+    return null;
+  }
 
   int get missedCalls => recents.where((r) => r.missed).length;
 
@@ -448,6 +503,8 @@ class PhoneSnapshot {
     int? speakerVolume,
     String? playing,
     bool clearPlaying = false,
+    bool? mayRecord,
+    List<Contact>? contacts,
   }) => PhoneSnapshot(
     aor: aor,
     registration: registration ?? this.registration,
@@ -474,6 +531,8 @@ class PhoneSnapshot {
     microphoneVolume: microphoneVolume ?? this.microphoneVolume,
     speakerVolume: speakerVolume ?? this.speakerVolume,
     playing: clearPlaying ? null : playing ?? this.playing,
+    mayRecord: mayRecord ?? this.mayRecord,
+    contacts: contacts ?? this.contacts,
   );
 
   static const empty = PhoneSnapshot(
@@ -654,6 +713,16 @@ abstract class PhoneApi {
   /// Join `call`'s party to `to`'s, ending both of ours.
   Future<void> transferAttended(int call, int to);
   Future<void> park(int call);
+
+  /// Record `call` (`on`), or stop the recording the user started; FCP
+  /// plays the recording announcement to both parties first.
+  Future<void> record(int call, bool on);
+
+  /// Keep a contact on this device: a new one (empty id) or a change.
+  Future<void> saveContact(Contact contact);
+
+  /// Forget a contact kept on this device.
+  Future<void> deleteContact(String id);
 
   Future<void> setDnd(bool on);
   Future<void> setCalling(CallingChange change);

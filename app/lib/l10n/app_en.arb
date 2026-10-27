@@ -165,7 +165,6 @@
   "forwardTo": "Forward to",
   "forwardRingSeconds": "Ring for (seconds)",
   "saveButton": "Save",
-  "clearButton": "Clear",
   "settingsAudio": "Audio",
   "microphone": "Microphone",
   "speaker": "Speaker",
@@ -284,5 +283,32 @@
   "logFile": "Log file",
   "logFileCopy": "Copy the path",
   "logFileCopied": "Path copied",
-  "logFileOpenFolder": "Open the folder"
+  "logFileOpenFolder": "Open the folder",
+  "recordButton": "Record",
+  "stopRecordingButton": "Stop recording",
+  "recordingNow": "Recording",
+  "moreButton": "More",
+  "createContactButton": "Create contact",
+  "editContactButton": "Edit",
+  "contactNewTitle": "New contact",
+  "contactEditTitle": "Edit contact",
+  "contactNameField": "Name",
+  "contactCompanyField": "Company",
+  "contactNumberField": "Number",
+  "contactLabelField": "Label (mobile, work…)",
+  "contactEmailField": "Email",
+  "contactNotesField": "Notes",
+  "contactNeedsName": "Enter a name",
+  "addNumberButton": "Add a number",
+  "removeNumberButton": "Remove this number",
+  "contactsHeading": "My contacts",
+  "contactOnDevice": "On this device",
+  "deleteContactConfirm": "Delete {name} from your contacts?",
+  "@deleteContactConfirm": {
+    "placeholders": {
+      "name": {
+        "type": "String"
+      }
+    }
+  }
 }

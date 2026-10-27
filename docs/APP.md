@@ -137,14 +137,28 @@ share sheet.
   attended transfer, park, add a second call and swap, end. Call quality and
   encryption shown. On a desktop, **Audio** opens the microphone and the
   speaker and their volumes (0–200 %, 100 the sound as it is): the call
-  moves to a device chosen at once (D8 findings 18 and 19).
+  moves to a device chosen at once (D8 findings 18 and 19). **Record**, when
+  FCP lets the user (`may_record` on `/me/softphone`, an administrator's
+  "May record calls"): FCP plays the recording announcement to both parties,
+  then records; **Stop recording** stops only what the user started
+  (`/me/calls/{id}/recording/{start,stop}`, by the id FCP named the call
+  with, `X-FCP-Call-Id`; FCP's `docs/RECORD_AND_CONTACTS.md`, D8 finding 20).
+  **More** opens a menu built from a list of actions, so a feature added
+  later is one more entry; today it holds **Create contact** (D8 finding 21).
 - **Incoming.** Answer, decline, send to voicemail, the caller's name from the
   directory. A second call while one is up.
 - **Recents.** History, missed calls marked, call back. Clear them all, or
   remove one; this hides them on this device only (`settings.json`), as FCP
-  keeps the call records.
-- **Contacts.** The tenant's directory with presence, searchable, busy lamps for
-  favourites.
+  keeps the call records. A number not yet a contact can be made one from
+  the row's menu.
+- **Contacts.** The user's own contacts (**My contacts**), then the tenant's
+  directory with presence, searchable, busy lamps for favourites. A contact
+  has a name, a company, numbers with labels, an email and notes; it is kept
+  on this device (`settings.json`, with any account, FCP's or not), made by
+  hand, from a call or from a recent call, changed and deleted from its
+  menu. A call or a recent call from one of its numbers shows its name.
+  Contacts kept by FCP, and synced with a site, come with FCP's
+  `/me/contacts` (`docs/RECORD_AND_CONTACTS.md` §3).
 - **Voicemail.** Messages with transcription, play, mark heard, delete, the
   count on the tab.
 - **Settings.** Do not disturb, forwarding, call waiting, audio devices and

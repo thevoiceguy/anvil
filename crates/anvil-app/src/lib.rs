@@ -41,8 +41,8 @@ pub use clip::{decode_wav, Clip};
 pub use command::{AudioKind, Command, Response};
 pub use state::{
     AudioDevice, AudioDevices, AudioProcessing, AudioVolume, Brand, CallState, CallView, Change,
-    Direction, MessageWaiting, Person, Push, Quality, Recent, Registration, Ringtone, State,
-    Voicemail,
+    Contact, ContactNumber, Direction, MessageWaiting, Person, Push, Quality, Recent, Registration,
+    Ringtone, State, Voicemail,
 };
 
 use settings::LocalSettings;
@@ -163,7 +163,10 @@ impl Phone {
             anvil: RwLock::new(Some(anvil)),
             fcp: cfg.fcp,
             domain,
-            state: Mutex::new(State::new(aor)),
+            state: Mutex::new(State {
+                contacts: local.contacts.clone(),
+                ..State::new(aor)
+            }),
             changes,
             events: Mutex::new(None),
             fcp_events: Mutex::new(None),
@@ -197,7 +200,10 @@ impl Phone {
             let first = Arc::clone(&fcp);
             tokio::spawn(async move {
                 match first.softphone().await {
-                    Ok(config) => *inner.features.lock() = config.feature_codes,
+                    Ok(config) => {
+                        inner.set_may_record(config.may_record);
+                        *inner.features.lock() = config.feature_codes;
+                    }
                     Err(e) => tracing::debug!(%e, "feature codes not read"),
                 }
                 tokio::join!(
@@ -436,6 +442,76 @@ impl Phone {
             }
             Command::Stop => {
                 self.stop_playing();
+                Ok(Response::ok())
+            }
+            Command::Record { call, on } => {
+                let id = self.pick(call, "no call to record", |c| {
+                    c.state == CallState::Connected
+                })?;
+                let fcp = self.fcp("recording a call")?;
+                let server_call = self
+                    .inner
+                    .state
+                    .lock()
+                    .call(id)
+                    .and_then(|c| c.server_call.clone())
+                    .ok_or_else(|| {
+                        PhoneError::Refused("the server did not name this call".into())
+                    })?;
+                // FCP answers once the parties have heard that the call
+                // is recorded and the recorder runs.
+                if on {
+                    fcp.start_recording(&server_call).await?;
+                } else {
+                    fcp.stop_recording(&server_call).await?;
+                }
+                self.update_call(id, |c| c.recording = on, || unreachable_view(id));
+                Ok(Response::ok())
+            }
+            Command::SaveContact { mut contact } => {
+                contact.name = contact.name.trim().to_string();
+                if contact.name.is_empty() {
+                    return Err(PhoneError::Refused("a contact needs a name".into()));
+                }
+                for n in &mut contact.numbers {
+                    n.number = n.number.trim().to_string();
+                    n.label = n.label.trim().to_string();
+                }
+                contact.numbers.retain(|n| !n.number.is_empty());
+                for field in [&mut contact.company, &mut contact.email, &mut contact.notes] {
+                    *field = field
+                        .take()
+                        .map(|v| v.trim().to_string())
+                        .filter(|v| !v.is_empty());
+                }
+                if contact.id.is_empty() {
+                    contact.id = new_contact_id();
+                }
+                let contacts = {
+                    let mut local = self.inner.local.lock();
+                    match local.contacts.iter_mut().find(|c| c.id == contact.id) {
+                        Some(kept) => *kept = contact,
+                        None => local.contacts.push(contact),
+                    }
+                    local.contacts.sort_by_key(|c| c.name.to_lowercase());
+                    local.contacts.clone()
+                };
+                self.inner.save_settings();
+                self.inner.set_contacts(contacts);
+                Ok(Response::ok())
+            }
+            Command::DeleteContact { id } => {
+                let contacts = {
+                    let mut local = self.inner.local.lock();
+                    let before = local.contacts.len();
+                    local.contacts.retain(|c| c.id != id);
+                    if local.contacts.len() == before {
+                        return Err(PhoneError::Refused(format!("no contact {id}")));
+                    }
+                    local.contacts.clone()
+                };
+                self.inner.save_settings();
+                self.inner.set_contacts(contacts);
                 Ok(Response::ok())
             }
             Command::Favourite { who, on } => {
@@ -993,6 +1069,19 @@ impl Inner {
     }
 
     /// Show `recents`, less those cleared or removed here.
+    fn set_may_record(&self, on: bool) {
+        let changed = std::mem::replace(&mut self.state.lock().may_record, on) != on;
+        if changed {
+            let _ = self.changes.send(Change::MayRecord { on });
+        }
+    }
+
+    fn set_contacts(&self, contacts: Vec<Contact>) {
+        let count = contacts.len() as u32;
+        self.state.lock().contacts = contacts;
+        let _ = self.changes.send(Change::Contacts { count });
+    }
+
     fn set_recents(&self, mut recents: Vec<Recent>) {
         let missed = {
             let local = self.local.lock();
@@ -1092,9 +1181,9 @@ async fn follow(inner: std::sync::Weak<Inner>, mut events: EventStream) {
                 || outgoing(call.0),
             ),
             Event::CallEstablished { call, codec } => {
-                let encrypted = match inner.anvil.read().await.as_ref() {
-                    Some(anvil) => anvil.is_encrypted(call),
-                    None => false,
+                let (encrypted, server_call) = match inner.anvil.read().await.as_ref() {
+                    Some(anvil) => (anvil.is_encrypted(call), anvil.server_call_id(call)),
+                    None => (false, None),
                 };
                 update_call(
                     &inner,
@@ -1104,6 +1193,10 @@ async fn follow(inner: std::sync::Weak<Inner>, mut events: EventStream) {
                         c.connected_at.get_or_insert_with(unix_now);
                         c.codec = Some(format!("{codec:?}").to_ascii_lowercase());
                         c.encrypted = encrypted;
+                        // A call placed is named by the server's answer.
+                        if c.server_call.is_none() {
+                            c.server_call = server_call;
+                        }
                     },
                     || outgoing(call.0),
                 )
@@ -1277,6 +1370,17 @@ fn keypad_digit(letter: char) -> char {
         'T'..='V' => '8',
         _ => '9',
     }
+}
+
+/// A new contact's id, unique on this device: the time and a count.
+fn new_contact_id() -> String {
+    static MADE: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
+    let nanos = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_nanos())
+        .unwrap_or_default();
+    let n = MADE.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    format!("c{nanos:x}{n:x}")
 }
 
 #[cfg(test)]

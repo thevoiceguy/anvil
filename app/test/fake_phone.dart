@@ -279,6 +279,46 @@ class FakePhone implements PhoneApi {
   }
 
   @override
+  Future<void> record(int call, bool on) async {
+    _refuse();
+    log.add('record $call $on');
+    _replace(call, (c) => c.copyWith(recording: on));
+  }
+
+  int _contacts = 0;
+
+  @override
+  Future<void> saveContact(Contact contact) async {
+    _refuse();
+    final saved = Contact(
+      id: contact.id.isEmpty ? 'c${++_contacts}' : contact.id,
+      name: contact.name.trim(),
+      company: contact.company,
+      numbers: contact.numbers,
+      email: contact.email,
+      notes: contact.notes,
+    );
+    log.add('contact ${saved.id} ${saved.name} ${saved.dial ?? ''}');
+    final contacts = [
+      for (final c in state.contacts)
+        if (c.id != saved.id) c,
+      saved,
+    ]..sort((a, b) => a.name.toLowerCase().compareTo(b.name.toLowerCase()));
+    set(state.copyWith(contacts: contacts), 'contacts');
+  }
+
+  @override
+  Future<void> deleteContact(String id) async {
+    log.add('delete contact $id');
+    set(
+      state.copyWith(
+        contacts: state.contacts.where((c) => c.id != id).toList(),
+      ),
+      'contacts',
+    );
+  }
+
+  @override
   Future<void> setDnd(bool on) async {
     log.add('dnd $on');
     final c = state.calling ?? const CallingSettings();

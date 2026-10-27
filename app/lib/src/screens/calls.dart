@@ -14,6 +14,7 @@ import '../mobile/platform.dart';
 import '../phone/phone_api.dart';
 import '../phone/phone_model.dart';
 import 'audio_controls.dart';
+import 'contacts.dart';
 
 /// The call the in-call screen is about: the one up, else one being placed,
 /// else a held one.
@@ -34,7 +35,10 @@ PhoneCall? currentCall(List<PhoneCall> calls) {
 /// The name a call's party goes by: the directory's, else what the call
 /// says.
 String nameFor(PhoneSnapshot snap, PhoneCall call) =>
-    call.displayName ?? snap.personFor(call.remote)?.name ?? call.who;
+    call.displayName ??
+    snap.personFor(call.remote)?.name ??
+    snap.contactFor(call.remote)?.name ??
+    call.who;
 
 class IncomingCallCard extends StatelessWidget {
   const IncomingCallCard({super.key, required this.model, required this.call});
@@ -188,6 +192,26 @@ class _InCallPanelState extends State<InCallPanel> {
                 Text(number, style: theme.textTheme.bodyLarge),
               const SizedBox(height: 4),
               _Status(call: call),
+              if (call.recording)
+                Padding(
+                  padding: const EdgeInsets.only(top: 4),
+                  child: Row(
+                    key: const Key('recordingNow'),
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      const Icon(
+                        Icons.fiber_manual_record,
+                        size: 14,
+                        color: AnvilColors.hangup,
+                      ),
+                      const SizedBox(width: 4),
+                      Text(
+                        s.recordingNow,
+                        style: const TextStyle(color: AnvilColors.hangup),
+                      ),
+                    ],
+                  ),
+                ),
               const SizedBox(height: 8),
               if (connected) _MediaLine(call: call),
               const SizedBox(height: 24),
@@ -263,6 +287,43 @@ class _InCallPanelState extends State<InCallPanel> {
                       icon: Icons.add_call,
                       label: s.addCallButton,
                       onPressed: connected ? widget.onAddCall : null,
+                    ),
+                    // FCP plays the recording announcement to both
+                    // parties before this says it records.
+                    if (snap.mayRecord)
+                      _RoundButton(
+                        key: const Key('record'),
+                        icon: call.recording
+                            ? Icons.stop_circle_outlined
+                            : Icons.fiber_manual_record,
+                        label: call.recording
+                            ? s.stopRecordingButton
+                            : s.recordButton,
+                        on: call.recording,
+                        onPressed: connected
+                            ? () => model.run(
+                                () =>
+                                    model.api.record(call.id, !call.recording),
+                              )
+                            : null,
+                      ),
+                    Builder(
+                      builder: (anchor) {
+                        final actions = actionsFor(
+                          context,
+                          model,
+                          call.remote,
+                          name: call.displayName,
+                        );
+                        return _RoundButton(
+                          key: const Key('more'),
+                          icon: Icons.more_horiz,
+                          label: s.moreButton,
+                          onPressed: actions.isEmpty
+                              ? null
+                              : () => showMoreMenu(anchor, actions),
+                        );
+                      },
                     ),
                   ],
                 ),

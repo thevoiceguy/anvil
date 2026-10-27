@@ -32,8 +32,9 @@ fn uri_of(name_addr: &str) -> String {
 }
 
 /// Place a call to the park code at a server that answers it with
-/// `extra` headers, then sends BYE once ACKed: how the call ended.
-async fn park_code_answered_with(extra: &str) -> EndReason {
+/// `extra` headers, then sends BYE once ACKed: how the call ended, and
+/// the server's id for the call as its answer named it.
+async fn park_code_answered_with(extra: &str) -> (EndReason, Option<String>) {
     let server = UdpSocket::bind("127.0.0.1:0").await.unwrap();
     let here = server.local_addr().unwrap();
     let (anvil, mut events) = start(account(
@@ -87,6 +88,7 @@ async fn park_code_answered_with(extra: &str) -> EndReason {
     })
     .await
     .expect("the park code answers");
+    let named = anvil.server_call_id(call);
 
     // The orbit said, the server hangs up.
     let bye = format!(
@@ -110,18 +112,25 @@ async fn park_code_answered_with(extra: &str) -> EndReason {
     .await
     .expect("the park code's call ends");
     let _ = anvil.shutdown().await;
-    reason
+    (reason, named)
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn the_park_codes_call_ends_saying_the_orbit() {
+    let (reason, named) =
+        park_code_answered_with("X-FCP-Parked: 701\r\nX-FCP-Call-Id: 6f1c2a9e\r\n").await;
+    assert_eq!(reason, EndReason::Parked("701".into()));
     assert_eq!(
-        park_code_answered_with("X-FCP-Parked: 701\r\n").await,
-        EndReason::Parked("701".into())
+        named.as_deref(),
+        Some("6f1c2a9e"),
+        "the answer names the call"
     );
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn an_answer_naming_no_orbit_ends_as_a_hangup() {
-    assert_eq!(park_code_answered_with("").await, EndReason::RemoteHangup);
+    assert_eq!(
+        park_code_answered_with("").await,
+        (EndReason::RemoteHangup, None)
+    );
 }

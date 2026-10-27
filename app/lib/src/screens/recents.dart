@@ -8,6 +8,7 @@ import '../design/format.dart';
 import '../design/theme.dart';
 import '../phone/phone_api.dart';
 import '../phone/phone_model.dart';
+import 'contacts.dart';
 
 class RecentsPage extends StatelessWidget {
   const RecentsPage({super.key, required this.model, required this.onDial});
@@ -73,7 +74,9 @@ class RecentsPage extends StatelessWidget {
                   );
                 }
                 final r = recents[i - 1];
-                final name = snap.personFor(r.remote)?.name ?? r.who;
+                final contact = snap.contactFor(r.remote);
+                final name =
+                    snap.personFor(r.remote)?.name ?? contact?.name ?? r.who;
                 final (icon, color) = r.missed
                     ? (Icons.call_missed, AnvilColors.hangup)
                     : r.direction == Direction.incoming
@@ -106,7 +109,19 @@ class RecentsPage extends StatelessWidget {
                       ),
                       PopupMenuButton<void>(
                         key: Key('recentMenu-${r.id}'),
+                        tooltip: s.moreButton,
                         itemBuilder: (_) => [
+                          if (contact == null)
+                            PopupMenuItem(
+                              key: Key('createContact-${r.id}'),
+                              onTap: () => editContact(
+                                context,
+                                model,
+                                number: shortAddress(r.remote),
+                                name: r.displayName,
+                              ),
+                              child: Text(s.createContactButton),
+                            ),
                           PopupMenuItem(
                             key: Key('removeRecent-${r.id}'),
                             onTap: () =>

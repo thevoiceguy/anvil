@@ -21,6 +21,15 @@ import 'tolerant_comparator.dart';
 final now = DateTime(2026, 10, 8, 14, 30);
 
 PhoneSnapshot seeded(PhoneSnapshot s) => s.copyWith(
+  mayRecord: true,
+  contacts: const [
+    Contact(
+      id: 'c1',
+      name: 'Jo Smith',
+      company: 'Acme Plumbing',
+      numbers: [ContactNumber(label: 'mobile', number: '0412345678')],
+    ),
+  ],
   people: const [
     Person(
       key: 'ann',
@@ -162,6 +171,7 @@ void twoCalls(FakePhone phone) => phone.set(
         codec: 'opus',
         encrypted: true,
         quality: CallQuality(jitterMs: 4, lossPermille: 0, rttMs: 30),
+        recording: true,
       ),
     ],
   ),

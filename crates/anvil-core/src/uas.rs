@@ -238,6 +238,7 @@ impl UasRequestHandler for AnvilUasHandler {
                 pipeline: None,
                 srtp: srtp_keys,
                 parked: None,
+                server_call: server_call.clone(),
             },
         );
 
@@ -381,7 +382,7 @@ fn extract_uri_from_nameaddr(value: &str) -> Option<String> {
 
 /// FCP names the call in every INVITE it sends a phone, as a push named
 /// it (FCP's `docs/PUSH.md` §2.5).
-const SERVER_CALL_HEADER: &str = "X-FCP-Call-Id";
+pub(crate) const SERVER_CALL_HEADER: &str = "X-FCP-Call-Id";
 
 fn display_name_from_header(from: Option<&str>) -> Option<String> {
     let v = from?;
