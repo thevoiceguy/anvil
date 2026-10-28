@@ -1,5 +1,6 @@
-// The tenant's directory: searchable, favourites first, each person's
-// presence and busy lamp (`docs/APP.md` §4, People).
+// The user's contacts and the tenant's directory, as two tabs under one
+// search: the directory with favourites first, each person's presence and
+// busy lamp (`docs/APP.md` §4, People).
 
 import 'package:flutter/material.dart';
 
@@ -19,8 +20,31 @@ class PeoplePage extends StatefulWidget {
   State<PeoplePage> createState() => _PeoplePageState();
 }
 
-class _PeoplePageState extends State<PeoplePage> {
+class _PeoplePageState extends State<PeoplePage>
+    with SingleTickerProviderStateMixin {
   String _query = '';
+
+  // My contacts first when there are any, else the directory; the tab
+  // chosen is kept while the app runs (the page's storage).
+  static const _tab = 'peopleTab';
+  late final TabController _tabs = TabController(
+    length: 2,
+    vsync: this,
+    initialIndex:
+        PageStorage.maybeOf(context)?.readState(context, identifier: _tab)
+            as int? ??
+        (widget.model.snapshot.contacts.isEmpty ? 1 : 0),
+  )..addListener(() => _keepTab(_tabs.index));
+
+  void _keepTab(int index) =>
+      PageStorage.maybeOf(context)
+          ?.writeState(context, index, identifier: _tab);
+
+  @override
+  void dispose() {
+    _tabs.dispose();
+    super.dispose();
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -45,10 +69,16 @@ class _PeoplePageState extends State<PeoplePage> {
       padding: const EdgeInsets.fromLTRB(16, 16, 16, 4),
       child: Text(text, style: theme.textTheme.titleSmall),
     );
+    Widget empty(String text) => Center(
+      child: Padding(
+        padding: const EdgeInsets.all(24),
+        child: Text(text, textAlign: TextAlign.center),
+      ),
+    );
     return Column(
       children: [
         Padding(
-          padding: const EdgeInsets.all(12),
+          padding: const EdgeInsets.fromLTRB(12, 12, 12, 0),
           child: Row(
             children: [
               Expanded(
@@ -65,35 +95,54 @@ class _PeoplePageState extends State<PeoplePage> {
                 key: const Key('newContact'),
                 tooltip: s.contactNewTitle,
                 icon: const Icon(Icons.person_add_alt_1),
-                onPressed: () => editContact(context, widget.model),
+                // Made: shown where it went.
+                onPressed: () async {
+                  await editContact(context, widget.model);
+                  if (mounted) _tabs.animateTo(0);
+                },
               ),
             ],
           ),
         ),
+        TabBar(
+          controller: _tabs,
+          tabs: [
+            Tab(key: const Key('tab-contacts'), text: s.contactsHeading),
+            Tab(key: const Key('tab-directory'), text: s.directoryTab),
+          ],
+        ),
         Expanded(
-          child: people.isEmpty && contacts.isEmpty
-              ? Center(child: Text(s.peopleEmpty))
-              : ListView(
-                  children: [
-                    if (contacts.isNotEmpty) ...[
-                      header(s.contactsHeading),
-                      for (final c in contacts)
-                        ContactTile(
-                          model: widget.model,
-                          contact: c,
-                          onDial: widget.onDial,
-                        ),
-                    ],
-                    if (favourites.isNotEmpty) ...[
-                      header(s.favourites),
-                      for (final p in favourites) _tile(context, p),
-                    ],
-                    if ((favourites.isNotEmpty || contacts.isNotEmpty) &&
-                        rest.isNotEmpty)
-                      header(s.everyone),
-                    for (final p in rest) _tile(context, p),
-                  ],
-                ),
+          child: TabBarView(
+            controller: _tabs,
+            children: [
+              contacts.isEmpty
+                  ? empty(query.isEmpty ? s.contactsEmpty : s.peopleEmpty)
+                  : ListView(
+                      key: const Key('contactsList'),
+                      children: [
+                        for (final c in contacts)
+                          ContactTile(
+                            model: widget.model,
+                            contact: c,
+                            onDial: widget.onDial,
+                          ),
+                      ],
+                    ),
+              people.isEmpty
+                  ? empty(s.directoryEmpty)
+                  : ListView(
+                      key: const Key('directoryList'),
+                      children: [
+                        if (favourites.isNotEmpty) ...[
+                          header(s.favourites),
+                          for (final p in favourites) _tile(context, p),
+                          if (rest.isNotEmpty) header(s.everyone),
+                        ],
+                        for (final p in rest) _tile(context, p),
+                      ],
+                    ),
+            ],
+          ),
         ),
       ],
     );

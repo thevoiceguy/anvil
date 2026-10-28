@@ -1122,8 +1122,80 @@ abstract class Strings {
   /// No description provided for @contactLabelField.
   ///
   /// In en, this message translates to:
-  /// **'Label (mobile, work…)'**
+  /// **'Label'**
   String get contactLabelField;
+
+  /// No description provided for @labelMobile.
+  ///
+  /// In en, this message translates to:
+  /// **'Mobile'**
+  String get labelMobile;
+
+  /// No description provided for @labelWork.
+  ///
+  /// In en, this message translates to:
+  /// **'Work'**
+  String get labelWork;
+
+  /// No description provided for @labelHome.
+  ///
+  /// In en, this message translates to:
+  /// **'Home'**
+  String get labelHome;
+
+  /// No description provided for @labelMain.
+  ///
+  /// In en, this message translates to:
+  /// **'Main'**
+  String get labelMain;
+
+  /// No description provided for @labelWorkFax.
+  ///
+  /// In en, this message translates to:
+  /// **'Work fax'**
+  String get labelWorkFax;
+
+  /// No description provided for @labelOther.
+  ///
+  /// In en, this message translates to:
+  /// **'Other'**
+  String get labelOther;
+
+  /// No description provided for @labelCustom.
+  ///
+  /// In en, this message translates to:
+  /// **'Custom…'**
+  String get labelCustom;
+
+  /// No description provided for @labelBackToList.
+  ///
+  /// In en, this message translates to:
+  /// **'Choose from the list'**
+  String get labelBackToList;
+
+  /// No description provided for @directoryTab.
+  ///
+  /// In en, this message translates to:
+  /// **'Directory'**
+  String get directoryTab;
+
+  /// No description provided for @contactsEmpty.
+  ///
+  /// In en, this message translates to:
+  /// **'No contacts yet. Add one with the button above.'**
+  String get contactsEmpty;
+
+  /// No description provided for @directoryEmpty.
+  ///
+  /// In en, this message translates to:
+  /// **'No one to show'**
+  String get directoryEmpty;
+
+  /// No description provided for @contactNumbers.
+  ///
+  /// In en, this message translates to:
+  /// **'{count} numbers'**
+  String contactNumbers(int count);
 
   /// No description provided for @contactEmailField.
   ///

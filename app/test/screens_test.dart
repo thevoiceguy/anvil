@@ -480,7 +480,9 @@ void main() {
     await tapKey(tester, 'saveContact');
     expect(find.text('Enter a name'), findsOneWidget, reason: 'needs a name');
     await tester.enterText(find.byKey(const Key('contactName')), 'Jo Smith');
-    await tester.enterText(find.byKey(const Key('contactLabel-0')), 'mobile');
+    await tapKey(tester, 'contactLabel-0');
+    await tester.tap(find.byKey(const Key('contactLabel-0-mobile')).last);
+    await tester.pumpAndSettle();
     await tapKey(tester, 'saveContact');
     expect(phone.log, contains('contact c1 Jo Smith 0412345678'));
     expect(phone.state.contacts.single.numbers.single.label, 'mobile');
@@ -539,7 +541,6 @@ void main() {
       find.byKey(const Key('contactNumber-1')),
       '0299998888',
     );
-    await tester.enterText(find.byKey(const Key('contactLabel-1')), 'work');
     await tester.enterText(find.byKey(const Key('contactCompany')), 'Acme');
     await tapKey(tester, 'saveContact');
     expect(phone.log, contains('contact c1 Zed Zulu 0400111222'));
@@ -549,9 +550,12 @@ void main() {
       reason: 'on the account when there is one',
     );
     expect(find.byKey(const Key('contactPlace-c1')), findsOneWidget);
-    expect(find.text('My contacts'), findsOneWidget);
     expect(find.byKey(const Key('contact-c1')), findsOneWidget);
-    expect(find.textContaining('0299998888 (work)'), findsOneWidget);
+    expect(phone.state.contacts.single.numbers.map((n) => n.label), [
+      'mobile',
+      'work',
+    ], reason: 'the first a mobile, the second work, unless chosen');
+    expect(find.text('Acme — 2 numbers'), findsOneWidget);
 
     await tester.enterText(find.byKey(const Key('peopleSearch')), 'acme');
     await tester.pumpAndSettle();
@@ -560,8 +564,11 @@ void main() {
     await tester.enterText(find.byKey(const Key('peopleSearch')), '');
     await tester.pumpAndSettle();
 
-    await tapKey(tester, 'dialContact-c1');
-    expect(phone.log, contains('call 0400111222'));
+    // Two numbers: opened, each its own row to dial.
+    await tapKey(tester, 'contact-c1');
+    expect(find.text('Work'), findsOneWidget);
+    await tapKey(tester, 'dialContact-c1-1');
+    expect(phone.log, contains('call 0299998888'));
     phone.set(phone.state.copyWith(calls: const []), 'call_ended', call: 1);
     await tester.pumpAndSettle();
     await go(tester, 'Contacts');
@@ -594,7 +601,63 @@ void main() {
     );
     await tapKey(tester, 'confirmDeleteContact');
     expect(phone.log, contains('delete contact c1'));
-    expect(find.text('My contacts'), findsNothing);
+    expect(find.byKey(const Key('contact-c1')), findsNothing);
+    expect(
+      find.text('No contacts yet. Add one with the button above.'),
+      findsOneWidget,
+    );
+  });
+
+  testWidgets('a number\'s label is chosen from a list or typed', (
+    tester,
+  ) async {
+    final phone = await signedIn(tester);
+    await go(tester, 'Contacts');
+    await tapKey(tester, 'newContact');
+    await tester.enterText(find.byKey(const Key('contactName')), 'Kim Park');
+    await tester.enterText(find.byKey(const Key('contactNumber-0')), '1004');
+    await tapKey(tester, 'contactLabel-0');
+    await tester.tap(find.byKey(const Key('contactLabel-0-custom')).last);
+    await tester.pumpAndSettle();
+    await tester.enterText(
+      find.byKey(const Key('contactLabelCustom-0')),
+      'Boat',
+    );
+    await tapKey(tester, 'saveContact');
+    expect(phone.state.contacts.single.numbers.single.label, 'Boat');
+    expect(find.textContaining('1004 (Boat)'), findsOneWidget);
+
+    // Opened again: the user's own label is shown as typed, and the list
+    // is a tap away.
+    await tapKey(tester, 'contactMenu-c1');
+    await tapKey(tester, 'editContact-c1');
+    final custom = tester.widget<TextFormField>(
+      find.byKey(const Key('contactLabelCustom-0')),
+    );
+    expect(custom.controller!.text, 'Boat');
+    await tapKey(tester, 'contactLabelList-0');
+    expect(find.byKey(const Key('contactLabel-0')), findsOneWidget);
+    await tapKey(tester, 'saveContact');
+    expect(phone.state.contacts.single.numbers.single.label, 'mobile');
+  });
+
+  testWidgets('contacts and the directory are two tabs under one search', (
+    tester,
+  ) async {
+    await signedIn(tester);
+    await go(tester, 'Contacts');
+    // No contacts yet: the directory is shown.
+    expect(find.byKey(const Key('person-ann')), findsOneWidget);
+    await tapKey(tester, 'tab-contacts');
+    expect(
+      find.text('No contacts yet. Add one with the button above.'),
+      findsOneWidget,
+    );
+    await tapKey(tester, 'tab-directory');
+    await tester.enterText(find.byKey(const Key('peopleSearch')), 'zzz');
+    await tester.pumpAndSettle();
+    expect(find.byKey(const Key('person-ann')), findsNothing);
+    expect(find.text('No one to show'), findsOneWidget);
   });
 
   testWidgets('a contact kept on this device moves to the account', (

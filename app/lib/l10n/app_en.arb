@@ -295,7 +295,26 @@
   "contactNameField": "Name",
   "contactCompanyField": "Company",
   "contactNumberField": "Number",
-  "contactLabelField": "Label (mobile, work…)",
+  "contactLabelField": "Label",
+  "labelMobile": "Mobile",
+  "labelWork": "Work",
+  "labelHome": "Home",
+  "labelMain": "Main",
+  "labelWorkFax": "Work fax",
+  "labelOther": "Other",
+  "labelCustom": "Custom…",
+  "labelBackToList": "Choose from the list",
+  "directoryTab": "Directory",
+  "contactsEmpty": "No contacts yet. Add one with the button above.",
+  "directoryEmpty": "No one to show",
+  "contactNumbers": "{count} numbers",
+  "@contactNumbers": {
+    "placeholders": {
+      "count": {
+        "type": "int"
+      }
+    }
+  },
   "contactEmailField": "Email",
   "contactNotesField": "Notes",
   "contactNeedsName": "Enter a name",

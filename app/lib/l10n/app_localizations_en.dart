@@ -569,7 +569,45 @@ class StringsEn extends Strings {
   String get contactNumberField => 'Number';
 
   @override
-  String get contactLabelField => 'Label (mobile, work…)';
+  String get contactLabelField => 'Label';
+
+  @override
+  String get labelMobile => 'Mobile';
+
+  @override
+  String get labelWork => 'Work';
+
+  @override
+  String get labelHome => 'Home';
+
+  @override
+  String get labelMain => 'Main';
+
+  @override
+  String get labelWorkFax => 'Work fax';
+
+  @override
+  String get labelOther => 'Other';
+
+  @override
+  String get labelCustom => 'Custom…';
+
+  @override
+  String get labelBackToList => 'Choose from the list';
+
+  @override
+  String get directoryTab => 'Directory';
+
+  @override
+  String get contactsEmpty => 'No contacts yet. Add one with the button above.';
+
+  @override
+  String get directoryEmpty => 'No one to show';
+
+  @override
+  String contactNumbers(int count) {
+    return '$count numbers';
+  }
 
   @override
   String get contactEmailField => 'Email';
