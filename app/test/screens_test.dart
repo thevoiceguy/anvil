@@ -741,7 +741,12 @@ void main() {
     final phone = await signedIn(tester);
     phone.logPath = '/support/anvil.log';
     await go(tester, 'Settings');
-    await tester.ensureVisible(find.byKey(const Key('logFile')));
+    // Far down the list: built once scrolled to.
+    await tester.dragUntilVisible(
+      find.byKey(const Key('logFile')),
+      find.byType(ListView).last,
+      const Offset(0, -300),
+    );
     await tester.pumpAndSettle();
     expect(find.text('/support/anvil.log'), findsOneWidget);
     String? copied;
@@ -757,6 +762,64 @@ void main() {
     await tapKey(tester, 'logFileCopy');
     expect(copied, '/support/anvil.log');
     expect(find.text('Path copied'), findsOneWidget);
+  });
+
+  testWidgets('settings test the microphone and the speakers', (tester) async {
+    final phone = await signedIn(tester);
+    await go(tester, 'Settings');
+    await tapKey(tester, 'testMicrophone');
+    expect(phone.log, contains('test microphone'));
+    expect(find.text('Listening… speak now'), findsOneWidget);
+
+    // The meter follows the microphone's level.
+    phone.set(phone.state.copyWith(audioTestLevel: 70), 'audio_test');
+    await tester.pumpAndSettle();
+    final meter = tester.widget<LinearProgressIndicator>(
+      find.byKey(const Key('microphoneLevel')),
+    );
+    expect(meter.value, closeTo(0.7, 0.001));
+    // One test at a time.
+    expect(
+      tester
+          .widget<OutlinedButton>(
+            find.descendant(
+              of: find.byKey(const Key('testSpeaker')),
+              matching: find.byType(OutlinedButton),
+              matchRoot: true,
+            ),
+          )
+          .onPressed,
+      isNull,
+    );
+
+    phone.set(
+      phone.state.copyWith(audioTest: AudioTest.playingBack),
+      'audio_test',
+    );
+    await tester.pumpAndSettle();
+    expect(find.text('Playing back what you said'), findsOneWidget);
+    expect(find.byKey(const Key('microphoneLevel')), findsNothing);
+    await tapKey(tester, 'stopTest');
+    expect(phone.log, contains('stop test'));
+
+    await tapKey(tester, 'testSpeaker');
+    expect(phone.log, contains('test speaker'));
+    await tapKey(tester, 'stopTest');
+    await tapKey(tester, 'testRinging');
+    expect(phone.log, contains('test ring'));
+  });
+
+  testWidgets('a ringtone added from a file can be removed', (tester) async {
+    final phone = await signedIn(tester);
+    await go(tester, 'Settings');
+    expect(find.byKey(const Key('removeRingtone')), findsNothing);
+    await phone.addRingtoneFile('/music/Bells.mp3');
+    await tester.pumpAndSettle();
+    expect(phone.state.ringtone, 'file:Bells.mp3');
+    await tapKey(tester, 'removeRingtone');
+    expect(phone.log, contains('remove ringtone file:Bells.mp3'));
+    expect(phone.state.ringtone, 'anvil');
+    expect(find.byKey(const Key('removeRingtone')), findsNothing);
   });
 
   testWidgets('a narrow window navigates from the bottom', (tester) async {

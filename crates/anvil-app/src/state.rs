@@ -41,6 +41,31 @@ pub struct State {
     /// in to FCP, those kept on their account.
     #[serde(default)]
     pub contacts: Vec<Contact>,
+    /// A test of the microphone or a speaker under way, if any.
+    #[serde(default)]
+    pub audio_test: Option<AudioTest>,
+}
+
+/// A test of this device's audio, under way.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub struct AudioTest {
+    pub stage: AudioTestStage,
+    /// While recording: how loud the microphone is now, 0 to 100.
+    pub level: u8,
+}
+
+/// What an audio test is doing.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum AudioTestStage {
+    /// Recording the microphone, its level shown.
+    Recording,
+    /// Playing the recording back on the speaker calls use.
+    PlayingBack,
+    /// A sound on the speaker calls use.
+    Speaker,
+    /// A sound on the speaker that rings.
+    Ring,
 }
 
 /// A contact the user keeps: on this device, with any account, FCP's or
@@ -111,6 +136,7 @@ impl State {
             push: Push::Off,
             may_record: false,
             contacts: Vec::new(),
+            audio_test: None,
         }
     }
 
@@ -465,5 +491,9 @@ pub enum Change {
     /// The contacts changed, on this device or on the account.
     Contacts {
         count: u32,
+    },
+    /// An audio test moved on (or, `None`, ended).
+    AudioTest {
+        test: Option<AudioTest>,
     },
 }

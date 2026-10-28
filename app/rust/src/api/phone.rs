@@ -741,9 +741,15 @@ pub struct PhoneState {
     pub may_record: bool,
     /// The user's contacts, by name: on this device and on their account.
     pub contacts: Vec<Contact>,
+    /// A test of the microphone or a speaker under way: `recording`,
+    /// `playing_back`, `speaker` or `ring`; `None` when none is.
+    pub audio_test: Option<String>,
+    /// While recording: how loud the microphone is, 0 to 100.
+    pub audio_test_level: u8,
 }
 
-/// A ringtone to choose: `anvil`, `classic`, or `brand:` and its name.
+/// A ringtone to choose: `anvil`, `classic`, `brand:` and its name, or
+/// `file:` and the name of a file added.
 pub struct Ringtone {
     pub id: String,
     pub name: String,
@@ -901,6 +907,16 @@ pub fn phone_state() -> anyhow::Result<PhoneState> {
         speaker_volume: s.audio.volume.map(|v| v.speaker),
         playing: s.playing,
         may_record: s.may_record,
+        audio_test: s.audio_test.map(|t| {
+            match t.stage {
+                anvil_app::AudioTestStage::Recording => "recording",
+                anvil_app::AudioTestStage::PlayingBack => "playing_back",
+                anvil_app::AudioTestStage::Speaker => "speaker",
+                anvil_app::AudioTestStage::Ring => "ring",
+            }
+            .to_string()
+        }),
+        audio_test_level: s.audio_test.map_or(0, |t| t.level),
         contacts: s
             .contacts
             .into_iter()
@@ -982,6 +998,7 @@ pub fn phone_changes(sink: StreamSink<PhoneChange>) -> anyhow::Result<()> {
                 C::Push { .. } => kind_only("push"),
                 C::MayRecord { .. } => kind_only("may_record"),
                 C::Contacts { .. } => kind_only("contacts"),
+                C::AudioTest { .. } => kind_only("audio_test"),
             };
             if sink.add(out).is_err() {
                 return;
@@ -1217,6 +1234,34 @@ pub async fn choose_ring_device(device: Option<String>) -> anyhow::Result<()> {
 /// heard once now when no call is up.
 pub async fn choose_ringtone(id: Option<String>) -> anyhow::Result<()> {
     execute(Command::Ringtone { id }).await.map(|_| ())
+}
+
+/// Add a ringtone from a sound file on this device (WAV, Ogg Vorbis or
+/// MP3): kept with the app's files, chosen, and heard once.
+pub async fn add_ringtone_file(path: String) -> anyhow::Result<()> {
+    execute(Command::RingtoneFile { path }).await.map(|_| ())
+}
+
+/// Remove a ringtone added from a file (`file:` and its name).
+pub async fn remove_ringtone(id: String) -> anyhow::Result<()> {
+    execute(Command::RemoveRingtone { id }).await.map(|_| ())
+}
+
+/// Test the microphone: a few seconds recorded, its level shown, then
+/// heard back on the speaker calls use.
+pub async fn test_microphone() -> anyhow::Result<()> {
+    execute(Command::TestMicrophone).await.map(|_| ())
+}
+
+/// Test a speaker: a sound on the one calls use, or (`ring`) on the one
+/// that rings, with the ringtone.
+pub async fn test_speaker(ring: bool) -> anyhow::Result<()> {
+    execute(Command::TestSpeaker { ring }).await.map(|_| ())
+}
+
+/// Stop an audio test.
+pub async fn stop_audio_test() -> anyhow::Result<()> {
+    execute(Command::StopTest).await.map(|_| ())
 }
 
 /// Turn echo cancellation or noise suppression on or off (`None` leaves it

@@ -463,6 +463,58 @@ class FakePhone implements PhoneApi {
   }
 
   @override
+  Future<void> addRingtoneFile(String path) async {
+    log.add('ringtone file $path');
+    final name = path.split(RegExp(r'[/\\]')).last;
+    set(
+      state.copyWith(
+        ringtones: [
+          ...state.ringtones,
+          Ringtone(id: 'file:$name', name: name),
+        ],
+        ringtone: 'file:$name',
+      ),
+      'audio',
+    );
+  }
+
+  @override
+  Future<void> removeRingtone(String id) async {
+    log.add('remove ringtone $id');
+    set(
+      state.copyWith(
+        ringtones: state.ringtones.where((r) => r.id != id).toList(),
+        ringtone: state.ringtone == id ? 'anvil' : state.ringtone,
+      ),
+      'audio',
+    );
+  }
+
+  @override
+  Future<void> testMicrophone() async {
+    log.add('test microphone');
+    set(
+      state.copyWith(audioTest: AudioTest.recording, audioTestLevel: 0),
+      'audio_test',
+    );
+  }
+
+  @override
+  Future<void> testSpeaker({required bool ring}) async {
+    log.add('test ${ring ? 'ring' : 'speaker'}');
+    set(
+      state.copyWith(audioTest: ring ? AudioTest.ring : AudioTest.speaker),
+      'audio_test',
+    );
+  }
+
+  @override
+  Future<void> stopAudioTest() async {
+    log.add('stop test');
+    set(state.copyWith(clearAudioTest: true, audioTestLevel: 0), 'audio_test');
+  }
+
+  @override
   Future<void> setAudioProcessing({
     bool? echoCancellation,
     bool? noiseSuppression,
