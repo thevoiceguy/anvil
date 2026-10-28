@@ -594,6 +594,13 @@ fn print_change(change: &anvil_app::Change) {
             }
         ),
         C::Contacts { count } => println!("[contacts] {count}"),
+        C::AudioTest { test } => match test {
+            Some(t) if t.stage == anvil_app::AudioTestStage::Recording => {
+                println!("[test] recording {}", "#".repeat(usize::from(t.level / 5)))
+            }
+            Some(t) => println!("[test] {:?}", t.stage),
+            None => println!("[test] done"),
+        },
     }
 }
 

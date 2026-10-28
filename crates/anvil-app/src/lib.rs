@@ -40,9 +40,9 @@ pub use anvil_fcp::{CallingSettings, CallingUpdate};
 pub use clip::{decode_wav, Clip};
 pub use command::{AudioKind, Command, Response};
 pub use state::{
-    AudioDevice, AudioDevices, AudioProcessing, AudioVolume, Brand, CallState, CallView, Change,
-    Contact, ContactNumber, Direction, MessageWaiting, Person, Push, Quality, Recent, Registration,
-    Ringtone, State, Voicemail,
+    AudioDevice, AudioDevices, AudioProcessing, AudioTest, AudioTestStage, AudioVolume, Brand,
+    CallState, CallView, Change, Contact, ContactNumber, Direction, MessageWaiting, Person, Push,
+    Quality, Recent, Registration, Ringtone, State, Voicemail,
 };
 
 use settings::LocalSettings;
@@ -111,6 +111,11 @@ struct Inner {
     /// The brand's ringtones that could be played: name, whether the
     /// brand's default, the sound.
     brand_ringtones: Mutex<Vec<(String, bool, ring::Tone)>>,
+    /// The ringtones added from files, kept beside the settings: file
+    /// name, sound.
+    file_ringtones: Mutex<Vec<(String, ring::Tone)>>,
+    /// The audio test under way: stopped by aborting it.
+    audio_test: Mutex<Option<tokio::task::AbortHandle>>,
     /// The profile's brand, shown while FCP has none.
     fallback_brand: Option<anvil_core::brand::BrandProfile>,
 }
@@ -160,6 +165,9 @@ impl Phone {
             }
         }
         let (changes, _) = broadcast::channel(256);
+        let file_ringtones = ringtone_dir(cfg.settings_path.as_deref())
+            .map(|d| ring::from_dir(&d))
+            .unwrap_or_default();
         let inner = Arc::new(Inner {
             sip_address: anvil.sip_address(),
             anvil: RwLock::new(Some(anvil)),
@@ -181,6 +189,8 @@ impl Phone {
             ringer: Mutex::new(None),
             sounding: tokio::sync::Mutex::new(()),
             brand_ringtones: Mutex::new(Vec::new()),
+            file_ringtones: Mutex::new(file_ringtones),
+            audio_test: Mutex::new(None),
             fallback_brand: cfg.fallback_brand,
         });
         if let Some(fallback) = &inner.fallback_brand {
@@ -446,6 +456,63 @@ impl Phone {
             }
             Command::Stop => {
                 self.stop_playing();
+                Ok(Response::ok())
+            }
+            Command::RingtoneFile { path } => {
+                let dir = ringtone_dir(self.inner.settings_path.as_deref())
+                    .ok_or_else(|| PhoneError::Refused("this phone keeps no files".into()))?;
+                let (name, tone) = ring::add_file(std::path::Path::new(&path), &dir)
+                    .map_err(PhoneError::Refused)?;
+                {
+                    let mut files = self.inner.file_ringtones.lock();
+                    files.retain(|(n, _)| *n != name);
+                    files.push((name.clone(), tone));
+                    files.sort_by_key(|a| a.0.to_lowercase());
+                }
+                self.inner.local.lock().ringtone = Some(ring::file_id(&name));
+                self.inner.save_settings();
+                self.read_audio_devices().await;
+                self.inner.preview().await;
+                Ok(Response::ok())
+            }
+            Command::RemoveRingtone { id } => {
+                let name = id
+                    .strip_prefix("file:")
+                    .filter(|n| self.inner.file_ringtones.lock().iter().any(|(f, _)| f == n))
+                    .ok_or_else(|| {
+                        PhoneError::Refused(format!("no ringtone {id:?} added from a file"))
+                    })?
+                    .to_string();
+                self.inner.file_ringtones.lock().retain(|(n, _)| *n != name);
+                if let Some(dir) = ringtone_dir(self.inner.settings_path.as_deref()) {
+                    if let Err(e) = std::fs::remove_file(dir.join(&name)) {
+                        tracing::warn!(%e, ringtone = %name, "the ringtone's file not removed");
+                    }
+                }
+                {
+                    let mut local = self.inner.local.lock();
+                    if local.ringtone.as_deref() == Some(id.as_str()) {
+                        local.ringtone = None;
+                    }
+                }
+                self.inner.save_settings();
+                self.read_audio_devices().await;
+                Ok(Response::ok())
+            }
+            Command::TestMicrophone => {
+                self.start_audio_test(AudioTestStage::Recording)?;
+                Ok(Response::ok())
+            }
+            Command::TestSpeaker { ring } => {
+                self.start_audio_test(if ring {
+                    AudioTestStage::Ring
+                } else {
+                    AudioTestStage::Speaker
+                })?;
+                Ok(Response::ok())
+            }
+            Command::StopTest => {
+                self.inner.stop_audio_test();
                 Ok(Response::ok())
             }
             Command::Record { call, on } => {
@@ -860,6 +927,31 @@ impl Phone {
     }
 
     /// The audio devices as the host has them now.
+    /// Start an audio test (ending one under way): refused while a call is
+    /// up or ringing, and a ringing test on a phone that does not ring.
+    fn start_audio_test(&self, stage: AudioTestStage) -> Result<(), PhoneError> {
+        if !self.inner.state.lock().calls.is_empty() {
+            return Err(PhoneError::Refused(
+                "not while a call is up or ringing".into(),
+            ));
+        }
+        if stage == AudioTestStage::Ring && !self.inner.ring {
+            return Err(PhoneError::Refused(
+                "this phone does not ring itself".into(),
+            ));
+        }
+        self.inner.stop_audio_test();
+        let inner = Arc::clone(&self.inner);
+        let task = tokio::spawn(async move {
+            if let Err(e) = inner.run_audio_test(stage).await {
+                tracing::warn!(%e, "the audio test failed");
+            }
+            inner.set_audio_test(None);
+        });
+        *self.inner.audio_test.lock() = Some(task.abort_handle());
+        Ok(())
+    }
+
     async fn read_audio_devices(&self) {
         let Ok(anvil) = self.anvil().await else {
             return;
@@ -922,7 +1014,16 @@ impl Inner {
                 name: name.clone(),
             })
             .collect();
-        own.chain(brand).collect()
+        let files: Vec<Ringtone> = self
+            .file_ringtones
+            .lock()
+            .iter()
+            .map(|(name, _)| Ringtone {
+                id: ring::file_id(name),
+                name: name.clone(),
+            })
+            .collect();
+        own.chain(brand).chain(files).collect()
     }
 
     /// The ringtone that rings: the one chosen while it is there, else the
@@ -942,6 +1043,14 @@ impl Inner {
 
     /// A ringtone's sound, by id.
     fn tone(&self, id: &str) -> Option<ring::Tone> {
+        if let Some(name) = id.strip_prefix("file:") {
+            return self
+                .file_ringtones
+                .lock()
+                .iter()
+                .find(|(n, _)| n == name)
+                .map(|(_, tone)| tone.clone());
+        }
         match id.strip_prefix("brand:") {
             Some(name) => self
                 .brand_ringtones
@@ -951,6 +1060,81 @@ impl Inner {
                 .map(|(_, _, tone)| tone.clone()),
             None => ring::built_in(id),
         }
+    }
+
+    /// Stop the audio test under way, if any.
+    fn stop_audio_test(&self) {
+        if let Some(task) = self.audio_test.lock().take() {
+            task.abort();
+            self.set_audio_test(None);
+        }
+    }
+
+    fn set_audio_test(&self, test: Option<AudioTest>) {
+        let changed = {
+            let mut state = self.state.lock();
+            let changed = state.audio_test != test;
+            state.audio_test = test;
+            changed
+        };
+        if changed {
+            let _ = self.changes.send(Change::AudioTest { test });
+        }
+    }
+
+    /// An audio test, to its end: the microphone recorded with its level
+    /// shown then heard back, or a sound on a speaker.
+    async fn run_audio_test(&self, stage: AudioTestStage) -> Result<(), PhoneError> {
+        /// How long the microphone is recorded.
+        const LENGTH: std::time::Duration = std::time::Duration::from_secs(5);
+        const RATE: u32 = 16_000;
+        let show = |stage, level| self.set_audio_test(Some(AudioTest { stage, level }));
+        show(stage, 0);
+        let guard = self.anvil.read().await;
+        let Some(anvil) = guard.as_ref() else {
+            return Ok(());
+        };
+        let (samples, rate, ring) = match stage {
+            AudioTestStage::Recording | AudioTestStage::PlayingBack => {
+                // The meter moves ten times a second, at the loudest heard.
+                let mut loudest = 0f32;
+                let mut shown = std::time::Instant::now();
+                let recorded = anvil
+                    .record_microphone(LENGTH, RATE, |level| {
+                        loudest = loudest.max(level);
+                        if shown.elapsed() >= std::time::Duration::from_millis(100) {
+                            show(AudioTestStage::Recording, meter(loudest));
+                            loudest = 0.0;
+                            shown = std::time::Instant::now();
+                        }
+                    })
+                    .await?;
+                show(AudioTestStage::PlayingBack, 0);
+                (recorded, RATE, false)
+            }
+            AudioTestStage::Speaker => {
+                let tone = ring::built_in(ring::DEFAULT).expect("Anvil's own ringtone");
+                (tone.clip.samples, tone.clip.sample_rate, false)
+            }
+            AudioTestStage::Ring => {
+                let tone = self
+                    .tone(&self.ringtone())
+                    .or_else(|| ring::built_in(ring::DEFAULT))
+                    .expect("Anvil's own ringtone");
+                (tone.clip.samples, tone.clip.sample_rate, true)
+            }
+        };
+        let length = std::time::Duration::from_millis(samples.len() as u64 * 1000 / rate as u64);
+        // Stopped with the test: aborting this task drops the guard.
+        let playing = AbortOnDrop(if ring {
+            anvil.ring(samples, rate, std::time::Duration::from_millis(300), false)?
+        } else {
+            anvil.play(samples, rate)?
+        });
+        drop(guard);
+        tokio::time::sleep(length + std::time::Duration::from_millis(300)).await;
+        drop(playing);
+        Ok(())
     }
 
     /// Stop what is sounding.
@@ -963,6 +1147,10 @@ impl Inner {
     /// Sound what the calls want: a ring, the call waiting tone, or
     /// nothing (a preview playing on unless a call rings).
     async fn sound(&self) {
+        // A call stops an audio test: the speaker and microphone are its.
+        if !self.state.lock().calls.is_empty() {
+            self.stop_audio_test();
+        }
         if !self.ring {
             return;
         }
@@ -1190,6 +1378,30 @@ impl Inner {
         if let Err(e) = local.save(path) {
             tracing::warn!(%e, path = %path.display(), "settings not saved");
         }
+    }
+}
+
+/// Where the ringtones added from files are kept: beside the settings.
+fn ringtone_dir(settings_path: Option<&std::path::Path>) -> Option<PathBuf> {
+    Some(settings_path?.parent()?.join("ringtones"))
+}
+
+/// A microphone's peak level (0.0–1.0) as a meter shows it, 0 to 100: by
+/// decibels, from 60 below full scale, as a voice's level is heard.
+fn meter(peak: f32) -> u8 {
+    if peak <= 0.0 {
+        return 0;
+    }
+    let db = 20.0 * peak.log10();
+    (((db + 60.0) / 60.0).clamp(0.0, 1.0) * 100.0).round() as u8
+}
+
+/// A task aborted when this is dropped.
+struct AbortOnDrop(tokio::task::JoinHandle<()>);
+
+impl Drop for AbortOnDrop {
+    fn drop(&mut self) {
+        self.0.abort();
     }
 }
 

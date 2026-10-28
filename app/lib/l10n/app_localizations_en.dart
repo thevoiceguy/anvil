@@ -412,6 +412,46 @@ class StringsEn extends Strings {
   String get ringtoneClassic => 'Classic';
 
   @override
+  String get ringtoneFile => 'Choose a file…';
+
+  @override
+  String get ringtoneFileType => 'Sound files';
+
+  @override
+  String get ringtoneRemove => 'Remove this ringtone';
+
+  @override
+  String get audioTests => 'Test your audio';
+
+  @override
+  String get testMicrophone => 'Test microphone';
+
+  @override
+  String get testMicrophoneNote =>
+      'Say something for five seconds, then hear it played back on your speaker at your volumes.';
+
+  @override
+  String get testSpeaker => 'Test speaker';
+
+  @override
+  String get testRinging => 'Test ringing';
+
+  @override
+  String get testRecording => 'Listening… speak now';
+
+  @override
+  String get testPlayingBack => 'Playing back what you said';
+
+  @override
+  String get testSpeakerPlaying => 'Playing on your speaker';
+
+  @override
+  String get testRingPlaying => 'Ringing on the ringing speaker';
+
+  @override
+  String get testStop => 'Stop';
+
+  @override
   String get echoCancellation => 'Echo cancellation';
 
   @override

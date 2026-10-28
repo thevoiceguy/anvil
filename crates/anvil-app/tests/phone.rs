@@ -1019,3 +1019,197 @@ async fn the_installed_profiles_brand_is_the_phones_while_fcp_has_none() {
     alice.shutdown().await;
     let _ = std::fs::remove_dir_all(dir);
 }
+
+/// A microphone that hears a voice: every frame loud. Speakers counted as
+/// [`Listening`]'s are.
+struct LoudMic(Arc<Heard>);
+struct LoudSource(AudioFormat, tokio::time::Interval);
+
+#[async_trait]
+impl AudioSource for LoudSource {
+    async fn next_frame(&mut self) -> Option<AudioFrame> {
+        self.1.tick().await;
+        let n = (self.0.sample_rate * self.0.frame_ms / 1000) as usize;
+        Some(AudioFrame {
+            samples: (0..n)
+                .map(|i| if i % 2 == 0 { 8_000 } else { -8_000 })
+                .collect(),
+            format: self.0,
+        })
+    }
+}
+
+impl AudioHost for LoudMic {
+    fn make_capture(&self, cfg: AudioFormat) -> Result<Box<dyn AudioSource>, AnvilError> {
+        Ok(Box::new(LoudSource(
+            cfg,
+            tokio::time::interval(Duration::from_millis(u64::from(cfg.frame_ms))),
+        )))
+    }
+    fn make_playback(&self, _: AudioFormat) -> Result<Box<dyn AudioSink>, AnvilError> {
+        Ok(Box::new(CountingSink(Arc::clone(&self.0), false)))
+    }
+    fn make_ringer(&self, _: AudioFormat) -> Result<Box<dyn AudioSink>, AnvilError> {
+        Ok(Box::new(CountingSink(Arc::clone(&self.0), true)))
+    }
+    fn devices(&self) -> Vec<DeviceInfo> {
+        Vec::new()
+    }
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn the_microphone_is_heard_back_and_the_speakers_tested() {
+    use anvil_app::AudioTestStage as Stage;
+    log();
+    let heard = Arc::new(Heard::default());
+    let alice = start(
+        "alice",
+        "127.0.0.40",
+        Box::new(LoudMic(Arc::clone(&heard))),
+        None,
+        true,
+        None,
+    )
+    .await;
+
+    // The microphone: recorded with its level shown, then played back on
+    // the speaker calls use, then over.
+    let in_calls = heard.in_calls();
+    assert!(alice.execute(Command::TestMicrophone).await.unwrap().ok);
+    until(&alice, "the microphone's level shown", |s| {
+        s.audio_test
+            .is_some_and(|t| t.stage == Stage::Recording && t.level > 50)
+    })
+    .await;
+    assert_eq!(heard.in_calls(), in_calls, "nothing played while recording");
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(10);
+    while alice.state().audio_test.map(|t| t.stage) != Some(Stage::PlayingBack) {
+        assert!(tokio::time::Instant::now() < deadline, "never played back");
+        tokio::time::sleep(Duration::from_millis(50)).await;
+    }
+    assert!(grows(|| heard.in_calls(), SOON).await, "heard back");
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(10);
+    while alice.state().audio_test.is_some() {
+        assert!(
+            tokio::time::Instant::now() < deadline,
+            "the test never ended"
+        );
+        tokio::time::sleep(Duration::from_millis(50)).await;
+    }
+
+    // The speakers: a sound on the one calls use, and on the one that rings.
+    let (in_calls, ringing) = (heard.in_calls(), heard.ringing());
+    assert!(
+        alice
+            .execute(Command::TestSpeaker { ring: false })
+            .await
+            .unwrap()
+            .ok
+    );
+    assert!(
+        grows(|| heard.in_calls(), SOON).await,
+        "the speaker sounded"
+    );
+    assert_eq!(heard.ringing(), ringing);
+    assert!(
+        alice
+            .execute(Command::TestSpeaker { ring: true })
+            .await
+            .unwrap()
+            .ok
+    );
+    assert!(grows(|| heard.ringing(), SOON).await, "the ringer sounded");
+    assert!(heard.in_calls() > in_calls);
+
+    // Stopped: quiet at once.
+    assert!(alice.execute(Command::StopTest).await.unwrap().ok);
+    assert_eq!(alice.state().audio_test, None);
+    tokio::time::sleep(Duration::from_millis(200)).await;
+    assert!(!grows(|| heard.ringing(), Duration::from_millis(500)).await);
+    alice.shutdown().await;
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_ringtone_from_a_file_rings_is_kept_and_can_be_removed() {
+    log();
+    let dir = std::env::temp_dir().join(format!("anvil-app-tone-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(dir.join("music")).unwrap();
+    let settings = dir.join("app").join("settings.json");
+    let file = dir.join("music").join("Bells.mp3");
+    std::fs::write(&file, include_bytes!("data/ring.mp3")).unwrap();
+    let heard = Arc::new(Heard::default());
+    let alice = start(
+        "alice",
+        "127.0.0.41",
+        Box::new(Listening(Arc::clone(&heard))),
+        Some(settings.clone()),
+        true,
+        None,
+    )
+    .await;
+
+    // Added: kept beside the settings, listed, chosen and heard once.
+    assert!(
+        alice
+            .execute(Command::RingtoneFile {
+                path: file.display().to_string()
+            })
+            .await
+            .unwrap()
+            .ok
+    );
+    let audio = alice.state().audio;
+    assert_eq!(audio.ringtone, "file:Bells.mp3");
+    assert!(audio.ringtones.iter().any(|r| r.name == "Bells.mp3"));
+    assert!(dir
+        .join("app")
+        .join("ringtones")
+        .join("Bells.mp3")
+        .is_file());
+    assert!(grows(|| heard.ringing(), SOON).await, "previewed");
+    // Not a sound: refused.
+    let text = dir.join("music").join("notes.txt");
+    std::fs::write(&text, "hello").unwrap();
+    assert!(alice
+        .execute(Command::RingtoneFile {
+            path: text.display().to_string()
+        })
+        .await
+        .is_err());
+    alice.shutdown().await;
+
+    // Started again: still there and still the one that rings.
+    let alice = start(
+        "alice",
+        "127.0.0.41",
+        Box::new(Listening(Arc::clone(&heard))),
+        Some(settings.clone()),
+        true,
+        None,
+    )
+    .await;
+    assert_eq!(alice.state().audio.ringtone, "file:Bells.mp3");
+
+    // Removed: gone from the list and the folder, Anvil's rings again; a
+    // built-in one cannot be removed.
+    assert!(alice
+        .execute(Command::RemoveRingtone { id: "anvil".into() })
+        .await
+        .is_err());
+    assert!(
+        alice
+            .execute(Command::RemoveRingtone {
+                id: "file:Bells.mp3".into()
+            })
+            .await
+            .unwrap()
+            .ok
+    );
+    let audio = alice.state().audio;
+    assert_eq!(audio.ringtone, "anvil");
+    assert!(!audio.ringtones.iter().any(|r| r.id.starts_with("file:")));
+    assert!(!dir.join("app").join("ringtones").join("Bells.mp3").exists());
+    alice.shutdown().await;
+    let _ = std::fs::remove_dir_all(dir);
+}

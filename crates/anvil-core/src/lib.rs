@@ -915,6 +915,18 @@ impl Anvil {
         audio::play(self.audio.as_ref(), samples, sample_rate)
     }
 
+    /// Record the microphone for `length`, mono at `sample_rate`, as a call
+    /// would send it, giving each 20 ms frame's level (0.0–1.0) to `level`:
+    /// a microphone test, played back after with [`Anvil::play`].
+    pub async fn record_microphone(
+        &self,
+        length: std::time::Duration,
+        sample_rate: u32,
+        level: impl FnMut(f32) + Send,
+    ) -> Result<Vec<i16>, AnvilError> {
+        audio::record(self.audio.as_ref(), length, sample_rate, level).await
+    }
+
     /// Ring: the clip over and over with `gap` after each, until the task is
     /// aborted; on the ringing speaker, or (`in_call`) the one calls use, as
     /// a call waiting tone is heard.

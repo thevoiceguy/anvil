@@ -4,6 +4,7 @@
 
 import 'dart:io';
 
+import 'package:file_selector/file_selector.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:url_launcher/url_launcher.dart';
@@ -110,6 +111,11 @@ class SettingsPage extends StatelessWidget {
           ),
           if (snap.ringtones.isNotEmpty)
             _RingtonePicker(snap: snap, model: model),
+          // A host with volumes of its own plays and records here.
+          if (snap.speakerVolume != null) ...[
+            header(s.audioTests),
+            AudioTests(snap: snap, model: model),
+          ],
           if (snap.echoCancellation case final on?)
             SwitchListTile(
               key: const Key('echoCancellation'),
@@ -179,7 +185,8 @@ class SettingsPage extends StatelessWidget {
 }
 
 /// A microphone or speaker: the system's default, or one by name.
-/// The ringtone: Anvil's own, or the brand's; choosing one plays it.
+/// The ringtone: Anvil's own, the brand's, or a sound file added; choosing
+/// one plays it.
 class _RingtonePicker extends StatelessWidget {
   const _RingtonePicker({required this.snap, required this.model});
 
@@ -195,24 +202,70 @@ class _RingtonePicker extends StatelessWidget {
       _ => r.name,
     };
     final known = snap.ringtones.any((r) => r.id == snap.ringtone);
+    final fromFile = snap.ringtone.startsWith('file:');
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-      child: DropdownMenu<String>(
-        key: const Key('ringtone'),
-        expandedInsets: EdgeInsets.zero,
-        leadingIcon: const Icon(Icons.music_note),
-        label: Text(s.ringtone),
-        initialSelection: known ? snap.ringtone : null,
-        dropdownMenuEntries: [
-          for (final r in snap.ringtones)
-            DropdownMenuEntry(value: r.id, label: name(r)),
+      child: Row(
+        children: [
+          Expanded(
+            child: DropdownMenu<String>(
+              key: const Key('ringtone'),
+              expandedInsets: EdgeInsets.zero,
+              leadingIcon: const Icon(Icons.music_note),
+              label: Text(s.ringtone),
+              initialSelection: known ? snap.ringtone : null,
+              dropdownMenuEntries: [
+                for (final r in snap.ringtones)
+                  DropdownMenuEntry(value: r.id, label: name(r)),
+                DropdownMenuEntry(
+                  value: _file,
+                  label: s.ringtoneFile,
+                  leadingIcon: const Icon(Icons.folder_open),
+                ),
+              ],
+              onSelected: (id) {
+                if (id == null) return;
+                if (id == _file) {
+                  _addFile(s);
+                } else {
+                  model.run(() => model.api.chooseRingtone(id));
+                }
+              },
+            ),
+          ),
+          if (fromFile)
+            IconButton(
+              key: const Key('removeRingtone'),
+              tooltip: s.ringtoneRemove,
+              icon: const Icon(Icons.delete_outline),
+              onPressed: () =>
+                  model.run(() => model.api.removeRingtone(snap.ringtone)),
+            ),
         ],
-        onSelected: (id) {
-          if (id == null) return;
-          model.run(() => model.api.chooseRingtone(id));
-        },
       ),
     );
+  }
+
+  /// The menu's entry for a file; no ringtone's id.
+  static const _file = '\u0000file';
+
+  Future<void> _addFile(Strings s) async {
+    final file = await openFile(
+      acceptedTypeGroups: [
+        XTypeGroup(
+          label: s.ringtoneFileType,
+          extensions: const ['mp3', 'ogg', 'oga', 'wav'],
+          mimeTypes: const ['audio/mpeg', 'audio/ogg', 'audio/wav'],
+          uniformTypeIdentifiers: const [
+            'public.mp3',
+            'org.xiph.ogg-audio',
+            'com.microsoft.waveform-audio',
+          ],
+        ),
+      ],
+    );
+    if (file == null) return;
+    await model.run(() => model.api.addRingtoneFile(file.path));
   }
 }
 

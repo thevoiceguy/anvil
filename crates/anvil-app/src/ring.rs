@@ -131,6 +131,82 @@ pub(crate) fn decode(mime: &str, bytes: &[u8]) -> Result<Tone, String> {
     })
 }
 
+/// A ringtone added from a file: `file:` and its file name.
+pub(crate) fn file_id(name: &str) -> String {
+    format!("file:{name}")
+}
+
+/// The biggest sound file taken as a ringtone.
+const BIGGEST_FILE: u64 = 20 * 1024 * 1024;
+
+/// A sound file's type, by its extension.
+fn mime_of(path: &std::path::Path) -> Option<&'static str> {
+    let ext = path.extension()?.to_str()?.to_ascii_lowercase();
+    Some(match ext.as_str() {
+        "wav" | "wave" => "audio/wav",
+        "ogg" | "oga" => "audio/ogg",
+        "mp3" => "audio/mpeg",
+        _ => return None,
+    })
+}
+
+/// A ringtone file read and decoded: its name and its sound.
+fn read_file(path: &std::path::Path) -> Result<(String, Tone), String> {
+    let name = path
+        .file_name()
+        .and_then(|n| n.to_str())
+        .ok_or("a ringtone file with no name")?
+        .to_string();
+    let mime = mime_of(path).ok_or("a ringtone must be a WAV, Ogg or MP3 file")?;
+    let size = std::fs::metadata(path)
+        .map_err(|e| format!("{name}: {e}"))?
+        .len();
+    if size > BIGGEST_FILE {
+        return Err(format!("{name} is too big for a ringtone (20 MB at most)"));
+    }
+    let bytes = std::fs::read(path).map_err(|e| format!("{name}: {e}"))?;
+    let tone = decode(mime, &bytes).map_err(|e| format!("{name}: {e}"))?;
+    Ok((name, tone))
+}
+
+/// Take the sound file at `path` as a ringtone: decoded, so one that cannot
+/// play is refused, then copied into `dir` under its own name (replacing
+/// one of that name). Its name and its sound.
+pub(crate) fn add_file(
+    path: &std::path::Path,
+    dir: &std::path::Path,
+) -> Result<(String, Tone), String> {
+    let (name, tone) = read_file(path)?;
+    std::fs::create_dir_all(dir).map_err(|e| format!("{}: {e}", dir.display()))?;
+    let kept = dir.join(&name);
+    if kept != path {
+        std::fs::copy(path, &kept).map_err(|e| format!("{name} not kept: {e}"))?;
+    }
+    Ok((name, tone))
+}
+
+/// The ringtones added from files, kept in `dir`, by name. Those that
+/// cannot be played are logged and left out.
+pub(crate) fn from_dir(dir: &std::path::Path) -> Vec<(String, Tone)> {
+    let Ok(entries) = std::fs::read_dir(dir) else {
+        return Vec::new();
+    };
+    let mut tones: Vec<(String, Tone)> = entries
+        .flatten()
+        .map(|e| e.path())
+        .filter(|p| p.is_file())
+        .filter_map(|p| match read_file(&p) {
+            Ok(t) => Some(t),
+            Err(e) => {
+                tracing::warn!(%e, "a ringtone file left out");
+                None
+            }
+        })
+        .collect();
+    tones.sort_by_key(|a| a.0.to_lowercase());
+    tones
+}
+
 /// A brand's ringtones decoded: name, whether the brand's default, the
 /// sound. Those that cannot be played are logged and left out.
 pub(crate) fn from_brand(ringtones: &[anvil_core::brand::Ringtone]) -> Vec<(String, bool, Tone)> {
@@ -374,6 +450,35 @@ mod tests {
         ]);
         let names: Vec<(&str, bool)> = kept.iter().map(|(n, d, _)| (n.as_str(), *d)).collect();
         assert_eq!(names, [("Acme", true), ("Tune", false)]);
+    }
+
+    #[test]
+    fn a_ringtone_file_is_kept_beside_the_settings_and_read_back() {
+        let dir = std::env::temp_dir().join(format!("anvil-ring-{}", std::process::id()));
+        let from = dir.join("from");
+        let kept = dir.join("ringtones");
+        std::fs::create_dir_all(&from).unwrap();
+        let mp3 = from.join("My Tone.MP3");
+        std::fs::write(&mp3, include_bytes!("../tests/data/ring.mp3")).unwrap();
+        let (name, tone) = add_file(&mp3, &kept).unwrap();
+        assert_eq!(name, "My Tone.MP3");
+        assert!(!tone.clip.samples.is_empty());
+        let read = from_dir(&kept);
+        assert_eq!(read.len(), 1);
+        assert_eq!(read[0].0, "My Tone.MP3");
+        assert_eq!(file_id(&name), "file:My Tone.MP3");
+
+        // Not a sound file, or not one that plays: refused, nothing kept.
+        let text = from.join("notes.txt");
+        std::fs::write(&text, "hello").unwrap();
+        assert!(add_file(&text, &kept)
+            .unwrap_err()
+            .contains("WAV, Ogg or MP3"));
+        let broken = from.join("broken.wav");
+        std::fs::write(&broken, "not a wav").unwrap();
+        assert!(add_file(&broken, &kept).is_err());
+        assert_eq!(from_dir(&kept).len(), 1);
+        std::fs::remove_dir_all(dir).unwrap();
     }
 
     #[test]

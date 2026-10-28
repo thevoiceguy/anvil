@@ -1,6 +1,7 @@
 // The microphone and the speaker, and how loud each is: in Settings and in
 // a call's Audio sheet (`docs/APP.md` §4). A call that is up moves to the
-// devices chosen and takes the volumes at once.
+// devices chosen and takes the volumes at once. Settings also tests them:
+// the microphone recorded and heard back, a sound on each speaker.
 
 import 'package:flutter/material.dart';
 
@@ -151,6 +152,85 @@ class _VolumeSliderState extends State<VolumeSlider> {
         },
       ),
       trailing: Text('${value.round()}%'),
+    );
+  }
+}
+
+/// Tests of the microphone and the speakers, with the volumes set: the
+/// microphone's level while it records, then what it heard played back.
+/// Not while a call is up: the phone refuses.
+class AudioTests extends StatelessWidget {
+  const AudioTests({super.key, required this.snap, required this.model});
+  final PhoneSnapshot snap;
+  final PhoneModel model;
+
+  @override
+  Widget build(BuildContext context) {
+    final s = Strings.of(context);
+    final test = snap.audioTest;
+    final busy = test != null || snap.calls.isNotEmpty;
+    final status = switch (test) {
+      AudioTest.recording => s.testRecording,
+      AudioTest.playingBack => s.testPlayingBack,
+      AudioTest.speaker => s.testSpeakerPlaying,
+      AudioTest.ring => s.testRingPlaying,
+      null => s.testMicrophoneNote,
+    };
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Wrap(
+            spacing: 8,
+            runSpacing: 8,
+            children: [
+              OutlinedButton.icon(
+                key: const Key('testMicrophone'),
+                icon: const Icon(Icons.mic),
+                label: Text(s.testMicrophone),
+                onPressed: busy
+                    ? null
+                    : () => model.run(() => model.api.testMicrophone()),
+              ),
+              OutlinedButton.icon(
+                key: const Key('testSpeaker'),
+                icon: const Icon(Icons.volume_up),
+                label: Text(s.testSpeaker),
+                onPressed: busy
+                    ? null
+                    : () => model.run(() => model.api.testSpeaker(ring: false)),
+              ),
+              OutlinedButton.icon(
+                key: const Key('testRinging'),
+                icon: const Icon(Icons.notifications_active),
+                label: Text(s.testRinging),
+                onPressed: busy
+                    ? null
+                    : () => model.run(() => model.api.testSpeaker(ring: true)),
+              ),
+              if (test != null)
+                TextButton.icon(
+                  key: const Key('stopTest'),
+                  icon: const Icon(Icons.stop),
+                  label: Text(s.testStop),
+                  onPressed: () => model.run(() => model.api.stopAudioTest()),
+                ),
+            ],
+          ),
+          const SizedBox(height: 8),
+          Text(status, style: Theme.of(context).textTheme.bodySmall),
+          if (test == AudioTest.recording) ...[
+            const SizedBox(height: 8),
+            LinearProgressIndicator(
+              key: const Key('microphoneLevel'),
+              value: snap.audioTestLevel / 100,
+              minHeight: 8,
+            ),
+          ],
+        ],
+      ),
     );
   }
 }

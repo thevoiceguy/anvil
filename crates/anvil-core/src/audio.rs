@@ -197,6 +197,39 @@ pub(crate) fn play(
     Ok(tokio::spawn(play_out(sink, format, samples, None)))
 }
 
+/// Record `host`'s microphone for `length`, mono at `sample_rate`, as a
+/// call would send it (its volume, its cleaning), giving each 20 ms frame's
+/// level to `level` as it comes: for a microphone test, heard back after.
+pub(crate) async fn record(
+    host: &dyn AudioHost,
+    length: std::time::Duration,
+    sample_rate: u32,
+    mut level: impl FnMut(f32) + Send,
+) -> Result<Vec<i16>, AnvilError> {
+    let format = clip_format(sample_rate)?;
+    let mut source = host.make_capture(format)?;
+    let deadline = tokio::time::Instant::now() + length;
+    let mut samples = Vec::with_capacity(sample_rate as usize * length.as_secs() as usize);
+    loop {
+        match tokio::time::timeout_at(deadline, source.next_frame()).await {
+            Ok(Some(frame)) => {
+                level(peak(&frame.samples));
+                samples.extend_from_slice(&frame.samples);
+            }
+            Ok(None) => {
+                return Err(AnvilError::AudioDevice("the microphone stopped".into()));
+            }
+            Err(_) => return Ok(samples),
+        }
+    }
+}
+
+/// How loud `samples` are: their peak, 0.0 (silence) to 1.0 (full scale).
+pub fn peak(samples: &[i16]) -> f32 {
+    let top = samples.iter().map(|s| s.unsigned_abs()).max().unwrap_or(0);
+    f32::from(top) / 32_768.0
+}
+
 /// Ring: the clip over and over, `gap` of silence after each, on the
 /// ringing speaker or (`in_call`) the one calls use, as a tone heard in a
 /// call, until the task is aborted.
@@ -292,6 +325,57 @@ mod play_tests {
         fn devices(&self) -> Vec<DeviceInfo> {
             Vec::new()
         }
+    }
+
+    /// A microphone that hears a frame of `level` every 20 ms.
+    struct Hearing(i16);
+
+    #[async_trait]
+    impl AudioSource for Hearing {
+        async fn next_frame(&mut self) -> Option<AudioFrame> {
+            tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+            Some(AudioFrame {
+                samples: vec![self.0; 320],
+                format: AudioFormat {
+                    sample_rate: 16_000,
+                    channels: 1,
+                    frame_ms: 20,
+                },
+            })
+        }
+    }
+
+    struct Listening;
+
+    impl AudioHost for Listening {
+        fn make_capture(&self, _: AudioFormat) -> Result<Box<dyn AudioSource>, AnvilError> {
+            Ok(Box::new(Hearing(16_384)))
+        }
+        fn make_playback(&self, _: AudioFormat) -> Result<Box<dyn AudioSink>, AnvilError> {
+            Err(AnvilError::AudioDevice("no speaker".into()))
+        }
+        fn devices(&self) -> Vec<DeviceInfo> {
+            Vec::new()
+        }
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn a_recording_lasts_its_length_and_reports_each_frames_level() {
+        let mut levels = Vec::new();
+        let samples = record(
+            &Listening,
+            std::time::Duration::from_millis(1_000),
+            16_000,
+            |l| levels.push(l),
+        )
+        .await
+        .unwrap();
+        // 49 or 50 whole frames in a second, each heard at half scale.
+        assert!((49..=50).contains(&levels.len()), "{}", levels.len());
+        assert!(levels.iter().all(|l| (*l - 0.5).abs() < 0.001));
+        assert_eq!(samples.len(), levels.len() * 320);
+        assert_eq!(peak(&[]), 0.0);
+        assert_eq!(peak(&[i16::MIN]), 1.0);
     }
 
     #[tokio::test(start_paused = true)]

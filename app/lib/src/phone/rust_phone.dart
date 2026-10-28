@@ -242,6 +242,8 @@ class RustPhone implements PhoneApi {
       speakerVolume: s.speakerVolume,
       playing: s.playing,
       mayRecord: s.mayRecord,
+      audioTest: AudioTest.parse(s.audioTest),
+      audioTestLevel: s.audioTestLevel,
       contacts: [
         for (final c in s.contacts)
           Contact(
@@ -407,6 +409,22 @@ class RustPhone implements PhoneApi {
 
   @override
   Future<void> chooseRingtone(String? id) => rust.chooseRingtone(id: id);
+
+  @override
+  Future<void> addRingtoneFile(String path) => rust.addRingtoneFile(path: path);
+
+  @override
+  Future<void> removeRingtone(String id) => rust.removeRingtone(id: id);
+
+  @override
+  Future<void> testMicrophone() => rust.testMicrophone();
+
+  @override
+  Future<void> testSpeaker({required bool ring}) =>
+      rust.testSpeaker(ring: ring);
+
+  @override
+  Future<void> stopAudioTest() => rust.stopAudioTest();
 
   @override
   Future<void> setAudioProcessing({
