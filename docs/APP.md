@@ -423,6 +423,27 @@ Three PRs, the screens thin over the state as §3 has it:
   the ringtone and device kept) and the decoders' tests on real Ogg and
   MP3 files.
 
+### D8 findings 24, 25, 30: audio tests and a ringtone of the user's own
+- Settings → Test your audio (a desktop, whose audio host has volumes of
+  its own): **Test microphone** records five seconds as a call would send
+  it (the microphone's volume, its cleaning), its level shown as a meter
+  in decibels from 60 below full scale, then plays it back on the speaker
+  calls use at the speaker's volume; **Test speaker** plays Anvil's chime
+  there; **Test ringing** plays the ringtone once on the speaker that
+  rings. One test at a time, refused while a call is up or ringing, and a
+  call ringing in stops it. From the CLI: `test mic`, `test speaker`,
+  `test ring`, `test stop`.
+- **Choose a file…** in the ringtone list takes a WAV, Ogg or MP3 file (20
+  MB at most), decoded first so one that cannot play is refused, then
+  copied into `ringtones/` beside the settings and chosen
+  (`ringtone file <path>`). It is listed as `file:` and its name, read
+  again at each start, and removed with the bin beside the list
+  (`ringtone remove <id>`), Anvil's own ringing again if it was chosen.
+- Proved by `anvil-app/tests/phone.rs`
+  (`the_microphone_is_heard_back_and_the_speakers_tested`,
+  `a_ringtone_from_a_file_rings_is_kept_and_can_be_removed`) and the
+  widget tests.
+
 ### W5: echo cancellation and noise suppression
 - The desktop's microphone is cleaned before it is sent: WebRTC's audio
   processing — AEC3, its noise suppressor and its high-pass filter — as
@@ -460,7 +481,10 @@ Three PRs:
   - Windows: an Inno Setup installer (`app/packaging/windows.iss`) for this
     user only, without administrator rights, in
     `%LOCALAPPDATA%\Programs\Anvil`, with a Start menu entry and an
-    uninstaller that also removes start at login. The Visual C++ runtime
+    uninstaller that also removes start at login. The uninstaller first runs
+    `anvil.exe --sign-out`, which signs the app out at FCP without a window
+    (ten seconds at most), so its session and device end there instead of
+    staying behind once the session's file is deleted. The Visual C++ runtime
     goes beside the exe, so nothing else needs installing.
   - macOS: a disk image (`app/packaging/macos.sh`) with the app, universal
     (Apple Silicon and Intel), ad hoc signed as Flutter builds it.

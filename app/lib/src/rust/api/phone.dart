@@ -215,6 +215,29 @@ Future<void> chooseRingDevice({String? device}) =>
 Future<void> chooseRingtone({String? id}) =>
     RustLib.instance.api.crateApiPhoneChooseRingtone(id: id);
 
+/// Add a ringtone from a sound file on this device (WAV, Ogg Vorbis or
+/// MP3): kept with the app's files, chosen, and heard once.
+Future<void> addRingtoneFile({required String path}) =>
+    RustLib.instance.api.crateApiPhoneAddRingtoneFile(path: path);
+
+/// Remove a ringtone added from a file (`file:` and its name).
+Future<void> removeRingtone({required String id}) =>
+    RustLib.instance.api.crateApiPhoneRemoveRingtone(id: id);
+
+/// Test the microphone: a few seconds recorded, its level shown, then
+/// heard back on the speaker calls use.
+Future<void> testMicrophone() =>
+    RustLib.instance.api.crateApiPhoneTestMicrophone();
+
+/// Test a speaker: a sound on the one calls use, or (`ring`) on the one
+/// that rings, with the ringtone.
+Future<void> testSpeaker({required bool ring}) =>
+    RustLib.instance.api.crateApiPhoneTestSpeaker(ring: ring);
+
+/// Stop an audio test.
+Future<void> stopAudioTest() =>
+    RustLib.instance.api.crateApiPhoneStopAudioTest();
+
 /// Turn echo cancellation or noise suppression on or off (`None` leaves it
 /// as it is), in the call that is up too.
 Future<void> setAudioProcessing({
@@ -746,6 +769,13 @@ class PhoneState {
   /// The user's contacts, by name: on this device and on their account.
   final List<Contact> contacts;
 
+  /// A test of the microphone or a speaker under way: `recording`,
+  /// `playing_back`, `speaker` or `ring`; `None` when none is.
+  final String? audioTest;
+
+  /// While recording: how loud the microphone is, 0 to 100.
+  final int audioTestLevel;
+
   const PhoneState({
     required this.aor,
     required this.registration,
@@ -774,6 +804,8 @@ class PhoneState {
     this.playing,
     required this.mayRecord,
     required this.contacts,
+    this.audioTest,
+    required this.audioTestLevel,
   });
 
   @override
@@ -804,7 +836,9 @@ class PhoneState {
       speakerVolume.hashCode ^
       playing.hashCode ^
       mayRecord.hashCode ^
-      contacts.hashCode;
+      contacts.hashCode ^
+      audioTest.hashCode ^
+      audioTestLevel.hashCode;
 
   @override
   bool operator ==(Object other) =>
@@ -837,7 +871,9 @@ class PhoneState {
           speakerVolume == other.speakerVolume &&
           playing == other.playing &&
           mayRecord == other.mayRecord &&
-          contacts == other.contacts;
+          contacts == other.contacts &&
+          audioTest == other.audioTest &&
+          audioTestLevel == other.audioTestLevel;
 }
 
 /// A connected call's media, as last measured.
@@ -973,7 +1009,8 @@ class RememberedSignIn {
           username == other.username;
 }
 
-/// A ringtone to choose: `anvil`, `classic`, or `brand:` and its name.
+/// A ringtone to choose: `anvil`, `classic`, `brand:` and its name, or
+/// `file:` and the name of a file added.
 class Ringtone {
   final String id;
   final String name;

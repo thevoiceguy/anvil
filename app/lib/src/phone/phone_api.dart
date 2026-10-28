@@ -305,6 +305,22 @@ class AudioDevice {
   final bool isDefault;
 }
 
+/// What an audio test is doing.
+enum AudioTest {
+  recording,
+  playingBack,
+  speaker,
+  ring;
+
+  static AudioTest? parse(String? stage) => switch (stage) {
+    'recording' => recording,
+    'playing_back' => playingBack,
+    'speaker' => speaker,
+    'ring' => ring,
+    _ => null,
+  };
+}
+
 /// A ringtone to choose: Anvil's own (`anvil`, `classic`) or the brand's
 /// (`brand:` and its name).
 class Ringtone {
@@ -403,6 +419,8 @@ class PhoneSnapshot {
     this.playing,
     this.mayRecord = false,
     this.contacts = const [],
+    this.audioTest,
+    this.audioTestLevel = 0,
   });
 
   final String aor;
@@ -460,6 +478,12 @@ class PhoneSnapshot {
   /// The user's contacts, by name: on this device and, signed in to FCP,
   /// on their account.
   final List<Contact> contacts;
+
+  /// A test of the microphone or a speaker under way, null when none is.
+  final AudioTest? audioTest;
+
+  /// While the microphone is recorded: how loud it is, 0 to 100.
+  final int audioTestLevel;
 
   /// Signed in to FCP, so a contact can be kept on the account.
   bool get hasAccount => calling != null;
@@ -526,6 +550,9 @@ class PhoneSnapshot {
     bool clearPlaying = false,
     bool? mayRecord,
     List<Contact>? contacts,
+    AudioTest? audioTest,
+    bool clearAudioTest = false,
+    int? audioTestLevel,
   }) => PhoneSnapshot(
     aor: aor,
     registration: registration ?? this.registration,
@@ -554,6 +581,8 @@ class PhoneSnapshot {
     playing: clearPlaying ? null : playing ?? this.playing,
     mayRecord: mayRecord ?? this.mayRecord,
     contacts: contacts ?? this.contacts,
+    audioTest: clearAudioTest ? null : audioTest ?? this.audioTest,
+    audioTestLevel: audioTestLevel ?? this.audioTestLevel,
   );
 
   static const empty = PhoneSnapshot(
@@ -770,6 +799,20 @@ abstract class PhoneApi {
   /// Ring with this ringtone by id, null for the brand's (else Anvil's);
   /// heard once now when no call is up.
   Future<void> chooseRingtone(String? id);
+
+  /// Add a ringtone from a sound file (WAV, Ogg or MP3): kept with the
+  /// app's files, chosen and heard once.
+  Future<void> addRingtoneFile(String path);
+
+  /// Remove a ringtone added from a file.
+  Future<void> removeRingtone(String id);
+
+  /// Test the microphone (recorded a few seconds, its level shown, then
+  /// heard back) or a speaker (`ring`: the one that rings, with the
+  /// ringtone).
+  Future<void> testMicrophone();
+  Future<void> testSpeaker({required bool ring});
+  Future<void> stopAudioTest();
 
   /// Turn echo cancellation or noise suppression on or off (null leaves it
   /// as it is), in the call that is up too.

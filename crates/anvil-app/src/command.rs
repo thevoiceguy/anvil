@@ -127,6 +127,23 @@ pub enum Command {
         #[serde(default)]
         id: Option<String>,
     },
+    /// Add a ringtone from a sound file on this device (WAV, Ogg Vorbis or
+    /// MP3, its first 30 seconds), kept beside the settings, and ring with
+    /// it.
+    RingtoneFile { path: String },
+    /// Remove a ringtone added from a file (`file:` and its name).
+    RemoveRingtone { id: String },
+    /// Test the microphone: record a few seconds, its level shown, then
+    /// hear it back on the speaker calls use. Not while a call is up.
+    TestMicrophone,
+    /// Test a speaker: a sound on the one calls use, or (`ring`) the one
+    /// that rings. Not while a call is up.
+    TestSpeaker {
+        #[serde(default)]
+        ring: bool,
+    },
+    /// Stop an audio test.
+    StopTest,
     /// Read the user's data from FCP again.
     Refresh,
     /// Register again now: woken by a push, the app's connection to the
@@ -192,7 +209,9 @@ impl Command {
     /// `favourite alice`,
     /// `unfavourite alice`, `recents clear`, `recents hide <id>`, `audio in USB Headset`, `audio out default`,
     /// `audio ring Speakers`, `audio echo off`, `audio noise on`,
-    /// `ringtone classic`, `ringtone default`,
+    /// `ringtone classic`, `ringtone default`, `ringtone file <path>`,
+    /// `ringtone remove <id>`, `test mic`, `test speaker`, `test ring`,
+    /// `test stop`,
     /// `refresh`, `register`, `status`. A trailing number names the call.
     pub fn parse_line(line: &str) -> Result<Self, String> {
         let words: Vec<&str> = line.split_whitespace().collect();
@@ -379,12 +398,27 @@ impl Command {
                     _ => return Err("volume needs mic or speaker, and a percent".into()),
                 }
             }
-            "ringtone" => {
-                let id = rest(&words, 1).ok_or("ringtone needs a ringtone, or default")?;
-                Command::Ringtone {
-                    id: (!id.eq_ignore_ascii_case("default")).then_some(id),
+            "ringtone" => match words.get(1).map(|w| w.to_ascii_lowercase()).as_deref() {
+                Some("file") => Command::RingtoneFile {
+                    path: rest(&words, 2).ok_or("ringtone file needs a path")?,
+                },
+                Some("remove") => Command::RemoveRingtone {
+                    id: rest(&words, 2).ok_or("ringtone remove needs a ringtone")?,
+                },
+                _ => {
+                    let id = rest(&words, 1).ok_or("ringtone needs a ringtone, or default")?;
+                    Command::Ringtone {
+                        id: (!id.eq_ignore_ascii_case("default")).then_some(id),
+                    }
                 }
-            }
+            },
+            "test" => match words.get(1).map(|w| w.to_ascii_lowercase()).as_deref() {
+                Some("mic") | Some("microphone") => Command::TestMicrophone,
+                Some("speaker") => Command::TestSpeaker { ring: false },
+                Some("ring") => Command::TestSpeaker { ring: true },
+                Some("stop") => Command::StopTest,
+                _ => return Err("test needs mic, speaker, ring or stop".into()),
+            },
             "refresh" => Command::Refresh,
             "register" => Command::Register,
             "status" => Command::Status,
@@ -471,6 +505,27 @@ mod tests {
             Command::parse_line("ringtone default").unwrap(),
             Command::Ringtone { id: None }
         );
+        assert_eq!(
+            Command::parse_line("ringtone file C:\\Users\\Jo\\My Tone.mp3").unwrap(),
+            Command::RingtoneFile {
+                path: "C:\\Users\\Jo\\My Tone.mp3".into()
+            }
+        );
+        assert_eq!(
+            Command::parse_line("ringtone remove file:My Tone.mp3").unwrap(),
+            Command::RemoveRingtone {
+                id: "file:My Tone.mp3".into()
+            }
+        );
+        assert_eq!(
+            Command::parse_line("test mic").unwrap(),
+            Command::TestMicrophone
+        );
+        assert_eq!(
+            Command::parse_line("test ring").unwrap(),
+            Command::TestSpeaker { ring: true }
+        );
+        assert!(Command::parse_line("test").is_err());
         assert_eq!(
             Command::parse_line("volume mic 80").unwrap(),
             Command::Volume {

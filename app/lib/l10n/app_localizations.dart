@@ -843,6 +843,84 @@ abstract class Strings {
   /// **'Classic'**
   String get ringtoneClassic;
 
+  /// No description provided for @ringtoneFile.
+  ///
+  /// In en, this message translates to:
+  /// **'Choose a file…'**
+  String get ringtoneFile;
+
+  /// No description provided for @ringtoneFileType.
+  ///
+  /// In en, this message translates to:
+  /// **'Sound files'**
+  String get ringtoneFileType;
+
+  /// No description provided for @ringtoneRemove.
+  ///
+  /// In en, this message translates to:
+  /// **'Remove this ringtone'**
+  String get ringtoneRemove;
+
+  /// No description provided for @audioTests.
+  ///
+  /// In en, this message translates to:
+  /// **'Test your audio'**
+  String get audioTests;
+
+  /// No description provided for @testMicrophone.
+  ///
+  /// In en, this message translates to:
+  /// **'Test microphone'**
+  String get testMicrophone;
+
+  /// No description provided for @testMicrophoneNote.
+  ///
+  /// In en, this message translates to:
+  /// **'Say something for five seconds, then hear it played back on your speaker at your volumes.'**
+  String get testMicrophoneNote;
+
+  /// No description provided for @testSpeaker.
+  ///
+  /// In en, this message translates to:
+  /// **'Test speaker'**
+  String get testSpeaker;
+
+  /// No description provided for @testRinging.
+  ///
+  /// In en, this message translates to:
+  /// **'Test ringing'**
+  String get testRinging;
+
+  /// No description provided for @testRecording.
+  ///
+  /// In en, this message translates to:
+  /// **'Listening… speak now'**
+  String get testRecording;
+
+  /// No description provided for @testPlayingBack.
+  ///
+  /// In en, this message translates to:
+  /// **'Playing back what you said'**
+  String get testPlayingBack;
+
+  /// No description provided for @testSpeakerPlaying.
+  ///
+  /// In en, this message translates to:
+  /// **'Playing on your speaker'**
+  String get testSpeakerPlaying;
+
+  /// No description provided for @testRingPlaying.
+  ///
+  /// In en, this message translates to:
+  /// **'Ringing on the ringing speaker'**
+  String get testRingPlaying;
+
+  /// No description provided for @testStop.
+  ///
+  /// In en, this message translates to:
+  /// **'Stop'**
+  String get testStop;
+
   /// No description provided for @echoCancellation.
   ///
   /// In en, this message translates to:

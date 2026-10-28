@@ -1,7 +1,9 @@
 ; The Windows installer (Inno Setup 6): installs for this user, without
 ; administrator rights, in %LOCALAPPDATA%\Programs\Anvil, with a Start menu
-; entry and an uninstaller that also removes start-at-login, what the
-; notifications registered, and the app's files (the signed-in session). Anvil offers to open tel:, sip:, sips: and
+; entry and an uninstaller that signs the app out at FCP first (its session
+; and device ended there, not left behind) and also removes start-at-login,
+; what the notifications registered, and the app's files (the signed-in
+; session). Anvil offers to open tel:, sip:, sips: and
 ; callto: links (Windows' default apps), and takes sip:, sips: and callto:
 ; where nothing else does.
 ;
@@ -121,6 +123,12 @@ Root: HKCU; Subkey: "Software\Classes\sips\shell\open\command"; ValueType: strin
 Root: HKCU; Subkey: "Software\Classes\callto"; ValueType: string; ValueData: "URL:callto"; Flags: uninsdeletekey; Check: Unclaimed('callto')
 Root: HKCU; Subkey: "Software\Classes\callto"; ValueType: string; ValueName: "URL Protocol"; ValueData: ""; Check: Unclaimed('callto')
 Root: HKCU; Subkey: "Software\Classes\callto\shell\open\command"; ValueType: string; ValueData: """{app}\anvil.exe"" ""%1"""; Check: Unclaimed('callto')
+
+[UninstallRun]
+; Before the app's files go: the session ends at FCP, and its device with it
+; (lib/main.dart, no window, ten seconds at most). The app is closed by now
+; (AppMutex), so this start is its own.
+Filename: "{app}\anvil.exe"; Parameters: "--sign-out"; Flags: runhidden waituntilterminated; RunOnceId: "SignOut"
 
 [UninstallDelete]
 ; The profile, which the installer put there but did not install as a file.

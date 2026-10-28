@@ -24,10 +24,14 @@ int APIENTRY wWinMain(_In_ HINSTANCE instance, _In_opt_ HINSTANCE prev,
     return EXIT_SUCCESS;
   }
 
-  // Started at login: in the tray, the window shown when asked for.
-  const bool hidden =
-      std::find(command_line_arguments.begin(), command_line_arguments.end(),
-                "--hidden") != command_line_arguments.end();
+  // Started at login: in the tray, the window shown when asked for. The
+  // uninstaller's sign-out never shows one.
+  const auto has = [&](const char* arg) {
+    return std::find(command_line_arguments.begin(),
+                     command_line_arguments.end(),
+                     arg) != command_line_arguments.end();
+  };
+  const bool hidden = has("--hidden") || has("--sign-out");
 
   // Initialize COM, so that it is available for use in the library and/or
   // plugins.
