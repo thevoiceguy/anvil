@@ -472,7 +472,10 @@ Three PRs:
   - Windows: an Inno Setup installer (`app/packaging/windows.iss`) for this
     user only, without administrator rights, in
     `%LOCALAPPDATA%\Programs\Anvil`, with a Start menu entry and an
-    uninstaller that also removes start at login. The Visual C++ runtime
+    uninstaller that also removes start at login. The uninstaller first runs
+    `anvil.exe --sign-out`, which signs the app out at FCP without a window
+    (ten seconds at most), so its session and device end there instead of
+    staying behind once the session's file is deleted. The Visual C++ runtime
     goes beside the exe, so nothing else needs installing.
   - macOS: a disk image (`app/packaging/macos.sh`) with the app, universal
     (Apple Silicon and Intel), ad hoc signed as Flutter builds it.

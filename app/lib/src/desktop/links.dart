@@ -7,6 +7,11 @@ import 'shell.dart';
 /// Start at login's argument: the app starts in the tray.
 const hiddenArgument = '--hidden';
 
+/// The uninstaller's argument: the app signs out at FCP and quits, never
+/// showing a window, so the session and its device end before the
+/// uninstaller deletes the app's files.
+const signOutArgument = '--sign-out';
+
 /// What `link` asks to call, for the keypad, or null when it is not a link
 /// to call. A `tel:` number keeps its digits, `+`, `*` and `#` (RFC 3966's
 /// separators and parameters dropped); a SIP address is kept whole but for
