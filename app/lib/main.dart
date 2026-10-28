@@ -1,6 +1,9 @@
+import 'dart:io';
+
 import 'package:flutter/material.dart';
 
 import 'src/app.dart';
+import 'src/desktop/links.dart';
 import 'src/desktop/native_shell.dart';
 import 'src/mobile/platform.dart';
 import 'src/phone/rust_phone.dart';
@@ -10,6 +13,14 @@ import 'src/update/rust_updates.dart';
 Future<void> main(List<String> args) async {
   WidgetsFlutterBinding.ensureInitialized();
   await RustLib.init();
+  if (args.contains(signOutArgument)) {
+    // The uninstaller: no window, and never kept waiting past ten seconds.
+    // Offline, the session stays at FCP until it ends there.
+    try {
+      await RustPhone().signOut().timeout(const Duration(seconds: 10));
+    } catch (_) {}
+    exit(0);
+  }
   final shell = NativeShell.supported ? NativeShell(args: args) : null;
   final phone = RustPhone();
   await shell?.init(
