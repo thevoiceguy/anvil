@@ -237,6 +237,7 @@ class Person {
     this.department,
     this.jobTitle,
     this.presence,
+    this.presenceLabel,
     this.onCall = false,
     this.favourite = false,
     required this.dial,
@@ -248,9 +249,12 @@ class Person {
   final String? department;
   final String? jobTitle;
 
-  /// `available`, `busy`, `away`, `dnd`, `offline`, … when the tenant shows
-  /// it.
+  /// `available`, `busy`, `away`, `dnd`, `ringing`, `on_call`,
+  /// `offline`, … when the tenant shows it.
   final String? presence;
+
+  /// Their own status's label beside it ("WFH").
+  final String? presenceLabel;
 
   /// Their busy lamp.
   final bool onCall;
@@ -275,10 +279,62 @@ class Person {
     department: department,
     jobTitle: jobTitle,
     presence: presence ?? this.presence,
+    presenceLabel: presenceLabel,
     onCall: onCall ?? this.onCall,
     favourite: favourite ?? this.favourite,
     dial: dial,
   );
+}
+
+/// One of the user's own statuses: a label on a state.
+class OwnStatus {
+  const OwnStatus({required this.id, required this.label, required this.state});
+  final String id;
+  final String label;
+
+  /// `available`, `away`, `busy` or `dnd`.
+  final String state;
+}
+
+/// The user's presence (FCP's `docs/PRESENCE.md`): what others see, the
+/// status they chose, and their own statuses to choose from.
+class MyPresence {
+  const MyPresence({
+    required this.shown,
+    this.shownLabel,
+    this.idle = false,
+    required this.status,
+    required this.statusState,
+    this.note,
+    this.until,
+    this.statuses = const [],
+  });
+
+  /// What others see: `available`, `away`, `busy`, `dnd`, `ringing`,
+  /// `on_call` or `offline`.
+  final String shown;
+  final String? shownLabel;
+
+  /// Away because one of the user's apps says they are idle.
+  final bool idle;
+
+  /// What they chose: `available`, `away`, `busy`, `dnd`, or one of
+  /// [statuses]' ids.
+  final String status;
+  final String statusState;
+  final String? note;
+
+  /// When the chosen status clears back to available.
+  final DateTime? until;
+  final List<OwnStatus> statuses;
+
+  /// The chosen status's own label, when it is one of theirs.
+  String? get statusLabel {
+    for (final s in statuses) {
+      if (s.id == status) return s.label;
+    }
+    return null;
+  }
 }
 
 /// One voicemail message.
@@ -445,6 +501,7 @@ class PhoneSnapshot {
     this.contacts = const [],
     this.directoryListed,
     this.mayChangeDirectoryListing = false,
+    this.presence,
     this.audioTest,
     this.audioTestLevel = 0,
   });
@@ -511,6 +568,9 @@ class PhoneSnapshot {
 
   /// The tenant lets the user take themselves out of the directory.
   final bool mayChangeDirectoryListing;
+
+  /// Signed in to an FCP that keeps it: the user's presence.
+  final MyPresence? presence;
 
   /// A test of the microphone or a speaker under way, null when none is.
   final AudioTest? audioTest;
@@ -585,6 +645,7 @@ class PhoneSnapshot {
     List<Contact>? contacts,
     bool? directoryListed,
     bool? mayChangeDirectoryListing,
+    MyPresence? presence,
     AudioTest? audioTest,
     bool clearAudioTest = false,
     int? audioTestLevel,
@@ -619,6 +680,7 @@ class PhoneSnapshot {
     directoryListed: directoryListed ?? this.directoryListed,
     mayChangeDirectoryListing:
         mayChangeDirectoryListing ?? this.mayChangeDirectoryListing,
+    presence: presence ?? this.presence,
     audioTest: clearAudioTest ? null : audioTest ?? this.audioTest,
     audioTestLevel: audioTestLevel ?? this.audioTestLevel,
   );
@@ -827,6 +889,23 @@ abstract class PhoneApi {
   /// Be listed in the tenant's directory, or not (when the tenant lets the
   /// user choose).
   Future<void> setDirectoryListed(bool on);
+
+  /// Pick a status: a built-in one (`available`, `away`, `busy`, `dnd`) or
+  /// one of the user's own by id, with a note and a time it clears at. A
+  /// `dnd` status turns do not disturb on; any other turns it off.
+  Future<void> setPresence(String status, {String? note, DateTime? until});
+
+  /// Set the note beside the user's status, or clear it (null).
+  Future<void> setPresenceNote(String? note);
+
+  /// Say the user is idle (no keyboard or mouse for a while), or back.
+  Future<void> setPresenceIdle(bool idle);
+
+  /// Keep, change, delete and order the user's own statuses.
+  Future<void> addStatus(String label, String state);
+  Future<void> editStatus(String id, {String? label, String? state});
+  Future<void> removeStatus(String id);
+  Future<void> orderStatuses(List<String> ids);
 
   Future<void> setDnd(bool on);
   Future<void> setCalling(CallingChange change);

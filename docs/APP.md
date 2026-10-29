@@ -490,6 +490,49 @@ Three PRs, the screens thin over the state as §3 has it:
   screen. A file unreadable or holding a size too small is let go.
 - Proved by `test/window_place_test.dart`; the window itself by hand.
 
+### D8 finding 33: presence a person sets
+With FCP v0.25.473 on (FCP's `docs/PRESENCE.md`, phase 3):
+- The home screen's "Ready" chip becomes the **presence chip**
+  (`lib/src/screens/presence.dart`): what others see — the status chosen,
+  its own label in place of the state's name ("WFH"), "On a call · WFH"
+  over it while a call is up, "Away (idle)" — and, when this app is not
+  registered, the registration's warning instead. Without an FCP that
+  keeps presence it is the registration chip it always was. The DND chip
+  goes: DND is one of the presence states.
+- Its menu: the four built-in statuses, the user's own, "Add a note…",
+  "Clear after…" (30 minutes, 1 hour, 2 hours, today, never) and "Edit
+  statuses…" (added, renamed, given a state, reordered by dragging,
+  deleted; at most 20). A new status starts without the old one's note
+  and end. A `dnd` status turns DND on; any other turns it off (FCP does
+  it).
+- `anvil-fcp`: `presence`, `set_presence`, `create_status`,
+  `update_status`, `delete_status`, `order_statuses` (`presence.rs`);
+  `/me/directory`'s `presence_label`. `anvil-app`: `State.presence`
+  (`MyPresence`), `Change::Presence`, the commands `Presence`,
+  `PresenceNote`, `PresenceIdle`, `StatusAdd`, `StatusEdit`,
+  `StatusRemove`, `StatusOrder`; read at start, on refresh, and when
+  `presence.user_changed` names the user; people's presence and label
+  from the same event; an address's `presence.status_changed` ignored
+  once FCP keeps a person's.
+- The CLI: `presence away`, `presence WFH 2h`, `presence note back at 2`,
+  `presence note off`, `presence idle on|off`, `presence add away At
+  lunch`, `presence edit WFH busy`, `presence remove WFH`.
+- **Away when idle** (desktop, `lib/src/desktop/idle.dart`): no keyboard
+  or mouse for the user's idle time (Settings → Away when idle: off, 5,
+  10, 15 or 30 minutes; 10 by default, kept in `idle.json`) says the
+  person is idle, input again that they are back; said again every ten
+  minutes while it lasts, as FCP lets it lapse after fifteen. The idle
+  time is `GetLastInputInfo` on Windows, GNOME's `IdleMonitor` or else the
+  freedesktop `ScreenSaver` over D-Bus on Linux, and the runner's
+  `anvil/idle` channel (`CGEventSource`) on macOS. A system that does not
+  say leaves the user as they are. A phone is never idle.
+- Proved by `test/presence_test.dart` (the chip picks, notes and clears;
+  statuses of one's own; people's labels; the idle watcher's timing and
+  repeat; Settings choosing the time), `command.rs`
+  `presence_lines_are_commands`, `anvil-fcp`'s own, and `tests/fcp.rs`
+  `the_user_sets_their_presence_with_statuses_of_their_own` (skips on an
+  FCP before v0.25.473).
+
 ### W5: echo cancellation and noise suppression
 - The desktop's microphone is cleaned before it is sent: WebRTC's audio
   processing — AEC3, its noise suppressor and its high-pass filter — as

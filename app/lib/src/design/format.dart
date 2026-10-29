@@ -30,11 +30,18 @@ String when(BuildContext context, DateTime? at, {DateTime? now}) {
 
 /// A presence as a person reads it.
 String presenceLabel(Strings s, Person p) {
-  if (p.onCall) return s.onACall;
+  final label = p.presenceLabel;
+  if (p.onCall || p.presence == 'on_call') {
+    return label == null ? s.onACall : '${s.onACall} · $label';
+  }
   return switch (p.presence) {
+    'ringing' =>
+      label == null ? s.presenceRinging : '${s.presenceRinging} · $label',
+    // A person's own status says it best ("WFH").
+    'available' || 'away' || 'busy' || 'dnd' when label != null => label,
     'available' || 'online' || 'open' => s.presenceAvailable,
     'away' || 'idle' || 'brb' => s.presenceAway,
-    'busy' || 'on-the-phone' => s.presenceBusy,
+    'busy' || 'on-the-phone' || 'on_the_phone' => s.presenceBusy,
     'dnd' => s.presenceDnd,
     null => '',
     _ => s.presenceOffline,

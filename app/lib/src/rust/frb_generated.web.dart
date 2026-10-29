@@ -60,6 +60,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   Contact dco_decode_box_autoadd_contact(dynamic raw);
 
   @protected
+  MyPresence dco_decode_box_autoadd_my_presence(dynamic raw);
+
+  @protected
   Quality dco_decode_box_autoadd_quality(dynamic raw);
 
   @protected
@@ -126,6 +129,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   List<ContactNumber> dco_decode_list_contact_number(dynamic raw);
 
   @protected
+  List<OwnStatus> dco_decode_list_own_status(dynamic raw);
+
+  @protected
   List<Person> dco_decode_list_person(dynamic raw);
 
   @protected
@@ -147,6 +153,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   ManagedSettings dco_decode_managed_settings(dynamic raw);
 
   @protected
+  MyPresence dco_decode_my_presence(dynamic raw);
+
+  @protected
   String? dco_decode_opt_String(dynamic raw);
 
   @protected
@@ -157,6 +166,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   CallingSettings? dco_decode_opt_box_autoadd_calling_settings(dynamic raw);
+
+  @protected
+  MyPresence? dco_decode_opt_box_autoadd_my_presence(dynamic raw);
 
   @protected
   Quality? dco_decode_opt_box_autoadd_quality(dynamic raw);
@@ -184,6 +196,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   Uint8List? dco_decode_opt_list_prim_u_8_strict(dynamic raw);
+
+  @protected
+  OwnStatus dco_decode_own_status(dynamic raw);
 
   @protected
   Person dco_decode_person(dynamic raw);
@@ -282,6 +297,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   Contact sse_decode_box_autoadd_contact(SseDeserializer deserializer);
 
   @protected
+  MyPresence sse_decode_box_autoadd_my_presence(SseDeserializer deserializer);
+
+  @protected
   Quality sse_decode_box_autoadd_quality(SseDeserializer deserializer);
 
   @protected
@@ -352,6 +370,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   );
 
   @protected
+  List<OwnStatus> sse_decode_list_own_status(SseDeserializer deserializer);
+
+  @protected
   List<Person> sse_decode_list_person(SseDeserializer deserializer);
 
   @protected
@@ -373,6 +394,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   ManagedSettings sse_decode_managed_settings(SseDeserializer deserializer);
 
   @protected
+  MyPresence sse_decode_my_presence(SseDeserializer deserializer);
+
+  @protected
   String? sse_decode_opt_String(SseDeserializer deserializer);
 
   @protected
@@ -383,6 +407,11 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   CallingSettings? sse_decode_opt_box_autoadd_calling_settings(
+    SseDeserializer deserializer,
+  );
+
+  @protected
+  MyPresence? sse_decode_opt_box_autoadd_my_presence(
     SseDeserializer deserializer,
   );
 
@@ -418,6 +447,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   Uint8List? sse_decode_opt_list_prim_u_8_strict(SseDeserializer deserializer);
+
+  @protected
+  OwnStatus sse_decode_own_status(SseDeserializer deserializer);
 
   @protected
   Person sse_decode_person(SseDeserializer deserializer);
@@ -522,6 +554,12 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   void sse_encode_box_autoadd_contact(Contact self, SseSerializer serializer);
 
   @protected
+  void sse_encode_box_autoadd_my_presence(
+    MyPresence self,
+    SseSerializer serializer,
+  );
+
+  @protected
   void sse_encode_box_autoadd_quality(Quality self, SseSerializer serializer);
 
   @protected
@@ -609,6 +647,12 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   );
 
   @protected
+  void sse_encode_list_own_status(
+    List<OwnStatus> self,
+    SseSerializer serializer,
+  );
+
+  @protected
   void sse_encode_list_person(List<Person> self, SseSerializer serializer);
 
   @protected
@@ -639,6 +683,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   );
 
   @protected
+  void sse_encode_my_presence(MyPresence self, SseSerializer serializer);
+
+  @protected
   void sse_encode_opt_String(String? self, SseSerializer serializer);
 
   @protected
@@ -653,6 +700,12 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   @protected
   void sse_encode_opt_box_autoadd_calling_settings(
     CallingSettings? self,
+    SseSerializer serializer,
+  );
+
+  @protected
+  void sse_encode_opt_box_autoadd_my_presence(
+    MyPresence? self,
     SseSerializer serializer,
   );
 
@@ -697,6 +750,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
     Uint8List? self,
     SseSerializer serializer,
   );
+
+  @protected
+  void sse_encode_own_status(OwnStatus self, SseSerializer serializer);
 
   @protected
   void sse_encode_person(Person self, SseSerializer serializer);

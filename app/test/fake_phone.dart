@@ -354,6 +354,149 @@ class FakePhone implements PhoneApi {
     set(state.copyWith(directoryListed: on), 'directory');
   }
 
+  /// The user's statuses kept, and the next id.
+  int _statusIds = 0;
+
+  MyPresence get _presence =>
+      state.presence ??
+      const MyPresence(
+        shown: 'available',
+        status: 'available',
+        statusState: 'available',
+      );
+
+  /// The presence FCP would answer, from what was chosen.
+  MyPresence _presenceOf({
+    required String status,
+    String? note,
+    DateTime? until,
+    bool? idle,
+    List<OwnStatus>? statuses,
+  }) {
+    final own = statuses ?? _presence.statuses;
+    final mine = own.where((s) => s.id == status).firstOrNull;
+    final statusState = mine?.state ?? status;
+    final isIdle = idle ?? _presence.idle;
+    return MyPresence(
+      shown: isIdle && statusState == 'available' ? 'away' : statusState,
+      shownLabel: mine?.label,
+      idle: isIdle && statusState == 'available',
+      status: status,
+      statusState: statusState,
+      note: note,
+      until: until,
+      statuses: own,
+    );
+  }
+
+  @override
+  Future<void> setPresence(
+    String status, {
+    String? note,
+    DateTime? until,
+  }) async {
+    _refuse();
+    log.add(
+      'presence $status${note == null ? '' : ' "$note"'}'
+      '${until == null ? '' : ' until'}',
+    );
+    final now = _presenceOf(status: status, note: note, until: until);
+    set(
+      state.copyWith(presence: now, dnd: now.statusState == 'dnd'),
+      'presence',
+    );
+  }
+
+  @override
+  Future<void> setPresenceNote(String? note) async {
+    _refuse();
+    log.add('presence note ${note ?? 'off'}');
+    final p = _presence;
+    set(
+      state.copyWith(
+        presence: _presenceOf(status: p.status, note: note, until: p.until),
+      ),
+      'presence',
+    );
+  }
+
+  @override
+  Future<void> setPresenceIdle(bool idle) async {
+    _refuse();
+    log.add('presence idle $idle');
+    final p = _presence;
+    set(
+      state.copyWith(
+        presence: _presenceOf(
+          status: p.status,
+          note: p.note,
+          until: p.until,
+          idle: idle,
+        ),
+      ),
+      'presence',
+    );
+  }
+
+  void _statuses(List<OwnStatus> statuses) {
+    final p = _presence;
+    final kept =
+        statuses.any((s) => s.id == p.status) ||
+        const ['available', 'away', 'busy', 'dnd'].contains(p.status);
+    set(
+      state.copyWith(
+        presence: _presenceOf(
+          status: kept ? p.status : 'available',
+          note: kept ? p.note : null,
+          until: kept ? p.until : null,
+          statuses: statuses,
+        ),
+      ),
+      'presence',
+    );
+  }
+
+  @override
+  Future<void> addStatus(String label, String state) async {
+    _refuse();
+    log.add('status add $state $label');
+    _statuses([
+      ..._presence.statuses,
+      OwnStatus(id: 'status-${++_statusIds}', label: label, state: state),
+    ]);
+  }
+
+  @override
+  Future<void> editStatus(String id, {String? label, String? state}) async {
+    _refuse();
+    log.add('status edit $id ${label ?? '-'} ${state ?? '-'}');
+    _statuses([
+      for (final s in _presence.statuses)
+        s.id == id
+            ? OwnStatus(
+                id: id,
+                label: label ?? s.label,
+                state: state ?? s.state,
+              )
+            : s,
+    ]);
+  }
+
+  @override
+  Future<void> removeStatus(String id) async {
+    _refuse();
+    log.add('status remove $id');
+    _statuses([..._presence.statuses.where((s) => s.id != id)]);
+  }
+
+  @override
+  Future<void> orderStatuses(List<String> ids) async {
+    _refuse();
+    log.add('status order ${ids.join(',')}');
+    final byId = {for (final s in _presence.statuses) s.id: s};
+    _statuses([for (final id in ids) byId[id]!]);
+  }
+
   @override
   Future<void> setDnd(bool on) async {
     log.add('dnd $on');

@@ -14,6 +14,7 @@ import '../desktop/shell.dart';
 import '../mobile/bridge.dart';
 import '../update/update_banner.dart';
 import '../update/updates.dart';
+import '../desktop/idle.dart';
 import '../phone/phone_api.dart';
 import '../phone/phone_model.dart';
 import 'audio_controls.dart';
@@ -96,6 +97,29 @@ class SettingsPage extends StatelessWidget {
                   ? (on) => model.run(() => model.api.setDirectoryListed(on))
                   : null,
             ),
+          if (snap.presence != null)
+            if (IdleScope.maybeOf(context) case final idle?)
+              ListTile(
+                key: const Key('idleAway'),
+                leading: const Icon(Icons.bedtime_outlined),
+                title: Text(s.idleAway),
+                subtitle: Text(s.idleAwaySubtitle),
+                trailing: DropdownButton<int>(
+                  key: const Key('idleMinutes'),
+                  value: IdleSetting.choices.contains(idle.minutes)
+                      ? idle.minutes
+                      : IdleSetting.defaultMinutes,
+                  items: [
+                    for (final m in IdleSetting.choices)
+                      DropdownMenuItem(
+                        key: Key('idleMinutes-$m'),
+                        value: m,
+                        child: Text(m == 0 ? s.idleOff : s.idleMinutes(m)),
+                      ),
+                  ],
+                  onChanged: (m) => idle.set(m ?? idle.minutes),
+                ),
+              ),
           header(s.settingsForwarding),
           for (final when in Forward.values)
             ListTile(

@@ -207,6 +207,7 @@ class RustPhone implements PhoneApi {
               department: p.department,
               jobTitle: p.jobTitle,
               presence: p.presence,
+              presenceLabel: p.presenceLabel,
               onCall: p.onCall,
               favourite: p.favourite,
               dial: p.dial,
@@ -244,6 +245,24 @@ class RustPhone implements PhoneApi {
       mayRecord: s.mayRecord,
       directoryListed: s.directoryListed,
       mayChangeDirectoryListing: s.mayChangeDirectoryListing,
+      presence: switch (s.presence) {
+        null => null,
+        final p => MyPresence(
+          shown: p.shown,
+          shownLabel: p.shownLabel,
+          idle: p.idle,
+          status: p.status,
+          statusState: p.statusState,
+          note: p.note,
+          until: p.until == null
+              ? null
+              : DateTime.tryParse(p.until!)?.toLocal(),
+          statuses: [
+            for (final o in p.statuses)
+              OwnStatus(id: o.id, label: o.label, state: o.state),
+          ],
+        ),
+      },
       audioTest: AudioTest.parse(s.audioTest),
       audioTestLevel: s.audioTestLevel,
       contacts: [
@@ -384,6 +403,35 @@ class RustPhone implements PhoneApi {
 
   @override
   Future<void> setDirectoryListed(bool on) => rust.setDirectoryListed(on_: on);
+
+  @override
+  Future<void> setPresence(String status, {String? note, DateTime? until}) =>
+      rust.setPresence(
+        status: status,
+        note: note,
+        until: until?.toUtc().toIso8601String(),
+      );
+
+  @override
+  Future<void> setPresenceNote(String? note) =>
+      rust.setPresenceNote(note: note);
+
+  @override
+  Future<void> setPresenceIdle(bool idle) => rust.setPresenceIdle(idle: idle);
+
+  @override
+  Future<void> addStatus(String label, String state) =>
+      rust.addStatus(label: label, state: state);
+
+  @override
+  Future<void> editStatus(String id, {String? label, String? state}) =>
+      rust.editStatus(id: id, label: label, state: state);
+
+  @override
+  Future<void> removeStatus(String id) => rust.removeStatus(id: id);
+
+  @override
+  Future<void> orderStatuses(List<String> ids) => rust.orderStatuses(ids: ids);
 
   @override
   Future<void> setDnd(bool on) => rust.setDnd(on_: on);

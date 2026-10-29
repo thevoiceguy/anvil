@@ -619,6 +619,44 @@ fn print_change(change: &anvil_app::Change) {
             ),
             None => println!("[directory] -"),
         },
+        C::Presence { presence } => match presence {
+            Some(p) => {
+                let chosen = p
+                    .statuses
+                    .iter()
+                    .find(|s| s.id == p.status)
+                    .map(|s| s.label.as_str())
+                    .unwrap_or(p.status.as_str());
+                let mut shown = p.shown.clone();
+                if p.idle {
+                    shown.push_str(" (idle)");
+                }
+                if let Some(label) = &p.shown_label {
+                    shown.push_str(&format!(" · {label}"));
+                }
+                println!(
+                    "[presence] {shown}; chose {chosen}{}{}; statuses: {}",
+                    p.note
+                        .as_deref()
+                        .map(|n| format!(" \"{n}\""))
+                        .unwrap_or_default(),
+                    p.until
+                        .as_deref()
+                        .map(|u| format!(" until {u}"))
+                        .unwrap_or_default(),
+                    if p.statuses.is_empty() {
+                        "none".to_string()
+                    } else {
+                        p.statuses
+                            .iter()
+                            .map(|s| format!("{} ({})", s.label, s.state))
+                            .collect::<Vec<_>>()
+                            .join(", ")
+                    }
+                )
+            }
+            None => println!("[presence] -"),
+        },
         C::AudioTest { test } => match test {
             Some(t) if t.stage == anvil_app::AudioTestStage::Recording => {
                 println!("[test] recording {}", "#".repeat(usize::from(t.level / 5)))

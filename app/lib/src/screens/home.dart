@@ -4,11 +4,11 @@
 import 'package:flutter/material.dart';
 
 import '../../l10n/app_localizations.dart';
-import '../design/theme.dart';
 import '../phone/phone_api.dart';
 import '../phone/phone_model.dart';
 import 'calls.dart';
 import 'people.dart';
+import 'presence.dart';
 import 'recents.dart';
 import 'settings.dart';
 import 'voicemail.dart';
@@ -230,7 +230,8 @@ class _HomeScreenState extends State<HomeScreen> {
         key: const Key('title'),
       ),
       actions: [
-        if (snap.dnd == true)
+        // With presence, DND is one of its states.
+        if (snap.dnd == true && snap.presence == null)
           Padding(
             padding: const EdgeInsets.symmetric(horizontal: 4),
             child: Chip(
@@ -239,7 +240,7 @@ class _HomeScreenState extends State<HomeScreen> {
               label: Text(s.dndOn),
             ),
           ),
-        _RegistrationChip(registration: snap.registration),
+        PresenceChip(model: model),
         const SizedBox(width: 8),
       ],
     );
@@ -274,27 +275,6 @@ class _NoticeBanner extends StatelessWidget {
           ],
         ),
       ),
-    );
-  }
-}
-
-class _RegistrationChip extends StatelessWidget {
-  const _RegistrationChip({required this.registration});
-  final Registration registration;
-
-  @override
-  Widget build(BuildContext context) {
-    final s = Strings.of(context);
-    final (label, color) = switch (registration) {
-      Registration.registered => (s.registrationRegistered, AnvilColors.answer),
-      Registration.registering => (s.registrationRegistering, Colors.amber),
-      Registration.unregistered => (s.registrationUnregistered, Colors.grey),
-      Registration.failed => (s.registrationFailed, AnvilColors.hangup),
-    };
-    return Chip(
-      key: const Key('registration'),
-      avatar: CircleAvatar(backgroundColor: color, radius: 5),
-      label: Text(label),
     );
   }
 }

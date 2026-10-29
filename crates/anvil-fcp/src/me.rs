@@ -54,7 +54,13 @@ pub struct DirectoryEntry {
     /// The user's presence (`available`, `busy`, `away`, `dnd`, `offline`,
     /// …) when the tenant shows it.
     pub presence: Option<String>,
+    /// Their own status's label ("WFH"), FCP v0.25.473 on.
+    #[serde(default)]
+    pub presence_label: Option<String>,
     pub presence_note: Option<String>,
+    /// Shown away because their apps say they are idle.
+    #[serde(default)]
+    pub presence_idle: bool,
 }
 
 /// One voicemail message (`/me/voicemail/messages`).
@@ -268,7 +274,7 @@ fn websocket_url(api: &str, path: &str) -> Result<String, FcpError> {
     Ok(format!("{ws}{path}"))
 }
 
-async fn json<T: serde::de::DeserializeOwned>(
+pub(crate) async fn json<T: serde::de::DeserializeOwned>(
     response: reqwest::Response,
     what: &str,
 ) -> Result<T, FcpError> {

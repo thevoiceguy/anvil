@@ -43,7 +43,8 @@ pub use command::{AudioKind, Command, Imported, Response};
 pub use state::{
     AudioDevice, AudioDevices, AudioProcessing, AudioTest, AudioTestStage, AudioVolume, Brand,
     CallState, CallView, Change, Contact, ContactNumber, Direction, DirectoryListing,
-    MessageWaiting, Person, Push, Quality, Recent, Registration, Ringtone, State, Voicemail,
+    MessageWaiting, MyPresence, OwnStatus, Person, Push, Quality, Recent, Registration, Ringtone,
+    State, Voicemail,
 };
 
 use settings::LocalSettings;
@@ -696,6 +697,77 @@ impl Phone {
                 }));
                 Ok(Response::ok())
             }
+            Command::Presence {
+                status,
+                note,
+                until,
+            } => {
+                let fcp = self.fcp("presence")?;
+                let status = self.status_id(&status)?;
+                let now = fcp
+                    .set_presence(&anvil_fcp::PresenceUpdate {
+                        status: Some(status),
+                        note: Some(note),
+                        until: Some(until),
+                        idle: None,
+                    })
+                    .await?;
+                self.inner.set_presence(Some(now.into()));
+                Ok(Response::ok())
+            }
+            Command::PresenceNote { note } => {
+                let fcp = self.fcp("presence")?;
+                let now = fcp
+                    .set_presence(&anvil_fcp::PresenceUpdate {
+                        note: Some(note),
+                        ..Default::default()
+                    })
+                    .await?;
+                self.inner.set_presence(Some(now.into()));
+                Ok(Response::ok())
+            }
+            Command::PresenceIdle { idle } => {
+                let fcp = self.fcp("presence")?;
+                let now = fcp
+                    .set_presence(&anvil_fcp::PresenceUpdate {
+                        idle: Some(idle),
+                        ..Default::default()
+                    })
+                    .await?;
+                self.inner.set_presence(Some(now.into()));
+                Ok(Response::ok())
+            }
+            Command::StatusAdd { label, state } => {
+                let fcp = self.fcp("presence")?;
+                fcp.create_status(&label, &state).await?;
+                data::refresh_presence(&self.inner, fcp).await;
+                Ok(Response::ok())
+            }
+            Command::StatusEdit {
+                status,
+                label,
+                state,
+            } => {
+                let fcp = self.fcp("presence")?;
+                let id = self.own_status_id(&status)?;
+                fcp.update_status(&id, label.as_deref(), state.as_deref())
+                    .await?;
+                data::refresh_presence(&self.inner, fcp).await;
+                Ok(Response::ok())
+            }
+            Command::StatusRemove { status } => {
+                let fcp = self.fcp("presence")?;
+                let id = self.own_status_id(&status)?;
+                fcp.delete_status(&id).await?;
+                data::refresh_presence(&self.inner, fcp).await;
+                Ok(Response::ok())
+            }
+            Command::StatusOrder { ids } => {
+                let fcp = self.fcp("presence")?;
+                fcp.order_statuses(&ids).await?;
+                data::refresh_presence(&self.inner, fcp).await;
+                Ok(Response::ok())
+            }
             Command::Favourite { who, on } => {
                 let key = self.person_key(&who)?;
                 {
@@ -964,6 +1036,32 @@ impl Phone {
     }
 
     /// A person by key, extension or name, as the directory has them.
+    /// A status as FCP names it: a built-in one, or one of the user's own
+    /// by id or label.
+    fn status_id(&self, given: &str) -> Result<String, PhoneError> {
+        let given = given.trim();
+        let builtin = ["available", "away", "busy", "dnd"];
+        if let Some(b) = builtin.iter().find(|b| b.eq_ignore_ascii_case(given)) {
+            return Ok(b.to_string());
+        }
+        self.own_status_id(given)
+    }
+
+    /// One of the user's own statuses, by id or label.
+    fn own_status_id(&self, given: &str) -> Result<String, PhoneError> {
+        let state = self.inner.state.lock();
+        let own = state
+            .presence
+            .as_ref()
+            .map(|p| p.statuses.as_slice())
+            .unwrap_or_default();
+        own.iter()
+            .find(|s| s.id == given)
+            .or_else(|| own.iter().find(|s| s.label.eq_ignore_ascii_case(given)))
+            .map(|s| s.id.clone())
+            .ok_or_else(|| PhoneError::Refused(format!("no status {given:?}")))
+    }
+
     fn person_key(&self, who: &str) -> Result<String, PhoneError> {
         let state = self.inner.state.lock();
         state
@@ -1393,6 +1491,18 @@ impl Inner {
         let changed = std::mem::replace(&mut self.state.lock().may_record, on) != on;
         if changed {
             let _ = self.changes.send(Change::MayRecord { on });
+        }
+    }
+
+    fn set_presence(&self, presence: Option<MyPresence>) {
+        let changed = {
+            let mut state = self.state.lock();
+            let changed = state.presence != presence;
+            state.presence = presence.clone();
+            changed
+        };
+        if changed {
+            let _ = self.changes.send(Change::Presence { presence });
         }
     }
 

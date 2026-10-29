@@ -96,6 +96,37 @@ pub enum Command {
     /// Be listed in the tenant's directory, or not (needs FCP, and the
     /// tenant's leave: `directory.may_change`).
     DirectoryListed { on: bool },
+    /// Pick a status (needs an FCP that keeps presence): a built-in one
+    /// (`available`, `away`, `busy`, `dnd`) or one of the user's own by id
+    /// or label, with a note and an RFC 3339 time it clears at. A `dnd`
+    /// status turns do not disturb on; any other turns it off.
+    Presence {
+        status: String,
+        #[serde(default)]
+        note: Option<String>,
+        #[serde(default)]
+        until: Option<String>,
+    },
+    /// Set the note beside the status, or clear it (`None`).
+    PresenceNote { note: Option<String> },
+    /// Say the user is idle (no keyboard or mouse for a while), or back.
+    PresenceIdle { idle: bool },
+    /// Keep a status of the user's own: a label on `available`, `away`,
+    /// `busy` or `dnd`.
+    StatusAdd { label: String, state: String },
+    /// Rename one of the user's statuses (by id or label), or change its
+    /// state.
+    StatusEdit {
+        status: String,
+        #[serde(default)]
+        label: Option<String>,
+        #[serde(default)]
+        state: Option<String>,
+    },
+    /// Delete one of the user's statuses; in use, they are available.
+    StatusRemove { status: String },
+    /// Put the user's statuses in this order, by id: every one, once.
+    StatusOrder { ids: Vec<String> },
     /// Mark a voicemail message heard.
     Heard { id: String },
     /// Delete a voicemail message.
@@ -237,7 +268,10 @@ impl Command {
     /// `forward all off`, `contact add 0412345678 Jo Smith`,
     /// `contact add account 0412345678 Jo Smith`, `contact delete <id>`,
     /// `contact import [account] <file>`, `contact export <file>`,
-    /// `directory off`,
+    /// `directory off`, `presence away`, `presence WFH 2h`,
+    /// `presence note back at 2`, `presence note off`, `presence idle on`,
+    /// `presence add away At lunch`, `presence edit WFH busy`,
+    /// `presence remove WFH`,
     /// `waiting off`, `heard <id>`, `delete <id>`, `play <id>`, `stop`,
     /// `favourite alice`,
     /// `unfavourite alice`, `recents clear`, `recents hide <id>`, `audio in USB Headset`, `audio out default`,
@@ -298,6 +332,45 @@ impl Command {
             },
             "dnd" => Command::Dnd {
                 on: on_off(words.get(1)).ok_or("dnd needs on or off")?,
+            },
+            "presence" => match words.get(1).map(|w| w.to_ascii_lowercase()).as_deref() {
+                None => return Err("presence needs a status".into()),
+                Some("note") => Command::PresenceNote {
+                    note: rest(&words, 2).filter(|n| !n.eq_ignore_ascii_case("off")),
+                },
+                Some("idle") => Command::PresenceIdle {
+                    idle: on_off(words.get(2)).ok_or("presence idle needs on or off")?,
+                },
+                Some("add") => Command::StatusAdd {
+                    state: need(words.get(2), "available, away, busy or dnd")?,
+                    label: rest(&words, 3).ok_or("presence add needs a state and a label")?,
+                },
+                Some("remove") => Command::StatusRemove {
+                    status: rest(&words, 2).ok_or("presence remove needs a status")?,
+                },
+                Some("edit") => {
+                    let state = need(words.get(3), "a state, or -")?;
+                    Command::StatusEdit {
+                        status: need(words.get(2), "a status")?,
+                        state: (state != "-").then_some(state),
+                        label: rest(&words, 4),
+                    }
+                }
+                Some(_) => {
+                    // `presence <status> [30m|1h|2h|<RFC 3339>]`.
+                    let last = words[words.len() - 1];
+                    let until = (words.len() > 2).then(|| until_of(last)).flatten();
+                    let end = if until.is_some() {
+                        words.len() - 1
+                    } else {
+                        words.len()
+                    };
+                    Command::Presence {
+                        status: words[1..end].join(" "),
+                        note: None,
+                        until,
+                    }
+                }
             },
             "directory" => Command::DirectoryListed {
                 on: on_off(words.get(1)).ok_or("directory needs on or off")?,
@@ -478,6 +551,23 @@ impl Command {
             other => return Err(format!("{other:?} is not a command")),
         })
     }
+}
+
+/// A time a status clears at, as the prompt gives it: `30m`, `1h`, `2h`
+/// (from now) or RFC 3339.
+fn until_of(word: &str) -> Option<String> {
+    let minutes = match word.to_ascii_lowercase().as_str() {
+        "30m" => 30,
+        "1h" => 60,
+        "2h" => 120,
+        _ => {
+            return chrono::DateTime::parse_from_rfc3339(word)
+                .ok()
+                .map(|_| word.to_string())
+        }
+    };
+    let at = std::time::SystemTime::now() + std::time::Duration::from_secs(minutes * 60);
+    Some(chrono::DateTime::<chrono::Utc>::from(at).to_rfc3339())
 }
 
 /// `on` or `off` (or yes/no, true/false).
@@ -678,6 +768,82 @@ mod tests {
         assert!(Command::parse_line("hangup x").is_err());
         assert!(Command::parse_line("call").is_err());
         assert!(Command::parse_line("fly").is_err());
+    }
+
+    #[test]
+    fn presence_lines_are_commands() {
+        let p = |line: &str| Command::parse_line(line).unwrap();
+        assert_eq!(
+            p("presence away"),
+            Command::Presence {
+                status: "away".into(),
+                note: None,
+                until: None
+            }
+        );
+        assert_eq!(
+            p("presence At lunch"),
+            Command::Presence {
+                status: "At lunch".into(),
+                note: None,
+                until: None
+            },
+            "a label of several words"
+        );
+        match p("presence WFH 2h") {
+            Command::Presence { status, until, .. } => {
+                assert_eq!(status, "WFH");
+                assert!(until.is_some_and(|u| chrono::DateTime::parse_from_rfc3339(&u).is_ok()));
+            }
+            other => panic!("{other:?}"),
+        }
+        assert_eq!(
+            p("presence busy 2026-10-29T17:00:00Z"),
+            Command::Presence {
+                status: "busy".into(),
+                note: None,
+                until: Some("2026-10-29T17:00:00Z".into())
+            }
+        );
+        assert_eq!(
+            p("presence note back at 2"),
+            Command::PresenceNote {
+                note: Some("back at 2".into())
+            }
+        );
+        assert_eq!(p("presence note off"), Command::PresenceNote { note: None });
+        assert_eq!(p("presence idle on"), Command::PresenceIdle { idle: true });
+        assert_eq!(
+            p("presence add away At lunch"),
+            Command::StatusAdd {
+                label: "At lunch".into(),
+                state: "away".into()
+            }
+        );
+        assert_eq!(
+            p("presence edit WFH busy"),
+            Command::StatusEdit {
+                status: "WFH".into(),
+                label: None,
+                state: Some("busy".into())
+            }
+        );
+        assert_eq!(
+            p("presence edit WFH - Home"),
+            Command::StatusEdit {
+                status: "WFH".into(),
+                label: Some("Home".into()),
+                state: None
+            }
+        );
+        assert_eq!(
+            p("presence remove At lunch"),
+            Command::StatusRemove {
+                status: "At lunch".into()
+            }
+        );
+        assert!(Command::parse_line("presence").is_err());
+        assert!(Command::parse_line("presence idle maybe").is_err());
     }
 
     #[test]
