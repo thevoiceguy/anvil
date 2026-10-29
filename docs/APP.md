@@ -477,6 +477,19 @@ Three PRs, the screens thin over the state as §3 has it:
   (`contacts_are_imported_to_the_account_with_their_ringtones_kept`, which
   skips on an FCP before v0.25.471) and the widget tests.
 
+### D8 finding 32: the window stays as the user left it
+- On a desktop the window's size, place and maximized state are kept in
+  `window.json` in the app's data directory, half a second after the user
+  stops moving or resizing it, and when it is closed to the tray; the
+  next start puts them back (`app/lib/src/desktop/window_place.dart`,
+  wired in `native_shell.dart`).
+- A maximized window keeps the place it goes back to when restored.
+  Started hidden at login, it is maximized when first shown.
+- A place no longer on any screen (its top not reachable on one, say a
+  monitor unplugged) keeps its size, made to fit, centred on the first
+  screen. A file unreadable or holding a size too small is let go.
+- Proved by `test/window_place_test.dart`; the window itself by hand.
+
 ### W5: echo cancellation and noise suppression
 - The desktop's microphone is cleaned before it is sent: WebRTC's audio
   processing — AEC3, its noise suppressor and its high-pass filter — as

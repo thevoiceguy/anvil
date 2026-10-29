@@ -6,7 +6,8 @@
 // and the session ending signs the phone out first, over `anvil/instance`.
 // A brand's icon is made into the window's, the tray's and the Dock's by
 // `anvil-app` (system_brand.rs), which also renames Windows' shortcuts and
-// a Linux menu entry; the Dock's is set over `anvil/dock` (macOS).
+// a Linux menu entry; the Dock's is set over `anvil/dock` (macOS). The
+// window's size, place and maximized state are kept (window_place.dart).
 
 import 'dart:async';
 import 'dart:convert';
@@ -16,6 +17,7 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 import 'package:launch_at_startup/launch_at_startup.dart';
+import 'package:screen_retriever/screen_retriever.dart';
 import 'package:tray_manager/tray_manager.dart';
 import 'package:window_manager/window_manager.dart';
 
@@ -23,6 +25,7 @@ import '../phone/rust_phone.dart';
 import '../rust/api/phone.dart' as rust;
 import 'links.dart';
 import 'shell.dart';
+import 'window_place.dart';
 
 class NativeShell with TrayListener, WindowListener implements DesktopShell {
   /// `args`: what the app was started with.
@@ -47,6 +50,20 @@ class NativeShell with TrayListener, WindowListener implements DesktopShell {
   bool _notify = false;
   bool _window = false;
   bool _login = false;
+
+  /// Where the window's place is kept, once it has been put back.
+  File? _placeFile;
+
+  /// The window's place when not maximized, and whether it is.
+  Rect? _normal;
+  bool _maximized = false;
+
+  /// Moves and resizes come many a second: kept once they stop.
+  Timer? _keepPlace;
+
+  /// Started hidden at login while maximized: maximized when shown, as
+  /// maximizing a hidden window would show it.
+  bool _maximizeWhenShown = false;
 
   /// The tray's state, and the brand's icon for each (none: Anvil's own).
   TrayState _trayState = TrayState.offline;
@@ -100,6 +117,7 @@ class NativeShell with TrayListener, WindowListener implements DesktopShell {
       windowManager.addListener(this);
       _window = true;
     });
+    if (_window) await _part('window place', _putBack);
     await _part('tray', () async {
       trayManager.addListener(this);
       await trayManager.setIcon(_icon(TrayState.offline));
@@ -168,6 +186,64 @@ class NativeShell with TrayListener, WindowListener implements DesktopShell {
       _login = true;
     });
   }
+
+  /// Put the window back where it was kept, then keep where it goes.
+  Future<void> _putBack() async {
+    final sep = Platform.pathSeparator;
+    final file = File('${await RustPhone.directory()}${sep}window.json');
+    final kept = await WindowPlace.read(file);
+    if (kept != null) {
+      final displays = await screenRetriever.getAllDisplays();
+      final place = kept.on([
+        for (final d in displays)
+          (d.visiblePosition ?? Offset.zero) & (d.visibleSize ?? d.size),
+      ]);
+      await windowManager.setBounds(place.bounds);
+      _normal = place.bounds;
+      _maximized = place.maximized;
+      if (place.maximized) {
+        if (_hidden) {
+          _maximizeWhenShown = true;
+        } else {
+          await windowManager.maximize();
+        }
+      }
+    }
+    _placeFile = file;
+  }
+
+  /// The window moved or changed size: keep its place once it settles.
+  void _placeChanged() {
+    if (_placeFile == null) return;
+    _keepPlace?.cancel();
+    _keepPlace = Timer(const Duration(milliseconds: 500), () {
+      unawaited(_part('window place', _keep));
+    });
+  }
+
+  Future<void> _keep() async {
+    final file = _placeFile;
+    if (file == null) return;
+    // Minimized, its bounds are not where it will come back to.
+    if (await windowManager.isMinimized()) return;
+    _maximized = await windowManager.isMaximized();
+    if (!_maximized) _normal = await windowManager.getBounds();
+    final normal = _normal;
+    if (normal == null) return;
+    await WindowPlace(bounds: normal, maximized: _maximized).write(file);
+  }
+
+  @override
+  void onWindowResize() => _placeChanged();
+
+  @override
+  void onWindowMove() => _placeChanged();
+
+  @override
+  void onWindowMaximize() => _placeChanged();
+
+  @override
+  void onWindowUnmaximize() => _placeChanged();
 
   Future<void> _part(String what, Future<void> Function() start) async {
     try {
@@ -345,6 +421,10 @@ class NativeShell with TrayListener, WindowListener implements DesktopShell {
     if (!_window) return;
     await _part('window', () async {
       await windowManager.show();
+      if (_maximizeWhenShown) {
+        _maximizeWhenShown = false;
+        await windowManager.maximize();
+      }
       await windowManager.focus();
     });
   }
@@ -403,6 +483,8 @@ class NativeShell with TrayListener, WindowListener implements DesktopShell {
   // Closing the window keeps the phone running in the tray.
   @override
   void onWindowClose() {
+    _keepPlace?.cancel();
+    unawaited(_part('window place', _keep));
     if (_tray) {
       unawaited(windowManager.hide());
     } else {
