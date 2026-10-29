@@ -44,6 +44,10 @@ pub struct State {
     /// Signed in to FCP: whether the user is in the tenant's directory.
     #[serde(default)]
     pub directory: Option<DirectoryListing>,
+    /// Signed in to an FCP that keeps it: the status the user chose and
+    /// what others see of them (FCP's `docs/PRESENCE.md`).
+    #[serde(default)]
+    pub presence: Option<MyPresence>,
     /// A test of the microphone or a speaker under way, if any.
     #[serde(default)]
     pub audio_test: Option<AudioTest>,
@@ -108,6 +112,60 @@ impl Contact {
     }
 }
 
+/// The user's presence: what others see, the status they chose, and
+/// their own statuses to choose from.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct MyPresence {
+    /// What others see: `available`, `away`, `busy`, `dnd`, `ringing`,
+    /// `on_call` or `offline`.
+    pub shown: String,
+    /// Their own status's label beside it ("WFH").
+    pub shown_label: Option<String>,
+    /// Away because this or another of their apps says they are idle.
+    pub idle: bool,
+    /// What they chose: `available`, `away`, `busy`, `dnd`, or one of
+    /// `statuses`' ids.
+    pub status: String,
+    /// The chosen status's state.
+    pub status_state: String,
+    pub note: Option<String>,
+    /// RFC 3339: when the chosen status clears back to available.
+    pub until: Option<String>,
+    pub statuses: Vec<OwnStatus>,
+}
+
+/// One of the user's own statuses: a label on a state.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct OwnStatus {
+    pub id: String,
+    pub label: String,
+    /// `available`, `away`, `busy` or `dnd`.
+    pub state: String,
+}
+
+impl From<anvil_fcp::MyPresence> for MyPresence {
+    fn from(p: anvil_fcp::MyPresence) -> Self {
+        Self {
+            shown: p.presence.state,
+            shown_label: p.presence.label,
+            idle: p.presence.idle,
+            status: p.status,
+            status_state: p.status_state,
+            note: p.note,
+            until: p.until,
+            statuses: p
+                .statuses
+                .into_iter()
+                .map(|s| OwnStatus {
+                    id: s.id,
+                    label: s.label,
+                    state: s.state,
+                })
+                .collect(),
+        }
+    }
+}
+
 /// Whether the user is in the tenant's directory, and may change that
 /// (FCP says; `docs/APP.md` §Settings).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -162,6 +220,7 @@ impl State {
             may_record: false,
             contacts: Vec::new(),
             directory: None,
+            presence: None,
             audio_test: None,
         }
     }
@@ -328,8 +387,12 @@ pub struct Person {
     pub extension: Option<String>,
     pub department: Option<String>,
     pub job_title: Option<String>,
-    /// `available`, `busy`, `away`, `dnd`, `offline`, … when shown.
+    /// `available`, `busy`, `away`, `dnd`, `ringing`, `on_call`,
+    /// `offline`, … when shown.
     pub presence: Option<String>,
+    /// Their own status's label beside it ("WFH").
+    #[serde(default)]
+    pub presence_label: Option<String>,
     /// On a call now (their busy lamp).
     pub on_call: bool,
     /// One of this user's favourites.
@@ -521,6 +584,10 @@ pub enum Change {
     /// The user's listing in the tenant's directory, as FCP said.
     Directory {
         listing: Option<DirectoryListing>,
+    },
+    /// The user's presence, as FCP said.
+    Presence {
+        presence: Option<MyPresence>,
     },
     /// An audio test moved on (or, `None`, ended).
     AudioTest {

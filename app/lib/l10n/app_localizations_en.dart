@@ -744,4 +744,96 @@ class StringsEn extends Strings {
   @override
   String get directoryListedLocked =>
       'Your administrator decides whether you are listed';
+
+  @override
+  String get presenceRinging => 'Ringing';
+
+  @override
+  String get presenceIdle => 'Away (idle)';
+
+  @override
+  String get presenceChoose => 'Your status';
+
+  @override
+  String get presenceNote => 'Add a note…';
+
+  @override
+  String presenceNoteIs(String note) {
+    return 'Note: $note';
+  }
+
+  @override
+  String get presenceNoteTitle => 'A note beside your status';
+
+  @override
+  String get presenceNoteHint => 'Back at 2';
+
+  @override
+  String get presenceClearAfter => 'Clear after…';
+
+  @override
+  String presenceUntil(String time) {
+    return 'Until $time';
+  }
+
+  @override
+  String get presenceClearAfterTitle => 'Clear the status after';
+
+  @override
+  String get clearAfter30m => '30 minutes';
+
+  @override
+  String get clearAfter1h => '1 hour';
+
+  @override
+  String get clearAfter2h => '2 hours';
+
+  @override
+  String get clearAfterToday => 'Today';
+
+  @override
+  String get clearAfterNever => 'Never';
+
+  @override
+  String get editStatuses => 'Edit statuses…';
+
+  @override
+  String get statusesTitle => 'Your statuses';
+
+  @override
+  String get statusesNone => 'Add your own, like WFH or At lunch.';
+
+  @override
+  String get statusAdd => 'Add a status';
+
+  @override
+  String get statusEdit => 'Edit the status';
+
+  @override
+  String get statusLabel => 'Name';
+
+  @override
+  String get statusState => 'Shows as';
+
+  @override
+  String get statusDndNote =>
+      'Choosing it turns do not disturb on: calls go to voicemail.';
+
+  @override
+  String get doneButton => 'Done';
+
+  @override
+  String get idleAway => 'Away when idle';
+
+  @override
+  String get idleAwaySubtitle =>
+      'Shown as away after no keyboard or mouse for a while';
+
+  @override
+  String get idleOff => 'Off';
+
+  @override
+  String idleMinutes(int minutes) {
+    return '$minutes minutes';
+  }
 }

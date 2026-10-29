@@ -599,12 +599,40 @@ pub struct Person {
     pub extension: Option<String>,
     pub department: Option<String>,
     pub job_title: Option<String>,
-    /// `available`, `busy`, `away`, `dnd`, `offline`, … when shown.
+    /// `available`, `busy`, `away`, `dnd`, `ringing`, `on_call`,
+    /// `offline`, … when shown.
     pub presence: Option<String>,
+    /// Their own status's label beside it ("WFH").
+    pub presence_label: Option<String>,
     pub on_call: bool,
     pub favourite: bool,
     /// What to dial.
     pub dial: String,
+}
+
+/// The user's presence (FCP's `docs/PRESENCE.md`).
+pub struct MyPresence {
+    /// What others see: `available`, `away`, `busy`, `dnd`, `ringing`,
+    /// `on_call` or `offline`.
+    pub shown: String,
+    pub shown_label: Option<String>,
+    /// Away because one of their apps says they are idle.
+    pub idle: bool,
+    /// What they chose: a built-in state or one of `statuses`' ids.
+    pub status: String,
+    pub status_state: String,
+    pub note: Option<String>,
+    /// RFC 3339.
+    pub until: Option<String>,
+    pub statuses: Vec<OwnStatus>,
+}
+
+/// One of the user's own statuses.
+pub struct OwnStatus {
+    pub id: String,
+    pub label: String,
+    /// `available`, `away`, `busy` or `dnd`.
+    pub state: String,
 }
 
 /// A contact the user keeps, on this device or on their FCP account.
@@ -749,6 +777,8 @@ pub struct PhoneState {
     pub directory_listed: Option<bool>,
     /// The tenant lets the user take themselves out of the directory.
     pub may_change_directory_listing: bool,
+    /// Signed in to an FCP that keeps it: the user's presence.
+    pub presence: Option<MyPresence>,
     /// A test of the microphone or a speaker under way: `recording`,
     /// `playing_back`, `speaker` or `ring`; `None` when none is.
     pub audio_test: Option<String>,
@@ -876,6 +906,7 @@ pub fn phone_state() -> anyhow::Result<PhoneState> {
                 department: p.department,
                 job_title: p.job_title,
                 presence: p.presence,
+                presence_label: p.presence_label,
                 on_call: p.on_call,
                 favourite: p.favourite,
             })
@@ -917,6 +948,24 @@ pub fn phone_state() -> anyhow::Result<PhoneState> {
         may_record: s.may_record,
         directory_listed: s.directory.map(|d| d.listed),
         may_change_directory_listing: s.directory.is_some_and(|d| d.may_change),
+        presence: s.presence.map(|p| MyPresence {
+            shown: p.shown,
+            shown_label: p.shown_label,
+            idle: p.idle,
+            status: p.status,
+            status_state: p.status_state,
+            note: p.note,
+            until: p.until,
+            statuses: p
+                .statuses
+                .into_iter()
+                .map(|s| OwnStatus {
+                    id: s.id,
+                    label: s.label,
+                    state: s.state,
+                })
+                .collect(),
+        }),
         audio_test: s.audio_test.map(|t| {
             match t.stage {
                 anvil_app::AudioTestStage::Recording => "recording",
@@ -1010,6 +1059,7 @@ pub fn phone_changes(sink: StreamSink<PhoneChange>) -> anyhow::Result<()> {
                 C::MayRecord { .. } => kind_only("may_record"),
                 C::Contacts { .. } => kind_only("contacts"),
                 C::Directory { .. } => kind_only("directory"),
+                C::Presence { .. } => kind_only("presence"),
                 C::AudioTest { .. } => kind_only("audio_test"),
             };
             if sink.add(out).is_err() {
@@ -1203,6 +1253,67 @@ pub async fn export_contacts(path: String) -> anyhow::Result<()> {
 /// tenant lets its users choose).
 pub async fn set_directory_listed(on: bool) -> anyhow::Result<()> {
     execute(Command::DirectoryListed { on }).await.map(|_| ())
+}
+
+/// Pick a status: a built-in one (`available`, `away`, `busy`, `dnd`) or
+/// one of the user's own by id, with a note and an RFC 3339 time it
+/// clears at.
+pub async fn set_presence(
+    status: String,
+    note: Option<String>,
+    until: Option<String>,
+) -> anyhow::Result<()> {
+    execute(Command::Presence {
+        status,
+        note,
+        until,
+    })
+    .await
+    .map(|_| ())
+}
+
+/// Set the note beside the user's status, or clear it.
+pub async fn set_presence_note(note: Option<String>) -> anyhow::Result<()> {
+    execute(Command::PresenceNote { note }).await.map(|_| ())
+}
+
+/// Say the user is idle, or back.
+pub async fn set_presence_idle(idle: bool) -> anyhow::Result<()> {
+    execute(Command::PresenceIdle { idle }).await.map(|_| ())
+}
+
+/// Keep a status of the user's own.
+pub async fn add_status(label: String, state: String) -> anyhow::Result<()> {
+    execute(Command::StatusAdd { label, state })
+        .await
+        .map(|_| ())
+}
+
+/// Rename one of the user's statuses, or change its state.
+pub async fn edit_status(
+    id: String,
+    label: Option<String>,
+    state: Option<String>,
+) -> anyhow::Result<()> {
+    execute(Command::StatusEdit {
+        status: id,
+        label,
+        state,
+    })
+    .await
+    .map(|_| ())
+}
+
+/// Delete one of the user's statuses.
+pub async fn remove_status(id: String) -> anyhow::Result<()> {
+    execute(Command::StatusRemove { status: id })
+        .await
+        .map(|_| ())
+}
+
+/// Put the user's statuses in this order.
+pub async fn order_statuses(ids: Vec<String>) -> anyhow::Result<()> {
+    execute(Command::StatusOrder { ids }).await.map(|_| ())
 }
 
 /// Delete a contact, from this device or from the account.

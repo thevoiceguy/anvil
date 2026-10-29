@@ -26,6 +26,7 @@ mod discovery;
 #[allow(unsafe_code)]
 mod dpapi;
 mod me;
+mod presence;
 mod remember;
 mod session;
 mod signin;
@@ -41,6 +42,7 @@ pub use me::{
     CallQuery, CallRecord, ContactFields, ContactImport, ContactImportSkip, ContactNumber,
     DirectoryEntry, MailboxStats, Page, PersonalContact, UserEvent, UserEvents, VoicemailMessage,
 };
+pub use presence::{MyPresence, OwnStatus, Presence, PresenceUpdate};
 pub use remember::LastSignIn;
 pub use session::{AppClient, DeviceCredentials, FileTokenStore, Session, TokenStore};
 pub use signin::{

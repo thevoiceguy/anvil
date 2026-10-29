@@ -930,3 +930,86 @@ async fn contacts_are_imported_to_the_account_with_their_ringtones_kept() {
     phone.shutdown().await;
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+/// FCP's presence a person sets (its `docs/PRESENCE.md`, v0.25.473 on): a
+/// status of the user's own picked with a note, idle said and taken back,
+/// a dnd status turning DND on, the status deleted while in use.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn the_user_sets_their_presence_with_statuses_of_their_own() {
+    let (Ok(admin), Ok(token)) = (
+        std::env::var("ANVIL_FCP_ADMIN"),
+        std::env::var("ANVIL_FCP_TOKEN"),
+    ) else {
+        eprintln!("ANVIL_FCP_ADMIN and ANVIL_FCP_TOKEN not set; skipping");
+        return;
+    };
+    let (fcp, _user) = signed_in(&admin, &token, "presence").await;
+    if fcp.presence().await.unwrap().is_none() {
+        eprintln!("this FCP keeps no presence (before v0.25.473); skipping");
+        return;
+    }
+    let phone = phone_with(fcp.clone(), "127.0.0.127", None).await;
+    until(&phone, "the presence read", |s| s.presence.is_some()).await;
+    assert_eq!(phone.state().presence.unwrap().status, "available");
+
+    let run = |c: Command| {
+        let phone = &phone;
+        async move { phone.execute(c).await.unwrap() }
+    };
+    run(Command::StatusAdd {
+        label: "WFH".into(),
+        state: "available".into(),
+    })
+    .await;
+    run(Command::Presence {
+        status: "wfh".into(),
+        note: Some("back at 2".into()),
+        until: None,
+    })
+    .await;
+    let p = phone.state().presence.unwrap();
+    let wfh = p
+        .statuses
+        .iter()
+        .find(|s| s.label == "WFH")
+        .unwrap()
+        .id
+        .clone();
+    assert_eq!(p.status, wfh, "picked by its label");
+    assert_eq!(p.note.as_deref(), Some("back at 2"));
+
+    run(Command::PresenceIdle { idle: true }).await;
+    let p = phone.state().presence.unwrap();
+    if p.shown != "offline" {
+        assert!(p.idle, "{p:?}");
+    }
+    run(Command::PresenceIdle { idle: false }).await;
+    assert!(!phone.state().presence.unwrap().idle);
+
+    run(Command::Presence {
+        status: "dnd".into(),
+        note: None,
+        until: None,
+    })
+    .await;
+    assert!(fcp.calling().await.unwrap().dnd, "a dnd status is DND");
+    run(Command::Presence {
+        status: "available".into(),
+        note: None,
+        until: None,
+    })
+    .await;
+    assert!(!fcp.calling().await.unwrap().dnd);
+
+    run(Command::Presence {
+        status: wfh.clone(),
+        note: None,
+        until: None,
+    })
+    .await;
+    run(Command::StatusRemove { status: wfh }).await;
+    let p = phone.state().presence.unwrap();
+    assert_eq!(p.status, "available", "deleted while in use");
+    assert!(p.statuses.is_empty());
+    phone.shutdown().await;
+}

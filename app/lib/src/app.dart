@@ -6,6 +6,7 @@ import 'package:flutter_localizations/flutter_localizations.dart';
 import '../l10n/app_localizations.dart';
 import 'design/theme.dart';
 import 'desktop/bridge.dart';
+import 'desktop/idle.dart';
 import 'desktop/shell.dart';
 import 'mobile/bridge.dart';
 import 'mobile/platform.dart';
@@ -23,6 +24,8 @@ class AnvilApp extends StatefulWidget {
     this.shell,
     this.updates,
     this.mobile,
+    this.idleClock,
+    this.idleSetting,
   });
   final PhoneApi phone;
 
@@ -37,6 +40,12 @@ class AnvilApp extends StatefulWidget {
   /// The app updating itself; none where a store updates it, and in the
   /// screens' tests unless they give one.
   final UpdateApi? updates;
+
+  /// A desktop's idle time and the user's idle setting: away when idle
+  /// (FCP's docs/PRESENCE.md); none on a phone and in the screens' tests
+  /// unless they give them.
+  final IdleClock? idleClock;
+  final IdleSetting? idleSetting;
 
   @override
   State<AnvilApp> createState() => _AnvilAppState();
@@ -56,6 +65,19 @@ class _AnvilAppState extends State<AnvilApp> {
   /// for a newer release again.
   AppLifecycleListener? _lifecycle;
 
+  /// Tells FCP the person is idle, while it keeps their presence.
+  late final IdleWatcher? _idle =
+      widget.idleClock == null || widget.idleSetting == null
+      ? null
+      : IdleWatcher(
+          clock: widget.idleClock!,
+          setting: widget.idleSetting!,
+          report: (idle) async {
+            if (model.snapshot.presence == null) return;
+            await widget.phone.setPresenceIdle(idle);
+          },
+        );
+
   @override
   void initState() {
     super.initState();
@@ -64,10 +86,12 @@ class _AnvilAppState extends State<AnvilApp> {
     if (updates != null) {
       _lifecycle = AppLifecycleListener(onResume: updates!.resumed);
     }
+    _idle?.start();
   }
 
   @override
   void dispose() {
+    _idle?.stop();
     _lifecycle?.dispose();
     model.dispose();
     updates?.dispose();
@@ -114,6 +138,9 @@ class _AnvilAppState extends State<AnvilApp> {
         var app = child ?? const SizedBox.shrink();
         if (updates != null) {
           app = UpdateScope(updates: updates!, quit: _quit, child: app);
+        }
+        if (widget.idleSetting != null) {
+          app = IdleScope(setting: widget.idleSetting!, child: app);
         }
         if (widget.shell != null) {
           app = DesktopBridge(model: model, shell: widget.shell!, child: app);

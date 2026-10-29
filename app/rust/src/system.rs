@@ -406,6 +406,7 @@ mod tests {
             department: None,
             job_title: None,
             presence: None,
+            presence_label: None,
             on_call: false,
             favourite: false,
         });

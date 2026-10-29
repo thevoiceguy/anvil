@@ -12,6 +12,7 @@ class MainFlutterWindow: NSWindow {
     RegisterGeneratedPlugins(registry: flutterViewController)
     StartAtLogin.register(with: flutterViewController.engine.binaryMessenger)
     Dock.register(with: flutterViewController.engine.binaryMessenger)
+    Idle.register(with: flutterViewController.engine.binaryMessenger)
 
     super.awakeFromNib()
   }
@@ -33,6 +34,22 @@ enum Dock {
         NSApplication.shared.applicationIconImage = nil
       }
       result(nil)
+    }
+  }
+}
+
+/// How long since the keyboard or mouse was last used, for away when idle
+/// (lib/src/desktop/idle.dart).
+enum Idle {
+  static func register(with messenger: FlutterBinaryMessenger) {
+    let channel = FlutterMethodChannel(name: "anvil/idle", binaryMessenger: messenger)
+    channel.setMethodCallHandler { call, result in
+      guard call.method == "idleSeconds" else {
+        result(FlutterMethodNotImplemented)
+        return
+      }
+      let anyInput = CGEventType(rawValue: ~0)!
+      result(CGEventSource.secondsSinceLastEventType(.combinedSessionState, eventType: anyInput))
     }
   }
 }

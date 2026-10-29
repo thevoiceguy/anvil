@@ -17,8 +17,12 @@ class AnvilColors {
     if (onCall) return hangup;
     return switch (presence) {
       'available' || 'online' || 'open' => answer,
-      'away' || 'idle' || 'brb' => held,
-      'busy' || 'dnd' || 'on-the-phone' => hangup,
+      'away' || 'idle' || 'brb' || 'ringing' => held,
+      'busy' ||
+      'dnd' ||
+      'on-the-phone' ||
+      'on_the_phone' ||
+      'on_call' => hangup,
       _ => const Color(0xFF9AA5B1),
     };
   }

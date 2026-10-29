@@ -1442,6 +1442,174 @@ abstract class Strings {
   /// In en, this message translates to:
   /// **'Your administrator decides whether you are listed'**
   String get directoryListedLocked;
+
+  /// No description provided for @presenceRinging.
+  ///
+  /// In en, this message translates to:
+  /// **'Ringing'**
+  String get presenceRinging;
+
+  /// No description provided for @presenceIdle.
+  ///
+  /// In en, this message translates to:
+  /// **'Away (idle)'**
+  String get presenceIdle;
+
+  /// No description provided for @presenceChoose.
+  ///
+  /// In en, this message translates to:
+  /// **'Your status'**
+  String get presenceChoose;
+
+  /// No description provided for @presenceNote.
+  ///
+  /// In en, this message translates to:
+  /// **'Add a note…'**
+  String get presenceNote;
+
+  /// No description provided for @presenceNoteIs.
+  ///
+  /// In en, this message translates to:
+  /// **'Note: {note}'**
+  String presenceNoteIs(String note);
+
+  /// No description provided for @presenceNoteTitle.
+  ///
+  /// In en, this message translates to:
+  /// **'A note beside your status'**
+  String get presenceNoteTitle;
+
+  /// No description provided for @presenceNoteHint.
+  ///
+  /// In en, this message translates to:
+  /// **'Back at 2'**
+  String get presenceNoteHint;
+
+  /// No description provided for @presenceClearAfter.
+  ///
+  /// In en, this message translates to:
+  /// **'Clear after…'**
+  String get presenceClearAfter;
+
+  /// No description provided for @presenceUntil.
+  ///
+  /// In en, this message translates to:
+  /// **'Until {time}'**
+  String presenceUntil(String time);
+
+  /// No description provided for @presenceClearAfterTitle.
+  ///
+  /// In en, this message translates to:
+  /// **'Clear the status after'**
+  String get presenceClearAfterTitle;
+
+  /// No description provided for @clearAfter30m.
+  ///
+  /// In en, this message translates to:
+  /// **'30 minutes'**
+  String get clearAfter30m;
+
+  /// No description provided for @clearAfter1h.
+  ///
+  /// In en, this message translates to:
+  /// **'1 hour'**
+  String get clearAfter1h;
+
+  /// No description provided for @clearAfter2h.
+  ///
+  /// In en, this message translates to:
+  /// **'2 hours'**
+  String get clearAfter2h;
+
+  /// No description provided for @clearAfterToday.
+  ///
+  /// In en, this message translates to:
+  /// **'Today'**
+  String get clearAfterToday;
+
+  /// No description provided for @clearAfterNever.
+  ///
+  /// In en, this message translates to:
+  /// **'Never'**
+  String get clearAfterNever;
+
+  /// No description provided for @editStatuses.
+  ///
+  /// In en, this message translates to:
+  /// **'Edit statuses…'**
+  String get editStatuses;
+
+  /// No description provided for @statusesTitle.
+  ///
+  /// In en, this message translates to:
+  /// **'Your statuses'**
+  String get statusesTitle;
+
+  /// No description provided for @statusesNone.
+  ///
+  /// In en, this message translates to:
+  /// **'Add your own, like WFH or At lunch.'**
+  String get statusesNone;
+
+  /// No description provided for @statusAdd.
+  ///
+  /// In en, this message translates to:
+  /// **'Add a status'**
+  String get statusAdd;
+
+  /// No description provided for @statusEdit.
+  ///
+  /// In en, this message translates to:
+  /// **'Edit the status'**
+  String get statusEdit;
+
+  /// No description provided for @statusLabel.
+  ///
+  /// In en, this message translates to:
+  /// **'Name'**
+  String get statusLabel;
+
+  /// No description provided for @statusState.
+  ///
+  /// In en, this message translates to:
+  /// **'Shows as'**
+  String get statusState;
+
+  /// No description provided for @statusDndNote.
+  ///
+  /// In en, this message translates to:
+  /// **'Choosing it turns do not disturb on: calls go to voicemail.'**
+  String get statusDndNote;
+
+  /// No description provided for @doneButton.
+  ///
+  /// In en, this message translates to:
+  /// **'Done'**
+  String get doneButton;
+
+  /// No description provided for @idleAway.
+  ///
+  /// In en, this message translates to:
+  /// **'Away when idle'**
+  String get idleAway;
+
+  /// No description provided for @idleAwaySubtitle.
+  ///
+  /// In en, this message translates to:
+  /// **'Shown as away after no keyboard or mouse for a while'**
+  String get idleAwaySubtitle;
+
+  /// No description provided for @idleOff.
+  ///
+  /// In en, this message translates to:
+  /// **'Off'**
+  String get idleOff;
+
+  /// No description provided for @idleMinutes.
+  ///
+  /// In en, this message translates to:
+  /// **'{minutes} minutes'**
+  String idleMinutes(int minutes);
 }
 
 class _StringsDelegate extends LocalizationsDelegate<Strings> {

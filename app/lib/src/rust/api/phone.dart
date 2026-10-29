@@ -188,6 +188,47 @@ Future<void> exportContacts({required String path}) =>
 Future<void> setDirectoryListed({required bool on_}) =>
     RustLib.instance.api.crateApiPhoneSetDirectoryListed(on_: on_);
 
+/// Pick a status: a built-in one (`available`, `away`, `busy`, `dnd`) or
+/// one of the user's own by id, with a note and an RFC 3339 time it
+/// clears at.
+Future<void> setPresence({
+  required String status,
+  String? note,
+  String? until,
+}) => RustLib.instance.api.crateApiPhoneSetPresence(
+  status: status,
+  note: note,
+  until: until,
+);
+
+/// Set the note beside the user's status, or clear it.
+Future<void> setPresenceNote({String? note}) =>
+    RustLib.instance.api.crateApiPhoneSetPresenceNote(note: note);
+
+/// Say the user is idle, or back.
+Future<void> setPresenceIdle({required bool idle}) =>
+    RustLib.instance.api.crateApiPhoneSetPresenceIdle(idle: idle);
+
+/// Keep a status of the user's own.
+Future<void> addStatus({required String label, required String state}) =>
+    RustLib.instance.api.crateApiPhoneAddStatus(label: label, state: state);
+
+/// Rename one of the user's statuses, or change its state.
+Future<void> editStatus({required String id, String? label, String? state}) =>
+    RustLib.instance.api.crateApiPhoneEditStatus(
+      id: id,
+      label: label,
+      state: state,
+    );
+
+/// Delete one of the user's statuses.
+Future<void> removeStatus({required String id}) =>
+    RustLib.instance.api.crateApiPhoneRemoveStatus(id: id);
+
+/// Put the user's statuses in this order.
+Future<void> orderStatuses({required List<String> ids}) =>
+    RustLib.instance.api.crateApiPhoneOrderStatuses(ids: ids);
+
 /// Delete a contact, from this device or from the account.
 Future<void> deleteContact({required String id}) =>
     RustLib.instance.api.crateApiPhoneDeleteContact(id: id);
@@ -687,6 +728,85 @@ class ManagedSettings {
           sources == other.sources;
 }
 
+/// The user's presence (FCP's `docs/PRESENCE.md`).
+class MyPresence {
+  /// What others see: `available`, `away`, `busy`, `dnd`, `ringing`,
+  /// `on_call` or `offline`.
+  final String shown;
+  final String? shownLabel;
+
+  /// Away because one of their apps says they are idle.
+  final bool idle;
+
+  /// What they chose: a built-in state or one of `statuses`' ids.
+  final String status;
+  final String statusState;
+  final String? note;
+
+  /// RFC 3339.
+  final String? until;
+  final List<OwnStatus> statuses;
+
+  const MyPresence({
+    required this.shown,
+    this.shownLabel,
+    required this.idle,
+    required this.status,
+    required this.statusState,
+    this.note,
+    this.until,
+    required this.statuses,
+  });
+
+  @override
+  int get hashCode =>
+      shown.hashCode ^
+      shownLabel.hashCode ^
+      idle.hashCode ^
+      status.hashCode ^
+      statusState.hashCode ^
+      note.hashCode ^
+      until.hashCode ^
+      statuses.hashCode;
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is MyPresence &&
+          runtimeType == other.runtimeType &&
+          shown == other.shown &&
+          shownLabel == other.shownLabel &&
+          idle == other.idle &&
+          status == other.status &&
+          statusState == other.statusState &&
+          note == other.note &&
+          until == other.until &&
+          statuses == other.statuses;
+}
+
+/// One of the user's own statuses.
+class OwnStatus {
+  final String id;
+  final String label;
+
+  /// `available`, `away`, `busy` or `dnd`.
+  final String state;
+
+  const OwnStatus({required this.id, required this.label, required this.state});
+
+  @override
+  int get hashCode => id.hashCode ^ label.hashCode ^ state.hashCode;
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is OwnStatus &&
+          runtimeType == other.runtimeType &&
+          id == other.id &&
+          label == other.label &&
+          state == other.state;
+}
+
 /// Someone in the tenant's directory.
 class Person {
   final String key;
@@ -695,8 +815,12 @@ class Person {
   final String? department;
   final String? jobTitle;
 
-  /// `available`, `busy`, `away`, `dnd`, `offline`, … when shown.
+  /// `available`, `busy`, `away`, `dnd`, `ringing`, `on_call`,
+  /// `offline`, … when shown.
   final String? presence;
+
+  /// Their own status's label beside it ("WFH").
+  final String? presenceLabel;
   final bool onCall;
   final bool favourite;
 
@@ -710,6 +834,7 @@ class Person {
     this.department,
     this.jobTitle,
     this.presence,
+    this.presenceLabel,
     required this.onCall,
     required this.favourite,
     required this.dial,
@@ -723,6 +848,7 @@ class Person {
       department.hashCode ^
       jobTitle.hashCode ^
       presence.hashCode ^
+      presenceLabel.hashCode ^
       onCall.hashCode ^
       favourite.hashCode ^
       dial.hashCode;
@@ -738,6 +864,7 @@ class Person {
           department == other.department &&
           jobTitle == other.jobTitle &&
           presence == other.presence &&
+          presenceLabel == other.presenceLabel &&
           onCall == other.onCall &&
           favourite == other.favourite &&
           dial == other.dial;
@@ -835,6 +962,9 @@ class PhoneState {
   /// The tenant lets the user take themselves out of the directory.
   final bool mayChangeDirectoryListing;
 
+  /// Signed in to an FCP that keeps it: the user's presence.
+  final MyPresence? presence;
+
   /// A test of the microphone or a speaker under way: `recording`,
   /// `playing_back`, `speaker` or `ring`; `None` when none is.
   final String? audioTest;
@@ -872,6 +1002,7 @@ class PhoneState {
     required this.contacts,
     this.directoryListed,
     required this.mayChangeDirectoryListing,
+    this.presence,
     this.audioTest,
     required this.audioTestLevel,
   });
@@ -907,6 +1038,7 @@ class PhoneState {
       contacts.hashCode ^
       directoryListed.hashCode ^
       mayChangeDirectoryListing.hashCode ^
+      presence.hashCode ^
       audioTest.hashCode ^
       audioTestLevel.hashCode;
 
@@ -944,6 +1076,7 @@ class PhoneState {
           contacts == other.contacts &&
           directoryListed == other.directoryListed &&
           mayChangeDirectoryListing == other.mayChangeDirectoryListing &&
+          presence == other.presence &&
           audioTest == other.audioTest &&
           audioTestLevel == other.audioTestLevel;
 }

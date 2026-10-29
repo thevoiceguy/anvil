@@ -59,6 +59,7 @@ pub(crate) fn person(e: &DirectoryEntry, favourite: impl Fn(&str) -> bool) -> Op
         department: e.department.clone(),
         job_title: e.job_title.clone(),
         presence: e.presence.clone(),
+        presence_label: e.presence_label.clone(),
         on_call: false,
     })
 }
@@ -125,7 +126,16 @@ pub(crate) async fn refresh_all(inner: &Inner, fcp: &FcpClient) {
         refresh_people(inner, fcp),
         refresh_voicemail(inner, fcp),
         refresh_contacts(inner, fcp),
+        refresh_presence(inner, fcp),
     );
+}
+
+/// The user's presence, from an FCP that keeps it.
+pub(crate) async fn refresh_presence(inner: &Inner, fcp: &FcpClient) {
+    match fcp.presence().await {
+        Ok(p) => inner.set_presence(p.map(Into::into)),
+        Err(e) => tracing::debug!(%e, "presence not read"),
+    }
 }
 
 /// What FCP tells the app: the feature codes, whether the user may record,
@@ -284,6 +294,11 @@ fn on_event(inner: &Arc<Inner>, fcp: &Arc<FcpClient>, event: &UserEvent) {
                 Refresh::Voicemail => refresh_voicemail(&inner, &fcp).await,
                 Refresh::Calling => refresh_calling(&inner, &fcp).await,
                 Refresh::Contacts => refresh_contacts(&inner, &fcp).await,
+                Refresh::Presence { username } => {
+                    if fcp.session().await.username.eq_ignore_ascii_case(&username) {
+                        refresh_presence(&inner, &fcp).await;
+                    }
+                }
             }
         });
     };
@@ -293,7 +308,23 @@ fn on_event(inner: &Arc<Inner>, fcp: &Arc<FcpClient>, event: &UserEvent) {
         name if name.starts_with("voicemail.") => spawn(Refresh::Voicemail),
         "user.calling_changed" => spawn(Refresh::Calling),
         "user.contact_changed" => spawn(Refresh::Contacts),
-        "presence.status_changed" => {
+        // A person's presence (FCP v0.25.473 on): theirs in the
+        // directory, and the user's own read again.
+        "presence.user_changed" => {
+            if let (Some(username), Some(state)) = (text("username"), text("state")) {
+                let label = text("label").map(str::to_string);
+                inner.update_person_by_key(username, |p| {
+                    p.presence = Some(state.to_string());
+                    p.presence_label = label;
+                });
+                spawn(Refresh::Presence {
+                    username: username.to_string(),
+                });
+            }
+        }
+        // An address's presence: an FCP that keeps a person's says it
+        // better, in `presence.user_changed`.
+        "presence.status_changed" if inner.state.lock().presence.is_none() => {
             if let (Some(aor), Some(state)) = (text("aor"), text("new_state")) {
                 inner.update_person(aor, |p| p.presence = Some(state.to_string()));
             }
@@ -313,6 +344,10 @@ enum Refresh {
     Voicemail,
     Calling,
     Contacts,
+    /// The user's own presence, when an event names them.
+    Presence {
+        username: String,
+    },
 }
 
 /// The user part of an address (`sip:alice@example.com` → `alice`,
