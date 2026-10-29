@@ -619,6 +619,9 @@ pub struct Contact {
     pub numbers: Vec<ContactNumber>,
     pub email: Option<String>,
     pub notes: Option<String>,
+    /// The ringtone a call from one of its numbers rings with, by id;
+    /// `None` (or one this device does not have) rings with the phone's.
+    pub ringtone: Option<String>,
 }
 
 /// One of a contact's numbers: what it is (`mobile`, `work`, …) and what
@@ -741,6 +744,11 @@ pub struct PhoneState {
     pub may_record: bool,
     /// The user's contacts, by name: on this device and on their account.
     pub contacts: Vec<Contact>,
+    /// Signed in to FCP: whether the user is listed in the tenant's
+    /// directory; `None` until FCP says.
+    pub directory_listed: Option<bool>,
+    /// The tenant lets the user take themselves out of the directory.
+    pub may_change_directory_listing: bool,
     /// A test of the microphone or a speaker under way: `recording`,
     /// `playing_back`, `speaker` or `ring`; `None` when none is.
     pub audio_test: Option<String>,
@@ -907,6 +915,8 @@ pub fn phone_state() -> anyhow::Result<PhoneState> {
         speaker_volume: s.audio.volume.map(|v| v.speaker),
         playing: s.playing,
         may_record: s.may_record,
+        directory_listed: s.directory.map(|d| d.listed),
+        may_change_directory_listing: s.directory.is_some_and(|d| d.may_change),
         audio_test: s.audio_test.map(|t| {
             match t.stage {
                 anvil_app::AudioTestStage::Recording => "recording",
@@ -935,6 +945,7 @@ pub fn phone_state() -> anyhow::Result<PhoneState> {
                     .collect(),
                 email: c.email,
                 notes: c.notes,
+                ringtone: c.ringtone,
             })
             .collect(),
     })
@@ -998,6 +1009,7 @@ pub fn phone_changes(sink: StreamSink<PhoneChange>) -> anyhow::Result<()> {
                 C::Push { .. } => kind_only("push"),
                 C::MayRecord { .. } => kind_only("may_record"),
                 C::Contacts { .. } => kind_only("contacts"),
+                C::Directory { .. } => kind_only("directory"),
                 C::AudioTest { .. } => kind_only("audio_test"),
             };
             if sink.add(out).is_err() {
@@ -1145,10 +1157,52 @@ pub async fn save_contact(contact: Contact) -> anyhow::Result<()> {
                 .collect(),
             email: contact.email,
             notes: contact.notes,
+            ringtone: contact.ringtone,
         },
     })
     .await
     .map(|_| ())
+}
+
+/// What a contacts import did.
+pub struct ContactsImported {
+    /// Contacts made.
+    pub imported: u32,
+    /// Entries already kept, or twice in the file: not made again.
+    pub duplicates: u32,
+    /// Entries left out, each with its place in the file and why.
+    pub skipped: Vec<String>,
+}
+
+/// Read the contacts in a vCard or CSV file into this device's contacts
+/// or, with `on_account`, the FCP account's; one already kept there is not
+/// made again.
+pub async fn import_contacts(path: String, on_account: bool) -> anyhow::Result<ContactsImported> {
+    let phone = phone()?;
+    let imported = on_runtime(async move {
+        let answer = phone
+            .execute(Command::ImportContacts { path, on_account })
+            .await?;
+        Ok(answer.imported.unwrap_or_default())
+    })
+    .await?;
+    Ok(ContactsImported {
+        imported: imported.imported,
+        duplicates: imported.duplicates,
+        skipped: imported.skipped,
+    })
+}
+
+/// Write every contact to a file: CSV when its name ends `.csv`, else
+/// vCard.
+pub async fn export_contacts(path: String) -> anyhow::Result<()> {
+    execute(Command::ExportContacts { path }).await.map(|_| ())
+}
+
+/// Be listed in the tenant's directory, or not (FCP refuses unless the
+/// tenant lets its users choose).
+pub async fn set_directory_listed(on: bool) -> anyhow::Result<()> {
+    execute(Command::DirectoryListed { on }).await.map(|_| ())
 }
 
 /// Delete a contact, from this device or from the account.

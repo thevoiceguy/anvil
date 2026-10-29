@@ -101,6 +101,7 @@ class _PeoplePageState extends State<PeoplePage>
                   if (mounted) _tabs.animateTo(0);
                 },
               ),
+              _contactsMenu(context),
             ],
           ),
         ),
@@ -144,6 +145,50 @@ class _PeoplePageState extends State<PeoplePage>
             ],
           ),
         ),
+      ],
+    );
+  }
+
+  /// Import and export: to the account or this device when there is an
+  /// account; export where the system lets the user save a file.
+  Widget _contactsMenu(BuildContext context) {
+    final s = Strings.of(context);
+    final model = widget.model;
+    final hasAccount = model.snapshot.hasAccount;
+    Future<void> import(bool onAccount) async {
+      await importContacts(context, model, onAccount: onAccount);
+      if (mounted) _tabs.animateTo(0);
+    }
+
+    return PopupMenuButton<void>(
+      key: const Key('contactsMenu'),
+      tooltip: s.contactsMenu,
+      icon: const Icon(Icons.import_export),
+      itemBuilder: (_) => [
+        if (hasAccount) ...[
+          PopupMenuItem(
+            key: const Key('importContacts-account'),
+            onTap: () => import(true),
+            child: Text(s.contactsImportToAccount),
+          ),
+          PopupMenuItem(
+            key: const Key('importContacts-device'),
+            onTap: () => import(false),
+            child: Text(s.contactsImportToDevice),
+          ),
+        ] else
+          PopupMenuItem(
+            key: const Key('importContacts-device'),
+            onTap: () => import(false),
+            child: Text(s.contactsImport),
+          ),
+        if (canExportContacts)
+          PopupMenuItem(
+            key: const Key('exportContacts'),
+            enabled: model.snapshot.contacts.isNotEmpty,
+            onTap: () => exportContacts(context, model),
+            child: Text(s.contactsExport),
+          ),
       ],
     );
   }

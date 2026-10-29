@@ -175,11 +175,20 @@ share sheet.
   live (FCP's `user.contact_changed`); the account's contacts are also
   read when the phone starts, when its events reconnect, and on
   `refresh`. The CLI's `contact add account
-  <number> <name>` puts one on the account.
+  <number> <name>` puts one on the account. A contact may have a ringtone
+  of its own, which a call from one of its numbers rings with; it is kept
+  with the contact (on the account too), and a device without that
+  ringtone (a file added on another device) rings with its own. The
+  People page's import and export menu reads a vCard or CSV file into the
+  account or this device (one already kept, by name and numbers, is not
+  made again) and, on a desktop, writes every contact to one (D8 findings
+  29, 31; `contact import [account] <file>`, `contact export <file>`).
 - **Voicemail.** Messages with transcription, play, mark heard, delete, the
   count on the tab.
-- **Settings.** Do not disturb, forwarding, call waiting, audio devices and
-  ringtone, start at login (desktop), sign out.
+- **Settings.** Do not disturb, forwarding, call waiting, whether the user
+  is listed in the tenant's directory (changed only when the tenant lets
+  its users choose; FCP v0.25.471, D8 finding 27; `directory on|off`),
+  audio devices and ringtone, start at login (desktop), sign out.
 - **Desktop.** A tray icon with presence and DND, a notification for an
   incoming call that answers from the notification, a compact in-call window,
   a global answer/hang-up shortcut.
@@ -443,6 +452,30 @@ Three PRs, the screens thin over the state as §3 has it:
   (`the_microphone_is_heard_back_and_the_speakers_tested`,
   `a_ringtone_from_a_file_rings_is_kept_and_can_be_removed`) and the
   widget tests.
+
+### D8 findings 27, 29, 31: the directory, contact files, a contact's ringtone
+- Settings → **Listed in the directory**, from `/me/softphone`'s
+  `directory_listed` and `may_change_directory_listing` (read at start and
+  on `refresh`), set through `PUT /me/profile`; greyed out, saying the
+  administrator decides, unless the tenant lets its users choose.
+- Contacts files: an import to the account is FCP's
+  `POST /me/contacts/import` (FCP reads the file and skips what the
+  account has); to this device, the app reads the file itself with the
+  same reader (`anvil-app/src/contact_file.rs`, FCP's
+  `fcp_core::contact_file`): vCard 3.0 and Apple's labels, Outlook's and
+  Google's CSV, 10 MB at most. An export writes the contacts shown, the
+  device's and the account's, as vCard, or CSV when the file's name ends
+  `.csv`. A phone's system offers no place to save to, so export is a
+  desktop's.
+- A contact's ringtone is chosen in its dialog from the phone's
+  ringtones; one chosen on another device is kept and shown as such.
+  Ringing picks the ringtone of the contact one of whose numbers the
+  ringing call is from, while this device has it.
+- Proved by `anvil-app/tests/phone.rs`
+  (`a_contacts_own_ringtone_rings_for_their_calls`,
+  `contacts_are_read_from_and_written_to_files`), `tests/fcp.rs`
+  (`contacts_are_imported_to_the_account_with_their_ringtones_kept`, which
+  skips on an FCP before v0.25.471) and the widget tests.
 
 ### W5: echo cancellation and noise suppression
 - The desktop's microphone is cleaned before it is sent: WebRTC's audio

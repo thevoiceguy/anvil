@@ -3,6 +3,9 @@
 // by hand, changed, moved to the account and deleted; and the "More" menu
 // that offers "Create contact" and whatever comes after it.
 
+import 'dart:io';
+
+import 'package:file_selector/file_selector.dart';
 import 'package:flutter/material.dart';
 
 import '../../l10n/app_localizations.dart';
@@ -99,9 +102,95 @@ Future<void> editContact(
             numbers: [if (number != null) ContactNumber(number: number)],
           ),
       canUseAccount: model.snapshot.hasAccount,
+      ringtones: model.snapshot.ringtones,
     ),
   );
   if (made != null) await model.run(() => model.api.saveContact(made));
+}
+
+/// The contacts files the dialogs offer.
+XTypeGroup _contactFiles(Strings s) => XTypeGroup(
+  label: s.contactsFileType,
+  extensions: const ['vcf', 'vcard', 'csv'],
+  mimeTypes: const ['text/vcard', 'text/x-vcard', 'text/csv'],
+  uniformTypeIdentifiers: const [
+    'public.vcard',
+    'public.comma-separated-values-text',
+  ],
+);
+
+/// The file to import, from the system's dialog; null when none is chosen.
+/// A test puts its own.
+Future<String?> Function(Strings s) pickContactsToImport = (s) async =>
+    (await openFile(acceptedTypeGroups: [_contactFiles(s)]))?.path;
+
+/// Where to export to, from the system's dialog; null when the user
+/// cancels. A test puts its own.
+Future<String?> Function(Strings s) pickContactsExport = (s) async =>
+    (await getSaveLocation(
+      suggestedName: 'contacts.vcf',
+      acceptedTypeGroups: [_contactFiles(s)],
+    ))?.path;
+
+/// Whether this system can save a file where the user chooses: a desktop.
+bool get canExportContacts =>
+    Platform.isWindows || Platform.isMacOS || Platform.isLinux;
+
+/// Import a vCard or CSV file the user picks, to the account
+/// (`onAccount`) or this device, and say what came of it.
+Future<void> importContacts(
+  BuildContext context,
+  PhoneModel model, {
+  required bool onAccount,
+}) async {
+  final s = Strings.of(context);
+  final messenger = ScaffoldMessenger.maybeOf(context);
+  final path = await pickContactsToImport(s);
+  if (path == null) return;
+  ContactsImported? done;
+  await model.run(() async {
+    done = await model.api.importContacts(path, onAccount: onAccount);
+  });
+  final d = done;
+  if (d == null) return;
+  messenger
+    ?..removeCurrentSnackBar()
+    ..showSnackBar(
+      SnackBar(
+        key: const Key('contactsImported'),
+        content: Text(
+          [
+            s.contactsImported(d.imported, d.duplicates),
+            if (d.skipped.isNotEmpty)
+              s.contactsImportSkipped(d.skipped.length, d.skipped.first),
+          ].join('\n'),
+        ),
+      ),
+    );
+}
+
+/// Export every contact to a file the user picks: CSV when its name ends
+/// `.csv`, else vCard.
+Future<void> exportContacts(BuildContext context, PhoneModel model) async {
+  final s = Strings.of(context);
+  final messenger = ScaffoldMessenger.maybeOf(context);
+  final path = await pickContactsExport(s);
+  if (path == null) return;
+  var saved = false;
+  await model.run(() async {
+    await model.api.exportContacts(path);
+    saved = true;
+  });
+  if (saved) {
+    messenger
+      ?..removeCurrentSnackBar()
+      ..showSnackBar(
+        SnackBar(
+          key: const Key('contactsExported'),
+          content: Text(s.contactsExported(path)),
+        ),
+      );
+  }
 }
 
 /// Move a device's `contact` to the account.
@@ -238,16 +327,20 @@ class _NumberLabelFieldState extends State<NumberLabelField> {
   }
 }
 
-/// A contact's name, company, numbers, email and notes; and, for a new one
-/// when there is an account, where it is kept.
+/// A contact's name, company, numbers, email, notes and ringtone; and, for
+/// a new one when there is an account, where it is kept.
 class ContactDialog extends StatefulWidget {
   const ContactDialog({
     super.key,
     required this.contact,
     this.canUseAccount = false,
+    this.ringtones = const [],
   });
   final Contact contact;
   final bool canUseAccount;
+
+  /// The ringtones this device has, to choose the contact's from.
+  final List<Ringtone> ringtones;
 
   @override
   State<ContactDialog> createState() => _ContactDialogState();
@@ -260,6 +353,7 @@ class _ContactDialogState extends State<ContactDialog> {
   late final _email = TextEditingController(text: widget.contact.email);
   late final _notes = TextEditingController(text: widget.contact.notes);
   late bool _onAccount = widget.contact.onAccount;
+  late String? _ringtone = widget.contact.ringtone;
   late final List<(TextEditingController, TextEditingController)> _numbers = [
     for (final n in widget.contact.numbers)
       (
@@ -309,7 +403,40 @@ class _ContactDialogState extends State<ContactDialog> {
         ],
         email: _text(_email),
         notes: _text(_notes),
+        ringtone: _ringtone,
       ),
+    );
+  }
+
+  /// The contact's ringtone: the phone's, or one this device has. One
+  /// chosen on another device is kept, and named so.
+  Widget _ringtonePicker(Strings s) {
+    final here = widget.ringtones.any((r) => r.id == _ringtone);
+    return DropdownButtonFormField<String?>(
+      key: const Key('contactRingtone'),
+      initialValue: _ringtone,
+      isExpanded: true,
+      decoration: InputDecoration(labelText: s.contactRingtoneField),
+      items: [
+        DropdownMenuItem(
+          key: const Key('contactRingtone-default'),
+          value: null,
+          child: Text(s.contactRingtoneDefault),
+        ),
+        for (final r in widget.ringtones)
+          DropdownMenuItem(
+            key: Key('contactRingtone-${r.id}'),
+            value: r.id,
+            child: Text(r.name),
+          ),
+        if (_ringtone != null && !here)
+          DropdownMenuItem(
+            key: const Key('contactRingtone-elsewhere'),
+            value: _ringtone,
+            child: Text(s.contactRingtoneElsewhere),
+          ),
+      ],
+      onChanged: (v) => setState(() => _ringtone = v),
     );
   }
 
@@ -433,6 +560,7 @@ class _ContactDialogState extends State<ContactDialog> {
                   minLines: 1,
                   decoration: InputDecoration(labelText: s.contactNotesField),
                 ),
+                if (widget.ringtones.isNotEmpty) _ringtonePicker(s),
               ],
             ),
           ),

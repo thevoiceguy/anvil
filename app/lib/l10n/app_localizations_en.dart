@@ -691,4 +691,57 @@ class StringsEn extends Strings {
   String deleteAccountContactConfirm(String name) {
     return 'Delete $name from your contacts? They go from every app you sign in to.';
   }
+
+  @override
+  String get contactsMenu => 'Import and export';
+
+  @override
+  String get contactsImport => 'Import contacts…';
+
+  @override
+  String get contactsImportToAccount => 'Import to my account…';
+
+  @override
+  String get contactsImportToDevice => 'Import to this device…';
+
+  @override
+  String get contactsExport => 'Export contacts…';
+
+  @override
+  String get contactsFileType => 'Contacts (vCard or CSV)';
+
+  @override
+  String contactsImported(int imported, int duplicates) {
+    return '$imported imported, $duplicates already kept';
+  }
+
+  @override
+  String contactsImportSkipped(int count, String first) {
+    return '$count left out: $first';
+  }
+
+  @override
+  String contactsExported(String path) {
+    return 'Contacts saved to $path';
+  }
+
+  @override
+  String get contactRingtoneField => 'Ringtone';
+
+  @override
+  String get contactRingtoneDefault => 'The phone\'s ringtone';
+
+  @override
+  String get contactRingtoneElsewhere => 'Chosen on another device';
+
+  @override
+  String get directoryListed => 'Listed in the directory';
+
+  @override
+  String get directoryListedSubtitle =>
+      'People in your organisation can find you under People';
+
+  @override
+  String get directoryListedLocked =>
+      'Your administrator decides whether you are listed';
 }

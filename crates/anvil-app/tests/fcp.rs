@@ -837,3 +837,96 @@ async fn contacts_on_the_account_reach_every_app_the_user_signs_in_to() {
     mobile.shutdown().await;
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn contacts_are_imported_to_the_account_with_their_ringtones_kept() {
+    let (Ok(admin), Ok(token)) = (
+        std::env::var("ANVIL_FCP_ADMIN"),
+        std::env::var("ANVIL_FCP_TOKEN"),
+    ) else {
+        eprintln!("ANVIL_FCP_ADMIN and ANVIL_FCP_TOKEN not set; skipping");
+        return;
+    };
+    let (fcp, user) = signed_in(&admin, &token, "files").await;
+    let n = user.rsplit('-').next().unwrap();
+    let dir = std::env::temp_dir().join(format!("anvil-contact-files-{n}"));
+    std::fs::create_dir_all(&dir).unwrap();
+    let file = dir.join("contacts.csv");
+    std::fs::write(
+        &file,
+        "Name,Organization 1 - Name,Phone 1 - Type,Phone 1 - Value\r\n\
+         Cy Clark,Clark & Co,Mobile,0412 000 111\r\n\
+         Dee Dunn,,Work,1004\r\n\
+         Dee Dunn,,Work,1004\r\n",
+    )
+    .unwrap();
+    if fcp.import_contacts(Vec::new()).await.is_err_and(|e| {
+        matches!(
+            e,
+            anvil_fcp::FcpError::Refused {
+                status: 404 | 405,
+                ..
+            }
+        )
+    }) {
+        eprintln!("this FCP imports no contacts (before v0.25.471); skipping");
+        return;
+    }
+    let phone = phone_with(fcp.clone(), "127.0.0.126", Some(dir.join("settings.json"))).await;
+
+    // Kept on the account by FCP, the second Dee a duplicate.
+    let done = phone
+        .execute(Command::ImportContacts {
+            path: file.display().to_string(),
+            on_account: true,
+        })
+        .await
+        .unwrap()
+        .imported
+        .unwrap();
+    assert_eq!((done.imported, done.duplicates), (2, 1), "{done:?}");
+    let contacts = phone.state().contacts;
+    let names: Vec<_> = contacts
+        .iter()
+        .map(|c| (c.name.as_str(), c.on_account))
+        .collect();
+    assert_eq!(names, [("Cy Clark", true), ("Dee Dunn", true)]);
+
+    // A contact's ringtone is kept on the account, and cleared there.
+    let mut cy = contacts[0].clone();
+    cy.ringtone = Some("classic".into());
+    assert!(
+        phone
+            .execute(Command::SaveContact {
+                contact: cy.clone()
+            })
+            .await
+            .unwrap()
+            .ok
+    );
+    let kept = fcp.contacts(Some("Cy"), None, None).await.unwrap();
+    assert_eq!(kept.data[0].ringtone.as_deref(), Some("classic"));
+    cy.ringtone = None;
+    assert!(
+        phone
+            .execute(Command::SaveContact { contact: cy })
+            .await
+            .unwrap()
+            .ok
+    );
+    let kept = fcp.contacts(Some("Cy"), None, None).await.unwrap();
+    assert_eq!(kept.data[0].ringtone, None);
+
+    // Listed in the directory; the tenant does not let its users choose.
+    until(&phone, "the listing read", |s| s.directory.is_some()).await;
+    let listing = phone.state().directory.unwrap();
+    assert!(listing.listed);
+    if !listing.may_change {
+        assert!(phone
+            .execute(Command::DirectoryListed { on: false })
+            .await
+            .is_err());
+    }
+    phone.shutdown().await;
+    let _ = std::fs::remove_dir_all(&dir);
+}

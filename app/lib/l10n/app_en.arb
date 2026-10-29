@@ -354,5 +354,47 @@
         "type": "String"
       }
     }
-  }
+  },
+  "contactsMenu": "Import and export",
+  "contactsImport": "Import contacts…",
+  "contactsImportToAccount": "Import to my account…",
+  "contactsImportToDevice": "Import to this device…",
+  "contactsExport": "Export contacts…",
+  "contactsFileType": "Contacts (vCard or CSV)",
+  "contactsImported": "{imported} imported, {duplicates} already kept",
+  "@contactsImported": {
+    "placeholders": {
+      "imported": {
+        "type": "int"
+      },
+      "duplicates": {
+        "type": "int"
+      }
+    }
+  },
+  "contactsImportSkipped": "{count} left out: {first}",
+  "@contactsImportSkipped": {
+    "placeholders": {
+      "count": {
+        "type": "int"
+      },
+      "first": {
+        "type": "String"
+      }
+    }
+  },
+  "contactsExported": "Contacts saved to {path}",
+  "@contactsExported": {
+    "placeholders": {
+      "path": {
+        "type": "String"
+      }
+    }
+  },
+  "contactRingtoneField": "Ringtone",
+  "contactRingtoneDefault": "The phone's ringtone",
+  "contactRingtoneElsewhere": "Chosen on another device",
+  "directoryListed": "Listed in the directory",
+  "directoryListedSubtitle": "People in your organisation can find you under People",
+  "directoryListedLocked": "Your administrator decides whether you are listed"
 }

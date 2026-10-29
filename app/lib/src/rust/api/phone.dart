@@ -167,6 +167,27 @@ Future<void> record({BigInt? call, required bool on_}) =>
 Future<void> saveContact({required Contact contact}) =>
     RustLib.instance.api.crateApiPhoneSaveContact(contact: contact);
 
+/// Read the contacts in a vCard or CSV file into this device's contacts
+/// or, with `on_account`, the FCP account's; one already kept there is not
+/// made again.
+Future<ContactsImported> importContacts({
+  required String path,
+  required bool onAccount,
+}) => RustLib.instance.api.crateApiPhoneImportContacts(
+  path: path,
+  onAccount: onAccount,
+);
+
+/// Write every contact to a file: CSV when its name ends `.csv`, else
+/// vCard.
+Future<void> exportContacts({required String path}) =>
+    RustLib.instance.api.crateApiPhoneExportContacts(path: path);
+
+/// Be listed in the tenant's directory, or not (FCP refuses unless the
+/// tenant lets its users choose).
+Future<void> setDirectoryListed({required bool on_}) =>
+    RustLib.instance.api.crateApiPhoneSetDirectoryListed(on_: on_);
+
 /// Delete a contact, from this device or from the account.
 Future<void> deleteContact({required String id}) =>
     RustLib.instance.api.crateApiPhoneDeleteContact(id: id);
@@ -486,6 +507,10 @@ class Contact {
   final String? email;
   final String? notes;
 
+  /// The ringtone a call from one of its numbers rings with, by id;
+  /// `None` (or one this device does not have) rings with the phone's.
+  final String? ringtone;
+
   const Contact({
     required this.id,
     required this.onAccount,
@@ -494,6 +519,7 @@ class Contact {
     required this.numbers,
     this.email,
     this.notes,
+    this.ringtone,
   });
 
   @override
@@ -504,7 +530,8 @@ class Contact {
       company.hashCode ^
       numbers.hashCode ^
       email.hashCode ^
-      notes.hashCode;
+      notes.hashCode ^
+      ringtone.hashCode;
 
   @override
   bool operator ==(Object other) =>
@@ -517,7 +544,8 @@ class Contact {
           company == other.company &&
           numbers == other.numbers &&
           email == other.email &&
-          notes == other.notes;
+          notes == other.notes &&
+          ringtone == other.ringtone;
 }
 
 /// One of a contact's numbers: what it is (`mobile`, `work`, …) and what
@@ -538,6 +566,37 @@ class ContactNumber {
           runtimeType == other.runtimeType &&
           label == other.label &&
           number == other.number;
+}
+
+/// What a contacts import did.
+class ContactsImported {
+  /// Contacts made.
+  final int imported;
+
+  /// Entries already kept, or twice in the file: not made again.
+  final int duplicates;
+
+  /// Entries left out, each with its place in the file and why.
+  final List<String> skipped;
+
+  const ContactsImported({
+    required this.imported,
+    required this.duplicates,
+    required this.skipped,
+  });
+
+  @override
+  int get hashCode =>
+      imported.hashCode ^ duplicates.hashCode ^ skipped.hashCode;
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is ContactsImported &&
+          runtimeType == other.runtimeType &&
+          imported == other.imported &&
+          duplicates == other.duplicates &&
+          skipped == other.skipped;
 }
 
 /// Which way a call goes.
@@ -769,6 +828,13 @@ class PhoneState {
   /// The user's contacts, by name: on this device and on their account.
   final List<Contact> contacts;
 
+  /// Signed in to FCP: whether the user is listed in the tenant's
+  /// directory; `None` until FCP says.
+  final bool? directoryListed;
+
+  /// The tenant lets the user take themselves out of the directory.
+  final bool mayChangeDirectoryListing;
+
   /// A test of the microphone or a speaker under way: `recording`,
   /// `playing_back`, `speaker` or `ring`; `None` when none is.
   final String? audioTest;
@@ -804,6 +870,8 @@ class PhoneState {
     this.playing,
     required this.mayRecord,
     required this.contacts,
+    this.directoryListed,
+    required this.mayChangeDirectoryListing,
     this.audioTest,
     required this.audioTestLevel,
   });
@@ -837,6 +905,8 @@ class PhoneState {
       playing.hashCode ^
       mayRecord.hashCode ^
       contacts.hashCode ^
+      directoryListed.hashCode ^
+      mayChangeDirectoryListing.hashCode ^
       audioTest.hashCode ^
       audioTestLevel.hashCode;
 
@@ -872,6 +942,8 @@ class PhoneState {
           playing == other.playing &&
           mayRecord == other.mayRecord &&
           contacts == other.contacts &&
+          directoryListed == other.directoryListed &&
+          mayChangeDirectoryListing == other.mayChangeDirectoryListing &&
           audioTest == other.audioTest &&
           audioTestLevel == other.audioTestLevel;
 }

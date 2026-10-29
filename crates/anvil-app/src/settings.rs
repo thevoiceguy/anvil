@@ -178,6 +178,7 @@ mod tests {
                 }],
                 email: None,
                 notes: None,
+                ringtone: Some("classic".into()),
             }],
         };
         saved.save(&path).unwrap();

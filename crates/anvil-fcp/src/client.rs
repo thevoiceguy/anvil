@@ -45,6 +45,18 @@ pub struct SoftphoneConfig {
     /// an older FCP, which has no such route.
     #[serde(default)]
     pub may_record: bool,
+    /// The user is listed in the tenant's directory (FCP v0.25.471; an
+    /// older FCP lists everyone).
+    #[serde(default = "listed")]
+    pub directory_listed: bool,
+    /// The tenant lets its users take themselves out of the directory
+    /// ([`FcpClient::set_directory_listed`]).
+    #[serde(default)]
+    pub may_change_directory_listing: bool,
+}
+
+fn listed() -> bool {
+    true
 }
 
 impl SoftphoneConfig {
@@ -207,16 +219,41 @@ impl FcpClient {
         path: &str,
         body: Option<&serde_json::Value>,
     ) -> Result<reqwest::Response, FcpError> {
+        self.api_request(method, path, |request| match body {
+            Some(body) => request.json(body),
+            None => request,
+        })
+        .await
+    }
+
+    /// An API request with `body` as it is (a file).
+    pub(crate) async fn api_bytes(
+        &self,
+        method: reqwest::Method,
+        path: &str,
+        body: Vec<u8>,
+    ) -> Result<reqwest::Response, FcpError> {
+        self.api_request(method, path, |request| {
+            request
+                .header(reqwest::header::CONTENT_TYPE, "application/octet-stream")
+                .body(body.clone())
+        })
+        .await
+    }
+
+    async fn api_request(
+        &self,
+        method: reqwest::Method,
+        path: &str,
+        with: impl Fn(reqwest::RequestBuilder) -> reqwest::RequestBuilder,
+    ) -> Result<reqwest::Response, FcpError> {
         let api = self.session.lock().await.server.api_url.clone();
         let send = |token: String| {
-            let mut request = self
+            let request = self
                 .http
                 .request(method.clone(), format!("{api}{path}"))
                 .bearer_auth(token);
-            if let Some(body) = body {
-                request = request.json(body);
-            }
-            request.send()
+            with(request).send()
         };
         let mut response = send(self.bearer().await?).await?;
         // Revoked or expired underneath us: once more after a refresh.

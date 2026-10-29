@@ -107,6 +107,10 @@ pub struct PersonalContact {
     pub numbers: Vec<ContactNumber>,
     pub email: Option<String>,
     pub notes: Option<String>,
+    /// The ringtone the user's apps ring with for a call from one of its
+    /// numbers, by the app's id for it; `None` rings with the app's own.
+    #[serde(default)]
+    pub ringtone: Option<String>,
     /// RFC 3339.
     pub created_at: String,
     pub updated_at: String,
@@ -121,6 +125,28 @@ pub struct ContactFields {
     pub numbers: Vec<ContactNumber>,
     pub email: Option<String>,
     pub notes: Option<String>,
+    /// Sent as it is: `None` clears the contact's ringtone.
+    pub ringtone: Option<String>,
+}
+
+/// What [`FcpClient::import_contacts`] did.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Deserialize, Serialize)]
+pub struct ContactImport {
+    /// Contacts made.
+    pub imported: usize,
+    /// Entries the account already had (the same name and numbers), or
+    /// twice in the file: not made again.
+    pub duplicates: usize,
+    /// Entries not made: each one's place in the file and why.
+    #[serde(default)]
+    pub skipped: Vec<ContactImportSkip>,
+}
+
+/// An entry an import left out.
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize)]
+pub struct ContactImportSkip {
+    pub entry: usize,
+    pub reason: String,
 }
 
 /// Which calls [`FcpClient::calls`] lists.
@@ -421,6 +447,28 @@ impl FcpClient {
             "/me/contacts",
         )
         .await
+    }
+
+    /// Keep the contacts in a vCard or CSV file on the user's account (FCP
+    /// tells which the file is). One the account already has, by name and
+    /// numbers, is not made again.
+    pub async fn import_contacts(&self, file: Vec<u8>) -> Result<ContactImport, FcpError> {
+        json(
+            self.api_bytes(reqwest::Method::POST, "/me/contacts/import", file)
+                .await?,
+            "/me/contacts/import",
+        )
+        .await
+    }
+
+    /// Take the user out of the tenant's directory, or put them back. FCP
+    /// refuses (403) unless the tenant lets its users choose
+    /// (`may_change_directory_listing` on [`FcpClient::softphone`]).
+    pub async fn set_directory_listed(&self, listed: bool) -> Result<(), FcpError> {
+        let body = serde_json::json!({ "directory_listed": listed });
+        self.api_with(reqwest::Method::PUT, "/me/profile", Some(&body))
+            .await?;
+        Ok(())
     }
 
     /// Delete one of the user's contacts, from every app and their site.

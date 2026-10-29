@@ -4,6 +4,7 @@
 import 'package:anvil/src/app.dart';
 import 'package:clock/clock.dart';
 import 'package:anvil/src/phone/phone_api.dart';
+import 'package:anvil/src/screens/contacts.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -706,6 +707,130 @@ void main() {
     expect(find.byKey(const Key('contactPlace-c1')), findsNothing);
     await tapKey(tester, 'contactMenu-c1');
     expect(find.byKey(const Key('moveContact-c1')), findsNothing);
+  });
+
+  testWidgets('a contact rings with a ringtone of its own', (tester) async {
+    final phone = await signedIn(
+      tester,
+      seed: (s) => withData(s).copyWith(
+        contacts: const [
+          Contact(
+            id: 'k1',
+            onAccount: true,
+            name: 'Kim Park',
+            numbers: [ContactNumber(label: 'mobile', number: '0400111222')],
+            ringtone: 'file:Elsewhere.mp3',
+          ),
+        ],
+      ),
+    );
+    await go(tester, 'Contacts');
+    // Chosen on another device: kept, and named so.
+    await tapKey(tester, 'contactMenu-k1');
+    await tapKey(tester, 'editContact-k1');
+    expect(find.text('Chosen on another device'), findsOneWidget);
+    await tapKey(tester, 'saveContact');
+    expect(phone.state.contacts.single.ringtone, 'file:Elsewhere.mp3');
+
+    await tapKey(tester, 'contactMenu-k1');
+    await tapKey(tester, 'editContact-k1');
+    await tapKey(tester, 'contactRingtone');
+    await tester.tap(find.text('Classic').last);
+    await tester.pumpAndSettle();
+    await tapKey(tester, 'saveContact');
+    expect(phone.state.contacts.single.ringtone, 'classic');
+
+    await tapKey(tester, 'contactMenu-k1');
+    await tapKey(tester, 'editContact-k1');
+    await tapKey(tester, 'contactRingtone');
+    await tester.tap(find.text("The phone's ringtone").last);
+    await tester.pumpAndSettle();
+    await tapKey(tester, 'saveContact');
+    expect(phone.state.contacts.single.ringtone, isNull);
+  });
+
+  testWidgets('contacts are imported from a file and exported to one', (
+    tester,
+  ) async {
+    final phone = await signedIn(tester);
+    pickContactsToImport = (_) async => '/home/me/contacts.vcf';
+    pickContactsExport = (_) async => '/home/me/out.csv';
+    addTearDown(() {
+      pickContactsToImport = (_) async => null;
+      pickContactsExport = (_) async => null;
+    });
+    await go(tester, 'Contacts');
+    await tapKey(tester, 'tab-directory');
+    await tapKey(tester, 'contactsMenu');
+    expect(
+      tester
+          .widget<PopupMenuItem<void>>(find.byKey(const Key('exportContacts')))
+          .enabled,
+      isFalse,
+      reason: 'nothing to export yet',
+    );
+    await tapKey(tester, 'importContacts-account');
+    expect(phone.log, contains('import /home/me/contacts.vcf account'));
+    expect(
+      find.text(
+        '1 imported, 2 already kept\n1 left out: entry 4: nothing to call it by',
+      ),
+      findsOneWidget,
+    );
+    expect(find.text('Imported Person'), findsOneWidget, reason: 'shown');
+    expect(phone.state.contacts.single.onAccount, isTrue);
+
+    await tapKey(tester, 'contactsMenu');
+    await tapKey(tester, 'importContacts-device');
+    expect(phone.log.last, startsWith('contact'));
+    expect(phone.log, contains('import /home/me/contacts.vcf'));
+
+    await tapKey(tester, 'contactsMenu');
+    await tapKey(tester, 'exportContacts');
+    expect(phone.log, contains('export /home/me/out.csv'));
+    expect(find.text('Contacts saved to /home/me/out.csv'), findsOneWidget);
+  });
+
+  testWidgets('without an account, contacts are imported to the device', (
+    tester,
+  ) async {
+    final phone = await signedIn(
+      tester,
+      seed: (s) => s.copyWith(people: const [ann]),
+    );
+    pickContactsToImport = (_) async => '/home/me/contacts.csv';
+    addTearDown(() => pickContactsToImport = (_) async => null);
+    await go(tester, 'Contacts');
+    await tapKey(tester, 'contactsMenu');
+    expect(find.byKey(const Key('importContacts-account')), findsNothing);
+    await tapKey(tester, 'importContacts-device');
+    expect(phone.log, contains('import /home/me/contacts.csv'));
+    expect(phone.state.contacts.single.onAccount, isFalse);
+  });
+
+  testWidgets('the user leaves the directory when the tenant lets them', (
+    tester,
+  ) async {
+    final phone = await signedIn(
+      tester,
+      seed: (s) => withData(s).copyWith(directoryListed: true),
+    );
+    await go(tester, 'Settings');
+    final listed = find.byKey(const Key('directoryListed'));
+    expect(tester.widget<SwitchListTile>(listed).onChanged, isNull);
+    expect(
+      find.text('Your administrator decides whether you are listed'),
+      findsOneWidget,
+    );
+
+    phone.set(
+      phone.state.copyWith(mayChangeDirectoryListing: true),
+      'directory',
+    );
+    await tester.pumpAndSettle();
+    await tapKey(tester, 'directoryListed');
+    expect(phone.log, contains('directory false'));
+    expect(tester.widget<SwitchListTile>(listed).value, isFalse);
   });
 
   testWidgets('voicemail plays, stops, is marked heard and deleted', (

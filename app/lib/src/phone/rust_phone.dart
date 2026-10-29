@@ -242,6 +242,8 @@ class RustPhone implements PhoneApi {
       speakerVolume: s.speakerVolume,
       playing: s.playing,
       mayRecord: s.mayRecord,
+      directoryListed: s.directoryListed,
+      mayChangeDirectoryListing: s.mayChangeDirectoryListing,
       audioTest: AudioTest.parse(s.audioTest),
       audioTestLevel: s.audioTestLevel,
       contacts: [
@@ -257,6 +259,7 @@ class RustPhone implements PhoneApi {
             ],
             email: c.email,
             notes: c.notes,
+            ringtone: c.ringtone,
           ),
       ],
     );
@@ -356,11 +359,31 @@ class RustPhone implements PhoneApi {
       ],
       email: contact.email,
       notes: contact.notes,
+      ringtone: contact.ringtone,
     ),
   );
 
   @override
   Future<void> deleteContact(String id) => rust.deleteContact(id: id);
+
+  @override
+  Future<ContactsImported> importContacts(
+    String path, {
+    required bool onAccount,
+  }) async {
+    final done = await rust.importContacts(path: path, onAccount: onAccount);
+    return ContactsImported(
+      imported: done.imported,
+      duplicates: done.duplicates,
+      skipped: done.skipped,
+    );
+  }
+
+  @override
+  Future<void> exportContacts(String path) => rust.exportContacts(path: path);
+
+  @override
+  Future<void> setDirectoryListed(bool on) => rust.setDirectoryListed(on_: on);
 
   @override
   Future<void> setDnd(bool on) => rust.setDnd(on_: on);

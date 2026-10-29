@@ -102,6 +102,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   ContactNumber dco_decode_contact_number(dynamic raw);
 
   @protected
+  ContactsImported dco_decode_contacts_imported(dynamic raw);
+
+  @protected
   Direction dco_decode_direction(dynamic raw);
 
   @protected
@@ -321,6 +324,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   ContactNumber sse_decode_contact_number(SseDeserializer deserializer);
+
+  @protected
+  ContactsImported sse_decode_contacts_imported(SseDeserializer deserializer);
 
   @protected
   Direction sse_decode_direction(SseDeserializer deserializer);
@@ -568,6 +574,12 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   void sse_encode_contact_number(ContactNumber self, SseSerializer serializer);
+
+  @protected
+  void sse_encode_contacts_imported(
+    ContactsImported self,
+    SseSerializer serializer,
+  );
 
   @protected
   void sse_encode_direction(Direction self, SseSerializer serializer);
