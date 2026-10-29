@@ -52,15 +52,23 @@ class _AnvilAppState extends State<AnvilApp> {
       ? null
       : UpdateModel(widget.updates!);
 
+  /// Coming back to the app (on a desktop, its window taking focus) looks
+  /// for a newer release again.
+  AppLifecycleListener? _lifecycle;
+
   @override
   void initState() {
     super.initState();
     model.boot();
     updates?.schedule();
+    if (updates != null) {
+      _lifecycle = AppLifecycleListener(onResume: updates!.resumed);
+    }
   }
 
   @override
   void dispose() {
+    _lifecycle?.dispose();
     model.dispose();
     updates?.dispose();
     super.dispose();

@@ -447,19 +447,28 @@ class _Updates extends StatelessWidget {
                 info.reason!,
             ].join(' — '),
           ),
-          trailing: info != null && info.canInstall
-              ? FilledButton(
+          // Checking stays offered beside an update found, which may be
+          // older than what is out now.
+          trailing: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              OutlinedButton(
+                key: const Key('checkForUpdates'),
+                onPressed: busy ? null : updates.check,
+                child: Text(s.checkForUpdates),
+              ),
+              if (info != null && info.canInstall) ...[
+                const SizedBox(width: 8),
+                FilledButton(
                   key: const Key('settingsUpdateNow'),
                   onPressed: busy || model.snapshot.calls.isNotEmpty
                       ? null
                       : () => startUpdate(model, updates, scope.quit),
                   child: Text(s.updateNow),
-                )
-              : OutlinedButton(
-                  key: const Key('checkForUpdates'),
-                  onPressed: busy ? null : updates.check,
-                  child: Text(s.checkForUpdates),
                 ),
+              ],
+            ],
+          ),
         );
       },
     );

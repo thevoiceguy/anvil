@@ -1,6 +1,8 @@
 // The app updating itself, against a fake updater: found half a minute after
-// start, taken from the banner or settings (never during a call), or, for a
-// copy that cannot update itself, pointed at.
+// start and looked for again every hour and on coming back to the app, taken
+// from the banner or settings (never during a call, and always the latest
+// release, not the one first offered), or, for a copy that cannot update
+// itself, pointed at.
 
 import 'package:anvil/src/app.dart';
 import 'package:anvil/src/phone/phone_api.dart';
@@ -52,7 +54,12 @@ void main() {
 
     await tester.tap(find.byKey(const Key('updateNow')));
     await tester.pumpAndSettle();
-    expect(updates.log, ['check', 'download', 'install']);
+    expect(updates.log, [
+      'check',
+      'check',
+      'download',
+      'install',
+    ], reason: 'it looks again before fetching');
     expect(phone.log.last, 'stop phone', reason: 'it unregisters first');
     expect(shell.log.last, 'quit');
   });
@@ -148,5 +155,97 @@ void main() {
     await tester.tap(find.byKey(const Key('settingsUpdateNow')));
     await tester.pumpAndSettle();
     expect(updates.log, containsAllInOrder(['download', 'install']));
+  });
+
+  testWidgets('an older offer installs the latest release', (tester) async {
+    final (_, _, updates) = await running(tester);
+    await tester.pump(const Duration(seconds: 31));
+    await tester.pumpAndSettle();
+    expect(find.text('Anvil 0.2.0 is available'), findsOneWidget);
+
+    // A newer release came out after the offer was made.
+    updates.next = const UpdateInfo(
+      version: '0.3.0',
+      notes: 'https://example.com/v0.3.0',
+      canInstall: true,
+    );
+    await tester.tap(find.byKey(const Key('updateNow')));
+    await tester.pumpAndSettle();
+    expect(updates.log, ['check', 'check', 'download', 'install']);
+    expect(updates.downloaded, '0.3.0');
+  });
+
+  testWidgets('a release taken back is not installed', (tester) async {
+    final (_, shell, updates) = await running(tester);
+    await tester.pump(const Duration(seconds: 31));
+    await tester.pumpAndSettle();
+    updates.next = null;
+    await tester.tap(find.byKey(const Key('updateNow')));
+    await tester.pumpAndSettle();
+    expect(updates.log, ['check', 'check']);
+    expect(shell.log, isNot(contains('quit')));
+    expect(find.byKey(const Key('updateBanner')), findsNothing);
+  });
+
+  testWidgets('it looks again every hour and on coming back to the app', (
+    tester,
+  ) async {
+    final (_, _, updates) = await running(tester);
+    await tester.pump(const Duration(seconds: 31));
+    await tester.pumpAndSettle();
+    expect(updates.log, ['check']);
+
+    Future<void> comeBack() async {
+      tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.inactive);
+      tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.resumed);
+      await tester.pumpAndSettle();
+    }
+
+    // Just checked: coming back does not look again.
+    await comeBack();
+    expect(updates.log, ['check']);
+
+    // A quarter of an hour on, it does, and offers what is out now.
+    updates.next = const UpdateInfo(
+      version: '0.3.0',
+      notes: 'https://example.com/v0.3.0',
+      canInstall: true,
+    );
+    await tester.pump(const Duration(minutes: 16));
+    await comeBack();
+    expect(updates.log, ['check', 'check']);
+    expect(find.text('Anvil 0.3.0 is available'), findsOneWidget);
+
+    // And the hour comes round on its own.
+    await tester.pump(const Duration(minutes: 45));
+    await tester.pumpAndSettle();
+    expect(updates.log, ['check', 'check', 'check']);
+  });
+
+  testWidgets('settings can look again with an update already offered', (
+    tester,
+  ) async {
+    final (_, _, updates) = await running(tester);
+    await tester.pump(const Duration(seconds: 31));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Settings').last);
+    await tester.pumpAndSettle();
+    await tester.ensureVisible(find.byKey(const Key('updates')));
+    expect(find.byKey(const Key('settingsUpdateNow')), findsOneWidget);
+
+    updates.next = const UpdateInfo(
+      version: '0.3.0',
+      notes: 'https://example.com/v0.3.0',
+      canInstall: true,
+    );
+    await tester.tap(find.byKey(const Key('checkForUpdates')));
+    await tester.pumpAndSettle();
+    expect(
+      find.descendant(
+        of: find.byKey(const Key('updates')),
+        matching: find.text('Anvil 0.3.0 is available'),
+      ),
+      findsOneWidget,
+    );
   });
 }
