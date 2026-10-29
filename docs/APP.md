@@ -555,10 +555,16 @@ Three PRs:
       owner's decision;
     - the .deb, or a build run from its folder: told of the release and
       given the file.
-  - The app checks half a minute after it starts and twice a day. A banner
-    offers "Update and restart" (not during a call; the phone unregisters
-    first) or "Download" for a copy that cannot update itself, and Later.
-    Settings show the version, check by hand and say how it went.
+  - The app checks half a minute after it starts, every hour, and when it
+    comes back to the front (a desktop window taking focus) unless it
+    checked in the last quarter of an hour. A banner offers "Update and
+    restart" (not during a call; the phone unregisters first) or
+    "Download" for a copy that cannot update itself, and Later. "Update
+    and restart" looks again first, so an offer made hours ago installs
+    the release out now (v0.2.21: a copy left running offered v0.2.18 while
+    v0.2.20 was out, and would have installed it). Settings show the
+    version and check by hand, with an update offered or not, and say how
+    it went.
   - The key's private half is the repository secret and one offline copy
     kept by the owner. Lost, existing installs cannot take updates until
     they are reinstalled by hand with a build carrying a new key.

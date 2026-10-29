@@ -52,10 +52,17 @@ class UpdateModel extends ChangeNotifier {
   bool dismissed = false;
   Timer? _timer;
 
-  /// Check soon after start, then twice a day.
+  /// Set while a check is recent: coming back to the app does not look
+  /// again until it runs out.
+  Timer? _recent;
+
+  /// How long a check counts as recent.
+  static const recently = Duration(minutes: 15);
+
+  /// Check soon after start, then every hour.
   void schedule({
     Duration first = const Duration(seconds: 30),
-    Duration every = const Duration(hours: 12),
+    Duration every = const Duration(hours: 1),
   }) {
     _timer?.cancel();
     _timer = Timer(first, () {
@@ -64,12 +71,28 @@ class UpdateModel extends ChangeNotifier {
     });
   }
 
+  /// The app came back to the front: look again, unless it looked
+  /// [recently]. A release out since the last check is offered instead of
+  /// the one found then.
+  void resumed() {
+    if (_recent?.isActive ?? false) return;
+    unawaited(check());
+  }
+
   Future<void> check() async {
     if (status == UpdateStatus.checking || status == UpdateStatus.downloading) {
       return;
     }
     status = UpdateStatus.checking;
     notifyListeners();
+    await _look();
+    notifyListeners();
+  }
+
+  /// Ask for the latest release and keep what it says.
+  Future<void> _look() async {
+    _recent?.cancel();
+    _recent = Timer(recently, () {});
     try {
       final found = await api.check();
       if (found?.version != available?.version) dismissed = false;
@@ -80,11 +103,25 @@ class UpdateModel extends ChangeNotifier {
       status = UpdateStatus.failed;
       error = '$e';
     }
-    notifyListeners();
   }
 
-  /// Fetch the update and start installing it; `quit` then ends the app.
+  /// Fetch the latest release and start installing it; `quit` then ends
+  /// the app. It looks again first, so an offer made hours ago installs
+  /// what is out now, not what was out then.
   Future<void> update(Future<void> Function() quit) async {
+    if (status == UpdateStatus.checking || status == UpdateStatus.downloading) {
+      return;
+    }
+    status = UpdateStatus.downloading;
+    notifyListeners();
+    await _look();
+    final latest = available;
+    if (status != UpdateStatus.available ||
+        latest == null ||
+        !latest.canInstall) {
+      notifyListeners();
+      return;
+    }
     status = UpdateStatus.downloading;
     notifyListeners();
     try {
@@ -107,6 +144,7 @@ class UpdateModel extends ChangeNotifier {
   @override
   void dispose() {
     _timer?.cancel();
+    _recent?.cancel();
     super.dispose();
   }
 }

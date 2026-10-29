@@ -7,6 +7,10 @@ class FakeUpdates implements UpdateApi {
   Object? failWith;
   final List<String> log = [];
 
+  /// The version the last check found when [download] was called: what the
+  /// updater fetches is what it last found.
+  String? downloaded;
+
   @override
   String version() => '0.1.0';
 
@@ -18,7 +22,10 @@ class FakeUpdates implements UpdateApi {
   }
 
   @override
-  Future<void> download() async => log.add('download');
+  Future<void> download() async {
+    log.add('download');
+    downloaded = next?.version;
+  }
 
   @override
   Future<void> install() async => log.add('install');
