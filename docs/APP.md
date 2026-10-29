@@ -151,9 +151,17 @@ share sheet.
   remove one; this hides them on this device only (`settings.json`), as FCP
   keeps the call records. A number not yet a contact can be made one from
   the row's menu.
-- **Contacts.** The user's own contacts (**My contacts**), then the tenant's
-  directory with presence, searchable, busy lamps for favourites. A contact
-  has a name, a company, numbers with labels, an email and notes. Signed in
+- **Contacts.** Two tabs under one search: the user's own contacts (**My
+  contacts**, first when there are any) and the tenant's **Directory**
+  with presence and busy lamps, favourites first; the tab chosen is kept
+  while the app runs, and a contact just made is shown in My contacts. A
+  contact has a name, a company, numbers with labels, an email and notes.
+  A label is picked from a list (Mobile, Work, Home, Main, Work fax, Other;
+  kept as `mobile`, `work`, … so FCP's portal shows the same) or typed
+  after **Custom…**; a new contact's first number is Mobile, another Work.
+  A contact with one number is dialled by a tap; one with more opens to a
+  row for each number with its label and its own call button (D8 findings
+  23, 26, 28). Signed in
   to FCP, a new contact goes on the user's account (FCP's `/me/contacts`,
   v0.25.467: every app they sign in to has it, and so does their site;
   `docs/RECORD_AND_CONTACTS.md` §3) unless they pick **This device**; each
@@ -163,9 +171,10 @@ share sheet.
   (`settings.json`). Made by hand, from a call or from a recent call,
   changed and deleted from its menu. A call or a recent call from one of its
   numbers shows its name; the match is made by the app, so FCP's caller ID
-  is never rewritten. FCP says nothing when a contact changes in another
-  app: the account's contacts are read when the phone starts, when its
-  events reconnect, and on `refresh`. The CLI's `contact add account
+  is never rewritten. A change made in another app or the portal arrives
+  live (FCP's `user.contact_changed`); the account's contacts are also
+  read when the phone starts, when its events reconnect, and on
+  `refresh`. The CLI's `contact add account
   <number> <name>` puts one on the account.
 - **Voicemail.** Messages with transcription, play, mark heard, delete, the
   count on the tab.

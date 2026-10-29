@@ -139,6 +139,105 @@ Future<void> deleteContact(
   if (sure == true) await model.run(() => model.api.deleteContact(contact.id));
 }
 
+/// The labels a number is given from a list, by the value kept (the same on
+/// every device and in FCP's portal); any other is the user's own.
+const numberLabels = ['mobile', 'work', 'home', 'main', 'work fax', 'other'];
+
+/// A number's label as shown: one of the list's in the user's language, any
+/// other as written.
+String labelShown(Strings s, String label) =>
+    switch (label.trim().toLowerCase()) {
+      'mobile' => s.labelMobile,
+      'work' => s.labelWork,
+      'home' => s.labelHome,
+      'main' => s.labelMain,
+      'work fax' => s.labelWorkFax,
+      'other' => s.labelOther,
+      _ => label,
+    };
+
+/// A number's label: chosen from [numberLabels], or "Custom…" and typed.
+class NumberLabelField extends StatefulWidget {
+  const NumberLabelField({
+    super.key,
+    required this.controller,
+    required this.index,
+  });
+  final TextEditingController controller;
+  final int index;
+
+  @override
+  State<NumberLabelField> createState() => _NumberLabelFieldState();
+}
+
+class _NumberLabelFieldState extends State<NumberLabelField> {
+  static const _custom = '\u0000custom';
+
+  // A label not on the list is the user's own, typed.
+  late bool _typing = _ownLabel(widget.controller.text);
+
+  static bool _ownLabel(String label) {
+    final l = label.trim().toLowerCase();
+    return l.isNotEmpty && !numberLabels.contains(l);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final s = Strings.of(context);
+    final i = widget.index;
+    if (_typing) {
+      return TextFormField(
+        key: Key('contactLabelCustom-$i'),
+        controller: widget.controller,
+        autofocus: widget.controller.text.isEmpty,
+        decoration: InputDecoration(
+          labelText: s.contactLabelField,
+          suffixIcon: IconButton(
+            key: Key('contactLabelList-$i'),
+            tooltip: s.labelBackToList,
+            icon: const Icon(Icons.list),
+            onPressed: () => setState(() {
+              widget.controller.text = numberLabels.first;
+              _typing = false;
+            }),
+          ),
+        ),
+      );
+    }
+    final current = widget.controller.text.trim().toLowerCase();
+    return DropdownButtonFormField<String>(
+      key: Key('contactLabel-$i'),
+      initialValue: numberLabels.contains(current) ? current : null,
+      isExpanded: true,
+      decoration: InputDecoration(labelText: s.contactLabelField),
+      items: [
+        for (final l in numberLabels)
+          DropdownMenuItem(
+            key: Key('contactLabel-$i-$l'),
+            value: l,
+            child: Text(labelShown(s, l)),
+          ),
+        DropdownMenuItem(
+          key: Key('contactLabel-$i-custom'),
+          value: _custom,
+          child: Text(s.labelCustom),
+        ),
+      ],
+      onChanged: (v) {
+        if (v == null) return;
+        setState(() {
+          if (v == _custom) {
+            widget.controller.text = '';
+            _typing = true;
+          } else {
+            widget.controller.text = v;
+          }
+        });
+      },
+    );
+  }
+}
+
 /// A contact's name, company, numbers, email and notes; and, for a new one
 /// when there is an account, where it is kept.
 class ContactDialog extends StatefulWidget {
@@ -168,7 +267,10 @@ class _ContactDialogState extends State<ContactDialog> {
         TextEditingController(text: n.number),
       ),
     if (widget.contact.numbers.isEmpty)
-      (TextEditingController(), TextEditingController()),
+      (
+        TextEditingController(text: numberLabels.first),
+        TextEditingController(),
+      ),
   ];
 
   @override
@@ -284,12 +386,12 @@ class _ContactDialogState extends State<ContactDialog> {
                       const SizedBox(width: 8),
                       Expanded(
                         flex: 2,
-                        child: TextFormField(
-                          key: Key('contactLabel-$i'),
+                        // Keyed by its controller: a number removed above
+                        // does not hand its label's state to the next.
+                        child: NumberLabelField(
+                          key: ObjectKey(label),
                           controller: label,
-                          decoration: InputDecoration(
-                            labelText: s.contactLabelField,
-                          ),
+                          index: i,
                         ),
                       ),
                       if (_numbers.length > 1)
@@ -307,9 +409,12 @@ class _ContactDialogState extends State<ContactDialog> {
                     key: const Key('addNumber'),
                     icon: const Icon(Icons.add),
                     label: Text(s.addNumberButton),
+                    // A second number is most often work.
                     onPressed: () => setState(
                       () => _numbers.add((
-                        TextEditingController(),
+                        TextEditingController(
+                          text: _numbers.isEmpty ? 'mobile' : 'work',
+                        ),
                         TextEditingController(),
                       )),
                     ),
@@ -348,8 +453,9 @@ class _ContactDialogState extends State<ContactDialog> {
   }
 }
 
-/// A contact in a list: tapped, its first number is dialled; its menu
-/// edits, moves to the account or deletes it. With an account, each is
+/// A contact in a list. With one number, tapped it is dialled; with more,
+/// it opens to a row for each, labelled, to choose the one to dial. Its
+/// menu edits, moves to the account or deletes it. With an account, each is
 /// marked with where it is kept.
 class ContactTile extends StatelessWidget {
   const ContactTile({
@@ -372,35 +478,101 @@ class ContactTile extends StatelessWidget {
         .take(2)
         .map((w) => w.characters.first.toUpperCase())
         .join();
-    final numbers = contact.numbers
-        .map((n) => n.label.isEmpty ? n.number : '${n.number} (${n.label})')
-        .join(' · ');
-    final dial = contact.dial;
     final hasAccount = model.snapshot.hasAccount;
     final place = contact.onAccount ? s.contactOnAccount : s.contactOnDevice;
-    return ListTile(
-      key: Key('contact-${contact.id}'),
-      leading: CircleAvatar(radius: 20, child: Text(initials)),
-      title: Row(
-        children: [
-          Flexible(child: Text(contact.name, overflow: TextOverflow.ellipsis)),
-          if (hasAccount)
-            Padding(
-              padding: const EdgeInsets.only(left: 6),
-              child: Tooltip(
-                message: place,
-                child: Icon(
-                  contact.onAccount ? Icons.cloud_outlined : Icons.smartphone,
-                  key: Key('contactPlace-${contact.id}'),
-                  size: 16,
-                  semanticLabel: place,
-                ),
+    final numbers = contact.numbers
+        .where((n) => n.number.trim().isNotEmpty)
+        .toList();
+    final leading = CircleAvatar(radius: 20, child: Text(initials));
+    final title = Row(
+      children: [
+        Flexible(child: Text(contact.name, overflow: TextOverflow.ellipsis)),
+        if (hasAccount)
+          Padding(
+            padding: const EdgeInsets.only(left: 6),
+            child: Tooltip(
+              message: place,
+              child: Icon(
+                contact.onAccount ? Icons.cloud_outlined : Icons.smartphone,
+                key: Key('contactPlace-${contact.id}'),
+                size: 16,
+                semanticLabel: place,
               ),
             ),
+          ),
+      ],
+    );
+    String shown(ContactNumber n) => n.label.trim().isEmpty
+        ? n.number
+        : '${n.number} (${labelShown(s, n.label)})';
+    final menu = PopupMenuButton<void>(
+      key: Key('contactMenu-${contact.id}'),
+      tooltip: s.moreButton,
+      itemBuilder: (_) => [
+        PopupMenuItem(
+          key: Key('editContact-${contact.id}'),
+          onTap: () => editContact(context, model, contact: contact),
+          child: Text(s.editContactButton),
+        ),
+        if (hasAccount && !contact.onAccount)
+          PopupMenuItem(
+            key: Key('moveContact-${contact.id}'),
+            onTap: () => moveContactToAccount(model, contact),
+            child: Text(s.moveContactToAccountButton),
+          ),
+        PopupMenuItem(
+          key: Key('deleteContact-${contact.id}'),
+          onTap: () => deleteContact(context, model, contact),
+          child: Text(s.deleteButton),
+        ),
+      ],
+    );
+
+    if (numbers.length > 1) {
+      return ExpansionTile(
+        key: Key('contact-${contact.id}'),
+        leading: leading,
+        title: title,
+        subtitle: Text(
+          [?contact.company, s.contactNumbers(numbers.length)].join(' — '),
+        ),
+        trailing: Wrap(
+          spacing: 4,
+          crossAxisAlignment: WrapCrossAlignment.center,
+          children: [const Icon(Icons.expand_more), menu],
+        ),
+        childrenPadding: const EdgeInsets.only(left: 56),
+        children: [
+          for (final (i, n) in numbers.indexed)
+            ListTile(
+              key: Key('contactNumberRow-${contact.id}-$i'),
+              dense: true,
+              title: Text(n.number),
+              subtitle: n.label.trim().isEmpty
+                  ? null
+                  : Text(labelShown(s, n.label)),
+              trailing: IconButton(
+                key: Key('dialContact-${contact.id}-$i'),
+                tooltip: s.callPerson(shown(n)),
+                icon: const Icon(Icons.call),
+                onPressed: () => onDial(n.number),
+              ),
+              onTap: () => onDial(n.number),
+            ),
         ],
-      ),
+      );
+    }
+
+    final dial = numbers.isEmpty ? null : numbers.single.number;
+    return ListTile(
+      key: Key('contact-${contact.id}'),
+      leading: leading,
+      title: title,
       subtitle: Text(
-        [?contact.company, if (numbers.isNotEmpty) numbers].join(' — '),
+        [
+          ?contact.company,
+          if (numbers.isNotEmpty) shown(numbers.single),
+        ].join(' — '),
       ),
       trailing: Wrap(
         spacing: 4,
@@ -412,28 +584,7 @@ class ContactTile extends StatelessWidget {
               icon: const Icon(Icons.call),
               onPressed: () => onDial(dial),
             ),
-          PopupMenuButton<void>(
-            key: Key('contactMenu-${contact.id}'),
-            tooltip: s.moreButton,
-            itemBuilder: (_) => [
-              PopupMenuItem(
-                key: Key('editContact-${contact.id}'),
-                onTap: () => editContact(context, model, contact: contact),
-                child: Text(s.editContactButton),
-              ),
-              if (hasAccount && !contact.onAccount)
-                PopupMenuItem(
-                  key: Key('moveContact-${contact.id}'),
-                  onTap: () => moveContactToAccount(model, contact),
-                  child: Text(s.moveContactToAccountButton),
-                ),
-              PopupMenuItem(
-                key: Key('deleteContact-${contact.id}'),
-                onTap: () => deleteContact(context, model, contact),
-                child: Text(s.deleteButton),
-              ),
-            ],
-          ),
+          menu,
         ],
       ),
       onTap: dial == null ? null : () => onDial(dial),

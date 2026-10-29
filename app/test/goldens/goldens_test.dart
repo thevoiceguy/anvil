@@ -33,7 +33,10 @@ PhoneSnapshot seeded(PhoneSnapshot s) => s.copyWith(
       id: 'contact-2',
       onAccount: true,
       name: 'Kim Park',
-      numbers: [ContactNumber(label: 'work', number: '0298765432')],
+      numbers: [
+        ContactNumber(label: 'work', number: '0298765432'),
+        ContactNumber(label: 'mobile', number: '0400111222'),
+      ],
     ),
   ],
   people: const [
