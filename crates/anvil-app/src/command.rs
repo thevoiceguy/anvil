@@ -82,6 +82,20 @@ pub enum Command {
     SaveContact { contact: crate::state::Contact },
     /// Delete a contact, from this device or from the account.
     DeleteContact { id: String },
+    /// Read the contacts in a vCard or CSV file into this device's
+    /// contacts or, with `on_account`, the FCP account's. One already kept
+    /// there, by name and numbers, is not made again.
+    ImportContacts {
+        path: String,
+        #[serde(default)]
+        on_account: bool,
+    },
+    /// Write every contact, the device's and the account's, to a file: CSV
+    /// when its name ends `.csv`, else vCard.
+    ExportContacts { path: String },
+    /// Be listed in the tenant's directory, or not (needs FCP, and the
+    /// tenant's leave: `directory.may_change`).
+    DirectoryListed { on: bool },
     /// Mark a voicemail message heard.
     Heard { id: String },
     /// Delete a voicemail message.
@@ -175,8 +189,23 @@ pub struct Response {
     /// The phone, for `status`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub state: Option<State>,
+    /// What `import_contacts` did.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub imported: Option<Imported>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub error: Option<String>,
+}
+
+/// What a contacts import did.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Imported {
+    /// Contacts made.
+    pub imported: u32,
+    /// Entries already kept, or twice in the file: not made again.
+    pub duplicates: u32,
+    /// Entries left out, each with its place in the file and why.
+    #[serde(default)]
+    pub skipped: Vec<String>,
 }
 
 impl Response {
@@ -185,6 +214,7 @@ impl Response {
             ok: true,
             call: None,
             state: None,
+            imported: None,
             error: None,
         }
     }
@@ -194,6 +224,7 @@ impl Response {
             ok: false,
             call: None,
             state: None,
+            imported: None,
             error: Some(message.into()),
         }
     }
@@ -205,6 +236,8 @@ impl Command {
     /// `park`, `record on`, `record off`, `dnd on`, `forward busy 1003`,
     /// `forward all off`, `contact add 0412345678 Jo Smith`,
     /// `contact add account 0412345678 Jo Smith`, `contact delete <id>`,
+    /// `contact import [account] <file>`, `contact export <file>`,
+    /// `directory off`,
     /// `waiting off`, `heard <id>`, `delete <id>`, `play <id>`, `stop`,
     /// `favourite alice`,
     /// `unfavourite alice`, `recents clear`, `recents hide <id>`, `audio in USB Headset`, `audio out default`,
@@ -266,6 +299,9 @@ impl Command {
             "dnd" => Command::Dnd {
                 on: on_off(words.get(1)).ok_or("dnd needs on or off")?,
             },
+            "directory" => Command::DirectoryListed {
+                on: on_off(words.get(1)).ok_or("directory needs on or off")?,
+            },
             "waiting" => Command::Calling {
                 update: anvil_fcp::CallingUpdate {
                     call_waiting: Some(on_off(words.get(1)).ok_or("waiting needs on or off")?),
@@ -322,15 +358,32 @@ impl Command {
                             }],
                             email: None,
                             notes: None,
+                            ringtone: None,
                         },
                     }
                 }
+                Some("import") => {
+                    // `contact import [account] <file>`.
+                    let on_account = words
+                        .get(2)
+                        .is_some_and(|w| w.eq_ignore_ascii_case("account"));
+                    let at = if on_account { 3 } else { 2 };
+                    Command::ImportContacts {
+                        path: rest(&words, at).ok_or("contact import needs a file")?,
+                        on_account,
+                    }
+                }
+                Some("export") => Command::ExportContacts {
+                    path: rest(&words, 2).ok_or("contact export needs a file")?,
+                },
                 Some("delete") => Command::DeleteContact {
                     id: need(words.get(2), "a contact id")?,
                 },
                 _ => {
                     return Err(
-                        "contact add [account] <number> <name>, or contact delete <id>".into(),
+                        "contact add [account] <number> <name>, contact delete <id>, \
+                         contact import [account] <file> or contact export <file>"
+                            .into(),
                     )
                 }
             },

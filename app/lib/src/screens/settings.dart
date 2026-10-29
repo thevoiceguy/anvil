@@ -82,6 +82,20 @@ class SettingsPage extends StatelessWidget {
               () => model.api.setCalling(CallingChange(callWaiting: on)),
             ),
           ),
+          if (snap.directoryListed case final listed?)
+            SwitchListTile(
+              key: const Key('directoryListed'),
+              title: Text(s.directoryListed),
+              subtitle: Text(
+                snap.mayChangeDirectoryListing
+                    ? s.directoryListedSubtitle
+                    : s.directoryListedLocked,
+              ),
+              value: listed,
+              onChanged: snap.mayChangeDirectoryListing
+                  ? (on) => model.run(() => model.api.setDirectoryListed(on))
+                  : null,
+            ),
           header(s.settingsForwarding),
           for (final when in Forward.values)
             ListTile(

@@ -7,7 +7,8 @@ use std::time::Duration;
 
 use anvil_app::control::{Client, Endpoint};
 use anvil_app::{
-    AudioKind, AudioProcessing, AudioVolume, CallState, Change, Command, Phone, PhoneConfig,
+    AudioKind, AudioProcessing, AudioVolume, CallState, Change, Command, Contact, ContactNumber,
+    Phone, PhoneConfig,
 };
 use anvil_core::audio::{
     AudioFormat, AudioFrame, AudioHost, AudioSink, AudioSource, DeviceInfo, Processing, Volume,
@@ -1212,4 +1213,258 @@ async fn a_ringtone_from_a_file_rings_is_kept_and_can_be_removed() {
     assert!(!dir.join("app").join("ringtones").join("Bells.mp3").exists());
     alice.shutdown().await;
     let _ = std::fs::remove_dir_all(dir);
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_contacts_own_ringtone_rings_for_their_calls() {
+    log();
+    let dir = std::env::temp_dir().join(format!("anvil-app-contact-tone-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).unwrap();
+    let settings = dir.join("app").join("settings.json");
+    // A ringtone that is silence, so it is heard as no ringing at all.
+    let hush = dir.join("Hush.wav");
+    std::fs::write(&hush, wav(8_000)).unwrap();
+    let heard = Arc::new(Heard::default());
+    let alice = start(
+        "alice",
+        "127.0.0.42",
+        Box::new(Listening(Arc::clone(&heard))),
+        Some(settings.clone()),
+        true,
+        None,
+    )
+    .await;
+    let bob = phone("bob", "127.0.0.43").await;
+    let carol = phone("carol", "127.0.0.44").await;
+    for command in [
+        Command::RingtoneFile {
+            path: hush.display().to_string(),
+        },
+        Command::Ringtone {
+            id: Some("anvil".into()),
+        },
+    ] {
+        assert!(alice.execute(command).await.unwrap().ok);
+    }
+    // Bob is a contact who rings with the silent one.
+    let mut contact = Contact {
+        id: String::new(),
+        on_account: false,
+        name: "Bob Brown".into(),
+        company: None,
+        numbers: vec![ContactNumber {
+            label: "work".into(),
+            number: "bob".into(),
+        }],
+        email: None,
+        notes: None,
+        ringtone: Some("file:Hush.wav".into()),
+    };
+    assert!(
+        alice
+            .execute(Command::SaveContact {
+                contact: contact.clone()
+            })
+            .await
+            .unwrap()
+            .ok
+    );
+    contact.id = alice.state().contacts[0].id.clone();
+    assert_eq!(
+        alice.state().contacts[0].ringtone.as_deref(),
+        Some("file:Hush.wav")
+    );
+    // The preview of Anvil's is over.
+    tokio::time::sleep(Duration::from_secs(2)).await;
+
+    assert!(
+        !rings(&alice, &heard, &bob).await,
+        "Bob's call rings with his ringtone"
+    );
+    assert!(
+        rings(&alice, &heard, &carol).await,
+        "Carol's with the phone's"
+    );
+    // A ringtone this device does not have: the phone's.
+    contact.ringtone = Some("file:Elsewhere.mp3".into());
+    assert!(
+        alice
+            .execute(Command::SaveContact { contact })
+            .await
+            .unwrap()
+            .ok
+    );
+    assert!(
+        rings(&alice, &heard, &bob).await,
+        "Bob's call rings with the phone's"
+    );
+
+    alice.shutdown().await;
+    bob.shutdown().await;
+    carol.shutdown().await;
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn contacts_are_read_from_and_written_to_files() {
+    log();
+    let dir = std::env::temp_dir().join(format!("anvil-app-contact-files-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).unwrap();
+    let alice = phone_with(
+        "alice",
+        "127.0.0.45",
+        Box::new(Quiet),
+        Some(dir.join("settings.json")),
+    )
+    .await;
+    assert!(
+        alice
+            .execute(Command::parse_line("contact add 1002 Bob Brown").unwrap())
+            .await
+            .unwrap()
+            .ok
+    );
+    // As a phone writes them: Bob again, Jo, the same Jo twice, and an
+    // entry with nothing to call it by.
+    let vcard = dir.join("from phone.vcf");
+    std::fs::write(
+        &vcard,
+        "BEGIN:VCARD\r\nVERSION:3.0\r\nFN:Bob Brown\r\nTEL;TYPE=WORK:1002\r\nEND:VCARD\r\n\
+         BEGIN:VCARD\r\nVERSION:3.0\r\nFN:Jo Smith\r\nORG:Acme\r\n\
+         TEL;TYPE=CELL:+61 412 345 678\r\nTEL;TYPE=WORK:02 9999 8888\r\n\
+         EMAIL:jo@example.com\r\nEND:VCARD\r\n\
+         BEGIN:VCARD\r\nVERSION:3.0\r\nFN:Jo Smith\r\nTEL;TYPE=WORK:02 9999 8888\r\n\
+         TEL;TYPE=CELL:+61 412 345 678\r\nEND:VCARD\r\n\
+         BEGIN:VCARD\r\nVERSION:3.0\r\nNOTE:nobody\r\nEND:VCARD\r\n",
+    )
+    .unwrap();
+    let done = alice
+        .execute(Command::parse_line(&format!("contact import {}", vcard.display())).unwrap())
+        .await
+        .unwrap();
+    let imported = done.imported.expect("what the import did");
+    assert_eq!(
+        (imported.imported, imported.duplicates),
+        (1, 2),
+        "{imported:?}"
+    );
+    assert_eq!(imported.skipped.len(), 1, "{imported:?}");
+    let contacts = alice.state().contacts;
+    let names: Vec<_> = contacts.iter().map(|c| c.name.as_str()).collect();
+    assert_eq!(names, ["Bob Brown", "Jo Smith"]);
+    let jo = &contacts[1];
+    assert!(!jo.on_account);
+    assert_eq!(jo.company.as_deref(), Some("Acme"));
+    let numbers: Vec<_> = jo
+        .numbers
+        .iter()
+        .map(|n| (n.label.as_str(), n.number.as_str()))
+        .collect();
+    assert_eq!(
+        numbers,
+        [("mobile", "+61 412 345 678"), ("work", "02 9999 8888")]
+    );
+    // The same file again makes nothing.
+    let again = alice
+        .execute(Command::ImportContacts {
+            path: vcard.display().to_string(),
+            on_account: false,
+        })
+        .await
+        .unwrap()
+        .imported
+        .unwrap();
+    assert_eq!((again.imported, again.duplicates), (0, 3));
+    // Without FCP there is no account to import to.
+    assert!(alice
+        .execute(Command::ImportContacts {
+            path: vcard.display().to_string(),
+            on_account: true,
+        })
+        .await
+        .is_err());
+
+    // Written out as either, and read back by another phone as they were.
+    for name in ["out.vcf", "out.csv"] {
+        let file = dir.join(name);
+        assert!(
+            alice
+                .execute(Command::ExportContacts {
+                    path: file.display().to_string()
+                })
+                .await
+                .unwrap()
+                .ok
+        );
+        let text = std::fs::read_to_string(&file).unwrap();
+        assert_eq!(
+            text.starts_with("BEGIN:VCARD"),
+            name.ends_with(".vcf"),
+            "{text}"
+        );
+        let other_dir = dir.join(format!("other-{name}"));
+        let other = phone_with(
+            "carol",
+            "127.0.0.46",
+            Box::new(Quiet),
+            Some(other_dir.join("settings.json")),
+        )
+        .await;
+        let read = other
+            .execute(Command::ImportContacts {
+                path: file.display().to_string(),
+                on_account: false,
+            })
+            .await
+            .unwrap()
+            .imported
+            .unwrap();
+        assert_eq!(read.imported, 2, "{name}: {read:?}");
+        let theirs: Vec<_> = other
+            .state()
+            .contacts
+            .into_iter()
+            .map(|c| (c.name, c.company, c.numbers, c.email))
+            .collect();
+        // A number with no label is written as another number.
+        let ours: Vec<_> = alice
+            .state()
+            .contacts
+            .into_iter()
+            .map(|mut c| {
+                for n in c.numbers.iter_mut().filter(|n| n.label.is_empty()) {
+                    n.label = "other".into();
+                }
+                (c.name, c.company, c.numbers, c.email)
+            })
+            .collect();
+        assert_eq!(theirs, ours, "{name}");
+        other.shutdown().await;
+    }
+    alice.shutdown().await;
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+/// Whether a call from `caller` is heard ringing at `alice` (then hung up).
+async fn rings(alice: &Phone, heard: &Heard, caller: &Phone) -> bool {
+    caller
+        .execute(Command::Call {
+            target: format!("sip:alice@{}", alice.sip_address()),
+        })
+        .await
+        .unwrap();
+    until(alice, "the call rings at Alice", |s| {
+        s.calls.iter().any(|c| c.state == CallState::Ringing)
+    })
+    .await;
+    let rang = grows(|| heard.ringing(), Duration::from_secs(1)).await;
+    caller
+        .execute(Command::Hangup { call: None })
+        .await
+        .unwrap();
+    until(alice, "the call gone", |s| s.calls.is_empty()).await;
+    tokio::time::sleep(Duration::from_millis(300)).await;
+    rang
 }

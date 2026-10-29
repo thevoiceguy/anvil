@@ -298,6 +298,7 @@ class FakePhone implements PhoneApi {
       numbers: contact.numbers,
       email: contact.email,
       notes: contact.notes,
+      ringtone: contact.ringtone,
     );
     log.add('contact ${saved.id} ${saved.name} ${saved.dial ?? ''}');
     final contacts = [
@@ -317,6 +318,40 @@ class FakePhone implements PhoneApi {
       ),
       'contacts',
     );
+  }
+
+  @override
+  Future<ContactsImported> importContacts(
+    String path, {
+    required bool onAccount,
+  }) async {
+    _refuse();
+    log.add('import $path${onAccount ? ' account' : ''}');
+    await saveContact(
+      Contact(
+        onAccount: onAccount,
+        name: 'Imported Person',
+        numbers: const [ContactNumber(label: 'mobile', number: '0400111222')],
+      ),
+    );
+    return const ContactsImported(
+      imported: 1,
+      duplicates: 2,
+      skipped: ['entry 4: nothing to call it by'],
+    );
+  }
+
+  @override
+  Future<void> exportContacts(String path) async {
+    _refuse();
+    log.add('export $path');
+  }
+
+  @override
+  Future<void> setDirectoryListed(bool on) async {
+    _refuse();
+    log.add('directory $on');
+    set(state.copyWith(directoryListed: on), 'directory');
   }
 
   @override

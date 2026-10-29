@@ -135,6 +135,7 @@ class Contact {
     this.numbers = const [],
     this.email,
     this.notes,
+    this.ringtone,
   });
 
   /// Empty in a new one; the phone (or FCP) gives it one when saved.
@@ -149,6 +150,10 @@ class Contact {
   final String? email;
   final String? notes;
 
+  /// The ringtone a call from one of its numbers rings with, by id; null
+  /// (or one this device does not have) rings with the phone's.
+  final String? ringtone;
+
   /// What to dial: the first number, when it has one.
   String? get dial => numbers.isEmpty ? null : numbers.first.number;
 
@@ -161,7 +166,26 @@ class Contact {
     numbers: numbers,
     email: email,
     notes: notes,
+    ringtone: ringtone,
   );
+}
+
+/// What a contacts import did.
+class ContactsImported {
+  const ContactsImported({
+    this.imported = 0,
+    this.duplicates = 0,
+    this.skipped = const [],
+  });
+
+  /// Contacts made.
+  final int imported;
+
+  /// Entries already kept, or twice in the file: not made again.
+  final int duplicates;
+
+  /// Entries left out, each with its place in the file and why.
+  final List<String> skipped;
 }
 
 /// One of a contact's numbers: what it is (mobile, work, …) and what to
@@ -419,6 +443,8 @@ class PhoneSnapshot {
     this.playing,
     this.mayRecord = false,
     this.contacts = const [],
+    this.directoryListed,
+    this.mayChangeDirectoryListing = false,
     this.audioTest,
     this.audioTestLevel = 0,
   });
@@ -478,6 +504,13 @@ class PhoneSnapshot {
   /// The user's contacts, by name: on this device and, signed in to FCP,
   /// on their account.
   final List<Contact> contacts;
+
+  /// Signed in to FCP: whether the user is listed in the tenant's
+  /// directory; null until FCP says.
+  final bool? directoryListed;
+
+  /// The tenant lets the user take themselves out of the directory.
+  final bool mayChangeDirectoryListing;
 
   /// A test of the microphone or a speaker under way, null when none is.
   final AudioTest? audioTest;
@@ -550,6 +583,8 @@ class PhoneSnapshot {
     bool clearPlaying = false,
     bool? mayRecord,
     List<Contact>? contacts,
+    bool? directoryListed,
+    bool? mayChangeDirectoryListing,
     AudioTest? audioTest,
     bool clearAudioTest = false,
     int? audioTestLevel,
@@ -581,6 +616,9 @@ class PhoneSnapshot {
     playing: clearPlaying ? null : playing ?? this.playing,
     mayRecord: mayRecord ?? this.mayRecord,
     contacts: contacts ?? this.contacts,
+    directoryListed: directoryListed ?? this.directoryListed,
+    mayChangeDirectoryListing:
+        mayChangeDirectoryListing ?? this.mayChangeDirectoryListing,
     audioTest: clearAudioTest ? null : audioTest ?? this.audioTest,
     audioTestLevel: audioTestLevel ?? this.audioTestLevel,
   );
@@ -774,6 +812,21 @@ abstract class PhoneApi {
 
   /// Delete a contact, from this device or from the account.
   Future<void> deleteContact(String id);
+
+  /// Read the contacts in a vCard or CSV file into this device's contacts
+  /// or (`onAccount`) the account's; one already kept is not made again.
+  Future<ContactsImported> importContacts(
+    String path, {
+    required bool onAccount,
+  });
+
+  /// Write every contact to a file: CSV when its name ends `.csv`, else
+  /// vCard.
+  Future<void> exportContacts(String path);
+
+  /// Be listed in the tenant's directory, or not (when the tenant lets the
+  /// user choose).
+  Future<void> setDirectoryListed(bool on);
 
   Future<void> setDnd(bool on);
   Future<void> setCalling(CallingChange change);

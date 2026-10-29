@@ -401,10 +401,23 @@ async fn tell_phone(cli: &Cli, command: anvil_app::Command) -> Result<()> {
         print_state(&state);
     } else if let Some(call) = answer.call {
         println!("calling (call {call})");
+    } else if let Some(imported) = answer.imported {
+        print_imported(&imported);
     } else {
         println!("ok");
     }
     Ok(())
+}
+
+/// What a contacts import did.
+fn print_imported(imported: &anvil_app::Imported) {
+    println!(
+        "{} imported, {} already kept",
+        imported.imported, imported.duplicates
+    );
+    for skipped in &imported.skipped {
+        println!("  left out: {skipped}");
+    }
 }
 
 /// The running phone's changes, until it goes or Ctrl+C.
@@ -594,6 +607,18 @@ fn print_change(change: &anvil_app::Change) {
             }
         ),
         C::Contacts { count } => println!("[contacts] {count}"),
+        C::Directory { listing } => match listing {
+            Some(l) => println!(
+                "[directory] {}{}",
+                if l.listed { "listed" } else { "not listed" },
+                if l.may_change {
+                    " (directory on|off)"
+                } else {
+                    ""
+                }
+            ),
+            None => println!("[directory] -"),
+        },
         C::AudioTest { test } => match test {
             Some(t) if t.stage == anvil_app::AudioTestStage::Recording => {
                 println!("[test] recording {}", "#".repeat(usize::from(t.level / 5)))
@@ -645,9 +670,10 @@ async fn run_phone(cli: &Cli) -> Result<()> {
                 }
                 match anvil_app::Command::parse_line(line) {
                     Ok(command) => match phone.execute(command).await {
-                        Ok(answer) => match (answer.state, answer.call) {
-                            (Some(state), _) => print_state(&state),
-                            (None, Some(call)) => println!("calling (call {call})"),
+                        Ok(answer) => match (answer.state, answer.call, answer.imported) {
+                            (Some(state), _, _) => print_state(&state),
+                            (None, Some(call), _) => println!("calling (call {call})"),
+                            (None, None, Some(imported)) => print_imported(&imported),
                             _ => println!("ok"),
                         },
                         Err(e) => println!("! {e}"),

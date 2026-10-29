@@ -1352,6 +1352,96 @@ abstract class Strings {
   /// In en, this message translates to:
   /// **'Delete {name} from your contacts? They go from every app you sign in to.'**
   String deleteAccountContactConfirm(String name);
+
+  /// No description provided for @contactsMenu.
+  ///
+  /// In en, this message translates to:
+  /// **'Import and export'**
+  String get contactsMenu;
+
+  /// No description provided for @contactsImport.
+  ///
+  /// In en, this message translates to:
+  /// **'Import contacts…'**
+  String get contactsImport;
+
+  /// No description provided for @contactsImportToAccount.
+  ///
+  /// In en, this message translates to:
+  /// **'Import to my account…'**
+  String get contactsImportToAccount;
+
+  /// No description provided for @contactsImportToDevice.
+  ///
+  /// In en, this message translates to:
+  /// **'Import to this device…'**
+  String get contactsImportToDevice;
+
+  /// No description provided for @contactsExport.
+  ///
+  /// In en, this message translates to:
+  /// **'Export contacts…'**
+  String get contactsExport;
+
+  /// No description provided for @contactsFileType.
+  ///
+  /// In en, this message translates to:
+  /// **'Contacts (vCard or CSV)'**
+  String get contactsFileType;
+
+  /// No description provided for @contactsImported.
+  ///
+  /// In en, this message translates to:
+  /// **'{imported} imported, {duplicates} already kept'**
+  String contactsImported(int imported, int duplicates);
+
+  /// No description provided for @contactsImportSkipped.
+  ///
+  /// In en, this message translates to:
+  /// **'{count} left out: {first}'**
+  String contactsImportSkipped(int count, String first);
+
+  /// No description provided for @contactsExported.
+  ///
+  /// In en, this message translates to:
+  /// **'Contacts saved to {path}'**
+  String contactsExported(String path);
+
+  /// No description provided for @contactRingtoneField.
+  ///
+  /// In en, this message translates to:
+  /// **'Ringtone'**
+  String get contactRingtoneField;
+
+  /// No description provided for @contactRingtoneDefault.
+  ///
+  /// In en, this message translates to:
+  /// **'The phone\'s ringtone'**
+  String get contactRingtoneDefault;
+
+  /// No description provided for @contactRingtoneElsewhere.
+  ///
+  /// In en, this message translates to:
+  /// **'Chosen on another device'**
+  String get contactRingtoneElsewhere;
+
+  /// No description provided for @directoryListed.
+  ///
+  /// In en, this message translates to:
+  /// **'Listed in the directory'**
+  String get directoryListed;
+
+  /// No description provided for @directoryListedSubtitle.
+  ///
+  /// In en, this message translates to:
+  /// **'People in your organisation can find you under People'**
+  String get directoryListedSubtitle;
+
+  /// No description provided for @directoryListedLocked.
+  ///
+  /// In en, this message translates to:
+  /// **'Your administrator decides whether you are listed'**
+  String get directoryListedLocked;
 }
 
 class _StringsDelegate extends LocalizationsDelegate<Strings> {

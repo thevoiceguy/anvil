@@ -93,6 +93,7 @@ pub(crate) fn contact(c: &PersonalContact) -> Contact {
             .collect(),
         email: c.email.clone(),
         notes: c.notes.clone(),
+        ringtone: c.ringtone.clone(),
     }
 }
 
@@ -111,18 +112,36 @@ pub(crate) fn contact_fields(c: &Contact) -> ContactFields {
             .collect(),
         email: c.email.clone(),
         notes: c.notes.clone(),
+        ringtone: c.ringtone.clone(),
     }
 }
 
 /// Read everything again.
 pub(crate) async fn refresh_all(inner: &Inner, fcp: &FcpClient) {
     tokio::join!(
+        refresh_softphone(inner, fcp),
         refresh_calling(inner, fcp),
         refresh_recents(inner, fcp),
         refresh_people(inner, fcp),
         refresh_voicemail(inner, fcp),
         refresh_contacts(inner, fcp),
     );
+}
+
+/// What FCP tells the app: the feature codes, whether the user may record,
+/// their listing in the directory.
+pub(crate) async fn refresh_softphone(inner: &Inner, fcp: &FcpClient) {
+    match fcp.softphone().await {
+        Ok(config) => {
+            inner.set_may_record(config.may_record);
+            inner.set_directory(Some(crate::DirectoryListing {
+                listed: config.directory_listed,
+                may_change: config.may_change_directory_listing,
+            }));
+            *inner.features.lock() = config.feature_codes;
+        }
+        Err(e) => tracing::debug!(%e, "softphone settings not read"),
+    }
 }
 
 pub(crate) async fn refresh_calling(inner: &Inner, fcp: &FcpClient) {
@@ -296,11 +315,13 @@ enum Refresh {
     Contacts,
 }
 
-/// The user part of an address (`sip:alice@example.com` → `alice`).
+/// The user part of an address (`sip:alice@example.com` → `alice`,
+/// `tel:+61412345678` → `+61412345678`).
 pub(crate) fn user_of(aor: &str) -> &str {
     let rest = aor
         .strip_prefix("sips:")
         .or_else(|| aor.strip_prefix("sip:"))
+        .or_else(|| aor.strip_prefix("tel:"))
         .unwrap_or(aor);
     rest.split(['@', ';']).next().unwrap_or(rest)
 }

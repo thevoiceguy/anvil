@@ -41,6 +41,9 @@ pub struct State {
     /// in to FCP, those kept on their account.
     #[serde(default)]
     pub contacts: Vec<Contact>,
+    /// Signed in to FCP: whether the user is in the tenant's directory.
+    #[serde(default)]
+    pub directory: Option<DirectoryListing>,
     /// A test of the microphone or a speaker under way, if any.
     #[serde(default)]
     pub audio_test: Option<AudioTest>,
@@ -89,6 +92,28 @@ pub struct Contact {
     pub email: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub notes: Option<String>,
+    /// The ringtone a call from one of its numbers rings with, by id
+    /// (`anvil`, `brand:…`, `file:…`); `None`, or one this device does not
+    /// have, rings with the phone's own.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub ringtone: Option<String>,
+}
+
+impl Contact {
+    /// Whether `remote` (an address or a number, as a call shows it) is
+    /// one of its numbers.
+    pub fn has_number(&self, remote: &str) -> bool {
+        let dialled = crate::data::user_of(remote);
+        self.numbers.iter().any(|n| n.number == dialled)
+    }
+}
+
+/// Whether the user is in the tenant's directory, and may change that
+/// (FCP says; `docs/APP.md` §Settings).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub struct DirectoryListing {
+    pub listed: bool,
+    pub may_change: bool,
 }
 
 /// One of a contact's numbers: what it is (`mobile`, `work`, …) and what
@@ -136,6 +161,7 @@ impl State {
             push: Push::Off,
             may_record: false,
             contacts: Vec::new(),
+            directory: None,
             audio_test: None,
         }
     }
@@ -491,6 +517,10 @@ pub enum Change {
     /// The contacts changed, on this device or on the account.
     Contacts {
         count: u32,
+    },
+    /// The user's listing in the tenant's directory, as FCP said.
+    Directory {
+        listing: Option<DirectoryListing>,
     },
     /// An audio test moved on (or, `None`, ended).
     AudioTest {

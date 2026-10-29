@@ -12,6 +12,7 @@
 
 mod clip;
 mod command;
+mod contact_file;
 pub mod control;
 mod data;
 pub mod managed;
@@ -38,11 +39,11 @@ use tokio::sync::{broadcast, RwLock};
 
 pub use anvil_fcp::{CallingSettings, CallingUpdate};
 pub use clip::{decode_wav, Clip};
-pub use command::{AudioKind, Command, Response};
+pub use command::{AudioKind, Command, Imported, Response};
 pub use state::{
     AudioDevice, AudioDevices, AudioProcessing, AudioTest, AudioTestStage, AudioVolume, Brand,
-    CallState, CallView, Change, Contact, ContactNumber, Direction, MessageWaiting, Person, Push,
-    Quality, Recent, Registration, Ringtone, State, Voicemail,
+    CallState, CallView, Change, Contact, ContactNumber, Direction, DirectoryListing,
+    MessageWaiting, Person, Push, Quality, Recent, Registration, Ringtone, State, Voicemail,
 };
 
 use settings::LocalSettings;
@@ -57,6 +58,9 @@ pub enum PhoneError {
     #[error("{0}")]
     Refused(String),
 }
+
+/// The biggest contacts file read, as FCP takes.
+const CONTACT_FILE_LIMIT: usize = 10 * 1024 * 1024;
 
 /// How to start the phone.
 pub struct PhoneConfig {
@@ -212,13 +216,7 @@ impl Phone {
             let inner = Arc::clone(&phone.inner);
             let first = Arc::clone(&fcp);
             tokio::spawn(async move {
-                match first.softphone().await {
-                    Ok(config) => {
-                        inner.set_may_record(config.may_record);
-                        *inner.features.lock() = config.feature_codes;
-                    }
-                    Err(e) => tracing::debug!(%e, "feature codes not read"),
-                }
+                data::refresh_softphone(&inner, &first).await;
                 tokio::join!(
                     data::refresh_recents(&inner, &first),
                     data::refresh_people(&inner, &first),
@@ -638,6 +636,66 @@ impl Phone {
                 self.inner.show_contacts();
                 Ok(Response::ok())
             }
+            Command::ImportContacts { path, on_account } => {
+                let file = tokio::fs::read(&path)
+                    .await
+                    .map_err(|e| PhoneError::Refused(format!("{path}: {e}")))?;
+                if file.len() > CONTACT_FILE_LIMIT {
+                    return Err(PhoneError::Refused(format!(
+                        "{path} is too big for a contacts file (10 MB at most)"
+                    )));
+                }
+                let imported = if on_account {
+                    let fcp = self.fcp("contacts on the account")?;
+                    let done = fcp.import_contacts(file).await?;
+                    data::refresh_contacts(&self.inner, fcp).await;
+                    Imported {
+                        imported: done.imported as u32,
+                        duplicates: done.duplicates as u32,
+                        skipped: done
+                            .skipped
+                            .into_iter()
+                            .map(|s| format!("entry {}: {}", s.entry, s.reason))
+                            .collect(),
+                    }
+                } else {
+                    let imported = self.inner.import_to_device(&file);
+                    self.inner.save_settings();
+                    self.inner.show_contacts();
+                    imported
+                };
+                Ok(Response {
+                    imported: Some(imported),
+                    ..Response::ok()
+                })
+            }
+            Command::ExportContacts { path } => {
+                let format = if path.to_ascii_lowercase().ends_with(".csv") {
+                    contact_file::Format::Csv
+                } else {
+                    contact_file::Format::VCard
+                };
+                let contacts = self.inner.state.lock().contacts.clone();
+                tokio::fs::write(&path, contact_file::write(format, &contacts))
+                    .await
+                    .map_err(|e| PhoneError::Refused(format!("{path}: {e}")))?;
+                Ok(Response::ok())
+            }
+            Command::DirectoryListed { on } => {
+                let fcp = self.fcp("the directory")?;
+                fcp.set_directory_listed(on).await?;
+                let may_change = self
+                    .inner
+                    .state
+                    .lock()
+                    .directory
+                    .is_some_and(|d| d.may_change);
+                self.inner.set_directory(Some(DirectoryListing {
+                    listed: on,
+                    may_change,
+                }));
+                Ok(Response::ok())
+            }
             Command::Favourite { who, on } => {
                 let key = self.person_key(&who)?;
                 {
@@ -1041,6 +1099,23 @@ impl Inner {
             .unwrap_or_else(|| ring::DEFAULT.to_string())
     }
 
+    /// The ringtone for the call ringing in: its contact's while this
+    /// device has that one, else the phone's.
+    fn ringtone_ringing_in(&self) -> String {
+        let contacts = {
+            let state = self.state.lock();
+            state
+                .calls
+                .iter()
+                .find(|c| c.direction == Direction::Incoming && c.state == CallState::Ringing)
+                .and_then(|call| state.contacts.iter().find(|c| c.has_number(&call.remote)))
+                .and_then(|c| c.ringtone.clone())
+        };
+        contacts
+            .filter(|id| self.tone(id).is_some())
+            .unwrap_or_else(|| self.ringtone())
+    }
+
     /// A ringtone's sound, by id.
     fn tone(&self, id: &str) -> Option<ring::Tone> {
         if let Some(name) = id.strip_prefix("file:") {
@@ -1165,7 +1240,7 @@ impl Inner {
         let tone = match sound {
             ring::Sound::Waiting => ring::waiting(),
             _ => self
-                .tone(&self.ringtone())
+                .tone(&self.ringtone_ringing_in())
                 .or_else(|| ring::built_in(ring::DEFAULT))
                 .expect("Anvil's own ringtone"),
         };
@@ -1319,6 +1394,54 @@ impl Inner {
         if changed {
             let _ = self.changes.send(Change::MayRecord { on });
         }
+    }
+
+    fn set_directory(&self, listing: Option<DirectoryListing>) {
+        let changed = std::mem::replace(&mut self.state.lock().directory, listing) != listing;
+        if changed {
+            let _ = self.changes.send(Change::Directory { listing });
+        }
+    }
+
+    /// Keep the contacts in a vCard or CSV file on this device, but those
+    /// it already has by name and numbers, or the file has twice.
+    fn import_to_device(&self, file: &[u8]) -> Imported {
+        let text = String::from_utf8_lossy(file);
+        let read = contact_file::read(contact_file::Format::guess(&text), &text);
+        let mut imported = Imported {
+            skipped: read
+                .skipped
+                .into_iter()
+                .map(|(entry, why)| format!("entry {entry}: {why}"))
+                .collect(),
+            ..Imported::default()
+        };
+        let mut local = self.local.lock();
+        let mut made: Vec<contact_file::ImportedContact> = Vec::new();
+        for c in read.contacts {
+            let kept = local
+                .contacts
+                .iter()
+                .any(|k| c.same_as(&k.name, &k.numbers));
+            if kept || made.iter().any(|m| m.same_as(&c.name, &c.numbers)) {
+                imported.duplicates += 1;
+                continue;
+            }
+            local.contacts.push(Contact {
+                id: new_contact_id(),
+                on_account: false,
+                name: c.name.clone(),
+                company: c.company.clone(),
+                numbers: c.numbers.clone(),
+                email: c.email.clone(),
+                notes: c.notes.clone(),
+                ringtone: None,
+            });
+            imported.imported += 1;
+            made.push(c);
+        }
+        local.contacts.sort_by_key(|c| c.name.to_lowercase());
+        imported
     }
 
     /// Show the device's contacts and the account's together, by name.
