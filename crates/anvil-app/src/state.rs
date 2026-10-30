@@ -10,6 +10,13 @@ use serde::{Deserialize, Serialize};
 pub struct State {
     /// The account's address of record.
     pub aor: String,
+    /// The account's lines, its own first (FCP's `docs/DEVICE_LINES.md`);
+    /// empty without FCP or from an older one: the account alone.
+    #[serde(default)]
+    pub lines: Vec<LineView>,
+    /// The tenant lets the user name their lines.
+    #[serde(default)]
+    pub may_rename_lines: bool,
     pub registration: Registration,
     /// The calls, oldest first.
     pub calls: Vec<CallView>,
@@ -205,6 +212,8 @@ impl State {
     pub fn new(aor: String) -> Self {
         Self {
             aor,
+            lines: Vec::new(),
+            may_rename_lines: false,
             registration: Registration::Unregistered,
             calls: Vec::new(),
             message_waiting: None,
@@ -313,6 +322,13 @@ pub struct CallView {
     /// The user is recording the call (they asked; FCP said yes).
     #[serde(default)]
     pub recording: bool,
+    /// The line the call is on: its key (`own`, `extension:1005`, …), as
+    /// the server named it ringing in or the user chose dialling out.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub line: Option<String>,
+    /// Ringing on a line that does not ring this app: shown, not sounded.
+    #[serde(default)]
+    pub silent: bool,
 }
 
 impl CallView {
@@ -332,8 +348,30 @@ impl CallView {
             connected_at: None,
             server_call: None,
             recording: false,
+            line: None,
+            silent: false,
         }
     }
+}
+
+/// One of the account's lines.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct LineView {
+    /// Its key: what a call for it is named by, and a name is set under.
+    pub line: String,
+    /// `own`, `extension`, `shared` or `on_behalf`.
+    pub kind: String,
+    pub aor: String,
+    /// What it is called: the user's name, the administrator's, else
+    /// `default_label`.
+    pub label: String,
+    pub default_label: String,
+    /// The account's own line follows [`State::registration`].
+    pub registration: Registration,
+    pub message_waiting: Option<MessageWaiting>,
+    pub ring: bool,
+    pub shared: bool,
+    pub appearances: u32,
 }
 
 /// A connected call's media, as last measured.
@@ -515,6 +553,10 @@ pub enum Change {
     Registration {
         state: Registration,
         reason: Option<String>,
+    },
+    /// The lines, or one line's registration or messages, changed.
+    Lines {
+        lines: Vec<LineView>,
     },
     /// A call appeared or changed.
     Call {

@@ -91,6 +91,10 @@ pub struct Anvil {
     watched: Arc<DashMap<String, ()>>,
     /// The tasks keeping each watch's subscription alive.
     watches: DashMap<String, JoinHandle<()>>,
+    /// The account's other lines (FCP's `docs/DEVICE_LINES.md`), by
+    /// address: each registered with the account's credentials and kept
+    /// apart, with its own message-summary subscription.
+    lines: DashMap<String, LineTasks>,
     /// Handles to the packet-pump task and any other long-running tasks.
     /// Dropped on shutdown.
     tasks: Vec<JoinHandle<()>>,
@@ -345,6 +349,7 @@ impl Anvil {
                 mwi: parking_lot::Mutex::new(None),
                 watched,
                 watches: DashMap::new(),
+                lines: DashMap::new(),
                 tasks: {
                     tasks.push(pump);
                     tasks
@@ -543,6 +548,104 @@ impl Anvil {
         Ok(())
     }
 
+    /// Register another line of the account: `aor` with the account's
+    /// credentials, refreshed apart, and its message summary subscribed
+    /// (FCP's `docs/DEVICE_LINES.md`). Its state arrives as
+    /// [`Event::LineRegistration`], its messages as
+    /// [`Event::LineMessageWaiting`]. Adding a line already held renews it.
+    pub async fn add_line(&self, aor: &str) -> Result<(), AnvilError> {
+        let account = SipUri::parse(aor)
+            .map_err(|e| AnvilError::Config(format!("invalid line {aor:?}: {e:?}")))?;
+        self.remove_line_tasks(aor);
+        let _ = self
+            .events
+            .send(Event::LineRegistration {
+                aor: aor.to_string(),
+                state: RegState::Registering,
+                reason: None,
+            })
+            .await;
+        let granted = match register_line_once(
+            &self.uac,
+            &account,
+            &self.registrar_uri,
+            self.register_expires,
+        )
+        .await
+        {
+            Ok(granted) => granted,
+            Err(e) => {
+                let _ = self
+                    .events
+                    .send(Event::LineRegistration {
+                        aor: aor.to_string(),
+                        state: RegState::Failed,
+                        reason: Some(e.to_string()),
+                    })
+                    .await;
+                return Err(e);
+            }
+        };
+        let _ = self
+            .events
+            .send(Event::LineRegistration {
+                aor: aor.to_string(),
+                state: RegState::Registered,
+                reason: None,
+            })
+            .await;
+        let refresh = tokio::spawn(keep_line_registered(
+            Arc::clone(&self.uac),
+            account.clone(),
+            self.registrar_uri.clone(),
+            self.register_expires,
+            granted,
+            self.events.clone(),
+        ));
+        let mwi = tokio::spawn(keep_line_subscribed(Arc::clone(&self.uac), account));
+        self.lines
+            .insert(aor.to_string(), LineTasks { refresh, mwi });
+        Ok(())
+    }
+
+    /// Let a line go: its refresh and subscription stop, and it is
+    /// unregistered (best effort).
+    pub async fn remove_line(&self, aor: &str) {
+        if !self.remove_line_tasks(aor) {
+            return;
+        }
+        if let Ok(account) = SipUri::parse(aor) {
+            let _ = self
+                .uac
+                .register_as(&account, self.registrar_uri.clone(), Some(0), None)
+                .await;
+        }
+        let _ = self
+            .events
+            .send(Event::LineRegistration {
+                aor: aor.to_string(),
+                state: RegState::Unregistered,
+                reason: None,
+            })
+            .await;
+    }
+
+    fn remove_line_tasks(&self, aor: &str) -> bool {
+        match self.lines.remove(aor) {
+            Some((_, tasks)) => {
+                tasks.refresh.abort();
+                tasks.mwi.abort();
+                true
+            }
+            None => false,
+        }
+    }
+
+    /// The lines added, by address.
+    pub fn lines(&self) -> Vec<String> {
+        self.lines.iter().map(|l| l.key().clone()).collect()
+    }
+
     /// Place an outgoing call.
     ///
     /// Sends an INVITE with an SDP offer (G.711 µ-law + A-law), returns as soon
@@ -553,6 +656,22 @@ impl Anvil {
     /// reserved by a bound UDP socket stored in the call entry, so the audio
     /// milestone can drop a media engine onto it without renegotiating SDP.
     pub async fn place_call(&self, target: &str) -> Result<CallId, AnvilError> {
+        self.place_call_from(target, None).await
+    }
+
+    /// Place an outgoing call from one of the account's lines: the INVITE's
+    /// `From` is the line's address (`None`, the account's own).
+    pub async fn place_call_from(
+        &self,
+        target: &str,
+        line: Option<&str>,
+    ) -> Result<CallId, AnvilError> {
+        let from = line
+            .map(|l| {
+                SipUri::parse(l)
+                    .map_err(|e| AnvilError::Config(format!("invalid line {l:?}: {e:?}")))
+            })
+            .transpose()?;
         let target_uri = SipUri::parse(target)
             .map_err(|e| AnvilError::Config(format!("invalid target {target:?}: {e:?}")))?;
 
@@ -580,7 +699,7 @@ impl Anvil {
         tracing::debug!(%target, rtp_port, "sending INVITE");
         let handle = self
             .uac
-            .invite(target_uri, Some(&sdp_body))
+            .invite_with_from(target_uri, Some(&sdp_body), from)
             .await
             .map_err(|e| AnvilError::Transport(format!("INVITE: {e}")))?;
 
@@ -1182,6 +1301,168 @@ async fn register_once(
 
 /// Refresh a registration before it lapses; on a failed refresh, say so and
 /// retry with a growing delay, and say so again when it comes back.
+/// A line's tasks: its registration's refresh and its message summary.
+struct LineTasks {
+    refresh: JoinHandle<()>,
+    mwi: JoinHandle<()>,
+}
+
+/// One REGISTER of a line; the expiry granted.
+async fn register_line_once(
+    uac: &IntegratedUAC,
+    account: &SipUri,
+    registrar: &SipUri,
+    expires: u32,
+) -> Result<u32, AnvilError> {
+    let mut asked = expires;
+    for _ in 0..3 {
+        match uac
+            .register_as(account, registrar.clone(), Some(asked), None)
+            .await
+        {
+            Ok(resp) if (200..300).contains(&resp.code()) => {
+                return Ok(registration::granted_expires(&resp, asked));
+            }
+            Ok(resp) if resp.code() == 423 => match registration::min_expires(&resp) {
+                Some(min) if min > asked => asked = min,
+                _ => return Err(AnvilError::AuthRejected("423 Interval Too Brief".into())),
+            },
+            Ok(resp) => {
+                return Err(AnvilError::AuthRejected(format!(
+                    "{} {}",
+                    resp.code(),
+                    resp.reason()
+                )))
+            }
+            Err(e) => return Err(AnvilError::Transport(e.to_string())),
+        }
+    }
+    Err(AnvilError::AuthRejected("423 Interval Too Brief".into()))
+}
+
+/// Keep a line registered, as [`keep_registered`] keeps the account.
+async fn keep_line_registered(
+    uac: Arc<IntegratedUAC>,
+    account: SipUri,
+    registrar: SipUri,
+    expires: u32,
+    mut granted: u32,
+    events: mpsc::Sender<Event>,
+) {
+    let aor = account.as_str().to_string();
+    let mut failures: u32 = 0;
+    loop {
+        let wait = if failures == 0 {
+            registration::refresh_after(granted)
+        } else {
+            registration::retry_after(failures)
+        };
+        tokio::time::sleep(wait).await;
+        match register_line_once(&uac, &account, &registrar, expires).await {
+            Ok(g) => {
+                granted = g;
+                if failures > 0 {
+                    let _ = events
+                        .send(Event::LineRegistration {
+                            aor: aor.clone(),
+                            state: RegState::Registered,
+                            reason: None,
+                        })
+                        .await;
+                }
+                failures = 0;
+            }
+            Err(e) => {
+                failures = failures.saturating_add(1);
+                tracing::warn!(%e, %aor, failures, "a line's registration refresh failed");
+                if failures == 1 {
+                    let _ = events
+                        .send(Event::LineRegistration {
+                            aor: aor.clone(),
+                            state: RegState::Failed,
+                            reason: Some(e.to_string()),
+                        })
+                        .await;
+                }
+            }
+        }
+    }
+}
+
+/// Keep a line's message summary subscribed: a SUBSCRIBE from and to the
+/// line, so the server's mailbox is the line's (an executive's on an
+/// assistant's phone), renewed as [`Anvil::subscribe_mwi`]'s is.
+async fn keep_line_subscribed(uac: Arc<IntegratedUAC>, account: SipUri) {
+    loop {
+        let granted = match subscribe_as(&uac, &account, mwi::EVENT).await {
+            Ok(g) => g,
+            Err(e) => {
+                tracing::debug!(%e, aor = %account.as_str(), "a line's message summary was not subscribed");
+                60
+            }
+        };
+        tokio::time::sleep(mwi_renew_after(granted)).await;
+    }
+}
+
+/// A SUBSCRIBE to `event` from and to `account` (not the agent's own
+/// address); the expiry granted.
+async fn subscribe_as(
+    uac: &IntegratedUAC,
+    account: &SipUri,
+    event: &str,
+) -> Result<u32, AnvilError> {
+    use sip_core::{Headers, Method, RequestLine};
+    let hex = || {
+        format!(
+            "{:016x}{:016x}",
+            rand::random::<u64>(),
+            rand::random::<u64>()
+        )
+    };
+    let tag = hex();
+    let call_id = format!("{}@anvil", hex());
+    let mut headers = Headers::new();
+    let mut push = |name: &str, value: String| {
+        headers
+            .push(name, value)
+            .map_err(|e| AnvilError::Transport(format!("header {name}: {e}")))
+    };
+    push(
+        "Via",
+        format!("SIP/2.0/UDP placeholder;branch=z9hG4bK{}", hex()),
+    )?;
+    push("Max-Forwards", "70".into())?;
+    push("From", format!("<{}>;tag={}", account.as_str(), &tag[..10]))?;
+    push("To", format!("<{}>", account.as_str()))?;
+    push("Call-ID", call_id)?;
+    push("CSeq", format!("1 {}", "SUBSCRIBE"))?;
+    push("Contact", format!("<{}>", account.as_str()))?;
+    push("Event", event.to_string())?;
+    push("Expires", MWI_EXPIRES.to_string())?;
+    push("Content-Length", "0".into())?;
+    let request = sip_core::Request::new(
+        RequestLine::new(Method::Subscribe, account.clone()),
+        headers,
+        bytes::Bytes::new(),
+    )
+    .map_err(|e| AnvilError::Transport(format!("SUBSCRIBE: {e}")))?;
+    match uac.send_request(request, account.clone()).await {
+        Ok(resp) if (200..300).contains(&resp.code()) => Ok(resp
+            .headers()
+            .get("Expires")
+            .and_then(|v| v.trim().parse::<u32>().ok())
+            .unwrap_or(MWI_EXPIRES)),
+        Ok(resp) => Err(AnvilError::AuthRejected(format!(
+            "{event} SUBSCRIBE as {}: {} {}",
+            account.as_str(),
+            resp.code(),
+            resp.reason()
+        ))),
+        Err(e) => Err(AnvilError::Transport(e.to_string())),
+    }
+}
+
 async fn keep_registered(
     uac: Arc<IntegratedUAC>,
     registrar: SipUri,
@@ -1362,7 +1643,23 @@ async fn dispatch_request(
                 "message-summary" => {
                     let body = String::from_utf8_lossy(request.body());
                     if let Some(summary) = mwi::parse(&body) {
-                        let _ = handler.events.send(Event::MessageWaiting { summary }).await;
+                        // To a line's address (FCP sends a subscription's
+                        // NOTIFY to its subscriber), it is that line's.
+                        let to = request.headers().get("To").map(|t| t.to_string());
+                        match to.as_deref().and_then(uas::user_and_host) {
+                            Some((user, aor))
+                                if !user.eq_ignore_ascii_case(&handler.local_user) =>
+                            {
+                                let _ = handler
+                                    .events
+                                    .send(Event::LineMessageWaiting { aor, summary })
+                                    .await;
+                            }
+                            _ => {
+                                let _ =
+                                    handler.events.send(Event::MessageWaiting { summary }).await;
+                            }
+                        }
                     }
                     (200, "OK")
                 }

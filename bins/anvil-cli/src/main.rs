@@ -207,8 +207,13 @@ enum Command {
     /// Run the phone: registered, ringing, and taking commands at a prompt
     /// and on its control socket, until `quit` or Ctrl+C.
     Run,
-    /// Tell the running phone to call a number, an extension or an address.
-    Call { target: String },
+    /// Tell the running phone to call a number, an extension or an address,
+    /// from one of its lines (`--line extension:1005`) or its own.
+    Call {
+        target: String,
+        #[arg(long)]
+        line: Option<String>,
+    },
     /// Answer the ringing call.
     Answer {
         #[arg(long)]
@@ -325,8 +330,9 @@ impl Command {
     fn phone_command(&self) -> Option<anvil_app::Command> {
         use anvil_app::Command as P;
         Some(match self {
-            Command::Call { target } => P::Call {
+            Command::Call { target, line } => P::Call {
                 target: target.clone(),
+                line: line.clone(),
             },
             Command::Answer { id } => P::Answer { call: *id },
             Command::Decline { id } => P::Decline { call: *id },
@@ -544,6 +550,19 @@ fn print_change(change: &anvil_app::Change) {
                 .map(|r| format!(" ({r})"))
                 .unwrap_or_default()
         ),
+        C::Lines { lines } => {
+            for l in lines {
+                println!(
+                    "[line] {} {} {:?}{}",
+                    l.line,
+                    l.label,
+                    l.registration,
+                    l.message_waiting
+                        .map(|m| format!(", {} new", m.new))
+                        .unwrap_or_default()
+                )
+            }
+        }
         C::Call { call } => println!("[call] {}", call_line(call)),
         C::CallEnded { id, reason } => println!("[call] {id} ended: {reason}"),
         C::MessageWaiting { message_waiting: m } => {

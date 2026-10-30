@@ -149,6 +149,7 @@ pub(crate) async fn refresh_softphone(inner: &Inner, fcp: &FcpClient) {
                 may_change: config.may_change_directory_listing,
             }));
             *inner.features.lock() = config.feature_codes;
+            inner.set_lines(config.lines, config.may_rename_lines).await;
         }
         Err(e) => tracing::debug!(%e, "softphone settings not read"),
     }

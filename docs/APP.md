@@ -533,6 +533,31 @@ With FCP v0.25.473 on (FCP's `docs/PRESENCE.md`, phase 3):
   `the_user_sets_their_presence_with_statuses_of_their_own` (skips on an
   FCP before v0.25.473).
 
+### D8 findings 40 and 42: lines (phase 2a, the data)
+With FCP v0.25.488 on (FCP's `docs/DEVICE_LINES.md`, phase 2):
+- `anvil-core`: `Anvil::add_line(aor)` registers another of the account's
+  lines with the account's credentials (`register_as`), refreshed apart, and
+  subscribes its message summary with a SUBSCRIBE from and to the line, so
+  FCP's mailbox is the line's (an executive's, on her assistant's app);
+  `remove_line`, `lines`. `place_call_from(target, line)` sends the INVITE
+  with the line as its `From`. `Event::IncomingCall` carries `line`, the key
+  FCP names in `X-FCP-Line`; `Event::LineRegistration`,
+  `Event::LineMessageWaiting` (a message-summary NOTIFY to a line's address).
+- `anvil-fcp`: `/me/softphone`'s `lines` (`SoftphoneLine`) and
+  `may_rename_lines`; `set_line_label`.
+- `anvil-app`: `State.lines` (`LineView`: key, kind, address, label,
+  registration, messages, ring), `State.may_rename_lines`, `Change::Lines`;
+  the lines FCP gives are registered or let go as they come and go; a call's
+  `line`, and `silent` for a call ringing on a line that does not ring this
+  app (shown, not sounded). `Command::Call { line }` places from a line by its
+  key; `Command::RenameLine`. The CLI: `anvil call <n> --line <key>`, and
+  `call <n> on <key>` / `rename-line <key> <name>` at the prompt.
+- Proved against FCP: `the_app_carries_its_lines_from_fcp` (three lines
+  registered, a call to the extension on its line, a call from it going out
+  as it, renaming allowed by the tenant).
+- Phase 2b is the screens: the lines column (desktop) and picker (mobile),
+  the line a call is on, rename.
+
 ### W5: echo cancellation and noise suppression
 - The desktop's microphone is cleaned before it is sent: WebRTC's audio
   processing — AEC3, its noise suppressor and its high-pass filter — as
