@@ -559,6 +559,31 @@ pub struct Call {
     pub connected_at: Option<u64>,
     /// The user is recording it.
     pub recording: bool,
+    /// The line it is on, by key (`own`, `extension:1005`, …); `None`
+    /// without lines.
+    pub line: Option<String>,
+    /// Ringing on a line that does not ring this app: shown, not sounded.
+    pub silent: bool,
+}
+
+/// One of the account's lines (FCP's `docs/DEVICE_LINES.md`).
+pub struct Line {
+    /// Its key: what a call on it is named by, and a name is set under.
+    pub line: String,
+    /// `own`, `extension`, `shared` or `on_behalf`.
+    pub kind: String,
+    pub aor: String,
+    /// What it is called: the user's name, the administrator's, else
+    /// `default_label`.
+    pub label: String,
+    pub default_label: String,
+    pub registration: Registration,
+    /// New messages in the line's mailbox, once it has said.
+    pub voicemail_new: Option<u32>,
+    /// Calls to it ring this app.
+    pub ring: bool,
+    pub shared: bool,
+    pub appearances: u32,
 }
 
 /// A connected call's media, as last measured.
@@ -733,6 +758,11 @@ pub struct CallingChange {
 pub struct PhoneState {
     pub aor: String,
     pub registration: Registration,
+    /// The account's lines, its own first; empty without FCP (or from an
+    /// older one): the account alone.
+    pub lines: Vec<Line>,
+    /// The tenant lets the user name their lines.
+    pub may_rename_lines: bool,
     pub calls: Vec<Call>,
     pub voicemail_new: u32,
     pub dnd: Option<bool>,
@@ -793,6 +823,15 @@ pub struct Ringtone {
     pub name: String,
 }
 
+fn registration(r: anvil_app::Registration) -> Registration {
+    match r {
+        anvil_app::Registration::Unregistered => Registration::Unregistered,
+        anvil_app::Registration::Registering => Registration::Registering,
+        anvil_app::Registration::Registered => Registration::Registered,
+        anvil_app::Registration::Failed => Registration::Failed,
+    }
+}
+
 fn direction(d: anvil_app::Direction) -> Direction {
     match d {
         anvil_app::Direction::Incoming => Direction::Incoming,
@@ -813,7 +852,7 @@ fn devices(list: Vec<anvil_app::AudioDevice>) -> Vec<AudioDevice> {
 /// What changed: the screen redraws from [`phone_state`] and may say why.
 pub struct PhoneChange {
     /// `registration`, `call`, `call_ended`, `message_waiting`, `dnd`,
-    /// `brand`, `transfer_progress`, `calling`, `recents`, `people`,
+    /// `brand`, `transfer_progress`, `lines`, `calling`, `recents`, `people`,
     /// `person`, `voicemail`, `audio`, `playing`, `push`, `may_record`,
     /// `contacts`.
     pub kind: String,
@@ -829,12 +868,24 @@ pub fn phone_state() -> anyhow::Result<PhoneState> {
     let s = phone()?.state();
     Ok(PhoneState {
         aor: s.aor,
-        registration: match s.registration {
-            anvil_app::Registration::Unregistered => Registration::Unregistered,
-            anvil_app::Registration::Registering => Registration::Registering,
-            anvil_app::Registration::Registered => Registration::Registered,
-            anvil_app::Registration::Failed => Registration::Failed,
-        },
+        registration: registration(s.registration),
+        lines: s
+            .lines
+            .into_iter()
+            .map(|l| Line {
+                line: l.line,
+                kind: l.kind,
+                aor: l.aor,
+                label: l.label,
+                default_label: l.default_label,
+                registration: registration(l.registration),
+                voicemail_new: l.message_waiting.map(|m| m.new),
+                ring: l.ring,
+                shared: l.shared,
+                appearances: l.appearances,
+            })
+            .collect(),
+        may_rename_lines: s.may_rename_lines,
         calls: s
             .calls
             .into_iter()
@@ -865,6 +916,8 @@ pub fn phone_state() -> anyhow::Result<PhoneState> {
                 }),
                 connected_at: c.connected_at,
                 recording: c.recording,
+                line: c.line,
+                silent: c.silent,
             })
             .collect(),
         voicemail_new: s.message_waiting.map(|m| m.new).unwrap_or(0),
@@ -1022,8 +1075,6 @@ pub fn phone_changes(sink: StreamSink<PhoneChange>) -> anyhow::Result<()> {
                     call: Some(call.id),
                     reason: None,
                 },
-                // Shown by the app's screens in phase 2b (FCP's
-                // `docs/DEVICE_LINES.md`); a redraw for now.
                 C::Lines { .. } => PhoneChange {
                     kind: "lines".into(),
                     call: None,
@@ -1129,11 +1180,20 @@ async fn execute(command: Command) -> anyhow::Result<Option<u64>> {
     .await
 }
 
-/// Dial a number, an extension, a name or an address; the new call's id.
-pub async fn place_call(target: String) -> anyhow::Result<u64> {
-    execute(Command::Call { target, line: None })
+/// Dial a number, an extension, a name or an address, from one of the
+/// lines by key (`None`: the account's own); the new call's id.
+pub async fn place_call(target: String, line: Option<String>) -> anyhow::Result<u64> {
+    execute(Command::Call { target, line })
         .await?
         .ok_or_else(|| anyhow::anyhow!("no call was placed"))
+}
+
+/// Name one of the lines, where the tenant allows it; empty gives it back
+/// its administrator's label.
+pub async fn rename_line(line: String, label: String) -> anyhow::Result<()> {
+    execute(Command::RenameLine { line, label })
+        .await
+        .map(|_| ())
 }
 
 pub async fn answer(call: Option<u64>) -> anyhow::Result<()> {

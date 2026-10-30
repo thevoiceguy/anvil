@@ -167,6 +167,22 @@ class RustPhone implements PhoneApi {
     return PhoneSnapshot(
       aor: s.aor,
       registration: Registration.values[s.registration.index],
+      lines: [
+        for (final l in s.lines)
+          PhoneLine(
+            line: l.line,
+            kind: l.kind,
+            aor: l.aor,
+            label: l.label,
+            defaultLabel: l.defaultLabel,
+            registration: Registration.values[l.registration.index],
+            voicemailNew: l.voicemailNew,
+            ring: l.ring,
+            shared: l.shared,
+            appearances: l.appearances,
+          ),
+      ],
+      mayRenameLines: s.mayRenameLines,
       calls: s.calls.map(_call).toList(),
       voicemailNew: s.voicemailNew,
       dnd: s.dnd,
@@ -314,6 +330,8 @@ class RustPhone implements PhoneApi {
           ? null
           : DateTime.fromMillisecondsSinceEpoch(at.toInt() * 1000),
       recording: c.recording,
+      line: c.line,
+      silent: c.silent,
     );
   }
 
@@ -328,8 +346,12 @@ class RustPhone implements PhoneApi {
   );
 
   @override
-  Future<int> call(String target) async =>
-      (await rust.placeCall(target: target)).toInt();
+  Future<int> call(String target, {String? line}) async =>
+      (await rust.placeCall(target: target, line: line)).toInt();
+
+  @override
+  Future<void> renameLine(String line, String label) =>
+      rust.renameLine(line: line, label: label);
 
   @override
   Future<void> answer([int? call]) => rust.answer(call: _id(call));

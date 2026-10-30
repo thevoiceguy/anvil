@@ -40,6 +40,25 @@ class PhoneModel extends ChangeNotifier {
   /// while the user consults on a second call.
   int? consulting;
 
+  /// The line a call is placed from, by key; null is the account's own.
+  /// A line FCP takes away falls back to the account's own.
+  String? get line => snapshot.lineOf(_line) == null ? null : _line;
+  String? _line;
+
+  /// Place calls from `line` (by key) from now on.
+  void chooseLine(String? line) {
+    _line = line == 'own' ? null : line;
+    notifyListeners();
+  }
+
+  /// Dial from the line chosen.
+  Future<void> dial(String target) =>
+      run(() async => api.call(target, line: line));
+
+  /// Name a line, or give it back its label with an empty name.
+  Future<void> renameLine(String line, String label) =>
+      run(() => api.renameLine(line, label.trim()));
+
   /// A number for the keypad from outside the app (a tel: or sip: link);
   /// the home screen takes it.
   final dialRequest = ValueNotifier<String?>(null);
@@ -152,6 +171,7 @@ class PhoneModel extends ChangeNotifier {
     await api.signOut();
     account = null;
     consulting = null;
+    _line = null;
     snapshot = PhoneSnapshot.empty;
     notifyListeners();
   }
@@ -208,9 +228,11 @@ class PhoneModel extends ChangeNotifier {
     notifyListeners();
   }
 
-  /// Consult before transferring: `call` is held and `target` called.
+  /// Consult before transferring: `call` is held and `target` called, from
+  /// the line it is on.
   Future<void> consult(int call, String target) => run(() async {
-    await api.call(target);
+    final on = snapshot.calls.where((c) => c.id == call).firstOrNull?.line;
+    await api.call(target, line: snapshot.lineOf(on) == null ? null : on);
     consulting = call;
   });
 

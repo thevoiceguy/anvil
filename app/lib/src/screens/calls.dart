@@ -15,6 +15,7 @@ import '../phone/phone_api.dart';
 import '../phone/phone_model.dart';
 import 'audio_controls.dart';
 import 'contacts.dart';
+import 'lines.dart';
 
 /// The call the in-call screen is about: the one up, else one being placed,
 /// else a held one.
@@ -52,6 +53,7 @@ class IncomingCallCard extends StatelessWidget {
     final person = model.snapshot.personFor(call.remote);
     final name = nameFor(model.snapshot, call);
     final number = shortAddress(call.remote);
+    final line = lineLabelFor(model.snapshot, call);
     return Card(
       key: Key('incoming-${call.id}'),
       margin: const EdgeInsets.fromLTRB(12, 12, 12, 0),
@@ -60,6 +62,18 @@ class IncomingCallCard extends StatelessWidget {
         child: Column(
           children: [
             Text(s.incomingCall, style: theme.textTheme.labelLarge),
+            if (line != null)
+              Row(
+                key: const Key('incomingLine'),
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  if (call.silent) ...[
+                    const Icon(Icons.notifications_off_outlined, size: 14),
+                    const SizedBox(width: 4),
+                  ],
+                  Text(s.lineOn(line), style: theme.textTheme.labelMedium),
+                ],
+              ),
             const SizedBox(height: 4),
             Text(name, style: theme.textTheme.headlineSmall),
             if (name != number) Text(number),
@@ -192,6 +206,12 @@ class _InCallPanelState extends State<InCallPanel> {
                 Text(number, style: theme.textTheme.bodyLarge),
               const SizedBox(height: 4),
               _Status(call: call),
+              if (lineLabelFor(snap, call) case final line?)
+                Text(
+                  s.lineOn(line),
+                  key: const Key('callLine'),
+                  style: theme.textTheme.bodySmall,
+                ),
               if (call.recording)
                 Padding(
                   padding: const EdgeInsets.only(top: 4),
@@ -850,7 +870,13 @@ class CallBar extends StatelessWidget {
 }
 
 class Keypad extends StatefulWidget {
-  const Keypad({super.key, required this.onCall, this.onBack, this.initial});
+  const Keypad({
+    super.key,
+    required this.onCall,
+    this.onBack,
+    this.initial,
+    this.from,
+  });
 
   /// Place a call to what was typed.
   final ValueChanged<String> onCall;
@@ -860,6 +886,9 @@ class Keypad extends StatefulWidget {
 
   /// What is on it to begin with (a link's number).
   final String? initial;
+
+  /// Above it: the line calls go from, when the account has lines.
+  final Widget? from;
 
   @override
   State<Keypad> createState() => _KeypadState();
@@ -892,6 +921,7 @@ class _KeypadState extends State<Keypad> {
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
+              ?widget.from,
               TextField(
                 key: const Key('target'),
                 controller: _target,

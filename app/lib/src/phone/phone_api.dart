@@ -73,6 +73,8 @@ class PhoneCall {
     this.quality,
     this.connectedAt,
     this.recording = false,
+    this.line,
+    this.silent = false,
   });
 
   final int id;
@@ -91,6 +93,13 @@ class PhoneCall {
 
   /// The user is recording it.
   final bool recording;
+
+  /// The line it is on, by key (`own`, `extension:1005`, …); null without
+  /// lines.
+  final String? line;
+
+  /// Ringing on a line that does not ring this app: shown, not sounded.
+  final bool silent;
 
   /// Who the call is with, as a person reads it.
   String get who => displayName ?? shortAddress(remote);
@@ -121,6 +130,65 @@ class PhoneCall {
     quality: quality ?? this.quality,
     connectedAt: connectedAt ?? this.connectedAt,
     recording: recording ?? this.recording,
+    line: line,
+    silent: silent,
+  );
+}
+
+/// One of the account's lines, as on a desk phone (FCP's
+/// `docs/DEVICE_LINES.md`): the user's own, another extension, a shared
+/// line, or one they act for.
+class PhoneLine {
+  const PhoneLine({
+    required this.line,
+    this.kind = 'own',
+    this.aor = '',
+    required this.label,
+    this.defaultLabel = '',
+    this.registration = Registration.registered,
+    this.voicemailNew,
+    this.ring = true,
+    this.shared = false,
+    this.appearances = 0,
+  });
+
+  /// Its key: what a call on it is named by, and a name is set under.
+  final String line;
+
+  /// `own`, `extension`, `shared` or `on_behalf`.
+  final String kind;
+  final String aor;
+
+  /// What it is called: the user's name, the administrator's, else
+  /// [defaultLabel].
+  final String label;
+  final String defaultLabel;
+  final Registration registration;
+
+  /// New messages in the line's mailbox, once it has said.
+  final int? voicemailNew;
+
+  /// Calls to it ring this app.
+  final bool ring;
+  final bool shared;
+  final int appearances;
+
+  bool get isOwn => line == 'own';
+
+  /// The user has named it something other than its label.
+  bool get renamed => label != defaultLabel;
+
+  PhoneLine copyWith({String? label, Registration? registration}) => PhoneLine(
+    line: line,
+    kind: kind,
+    aor: aor,
+    label: label ?? this.label,
+    defaultLabel: defaultLabel,
+    registration: registration ?? this.registration,
+    voicemailNew: voicemailNew,
+    ring: ring,
+    shared: shared,
+    appearances: appearances,
   );
 }
 
@@ -474,6 +542,8 @@ class PhoneSnapshot {
   const PhoneSnapshot({
     required this.aor,
     required this.registration,
+    this.lines = const [],
+    this.mayRenameLines = false,
     this.calls = const [],
     this.voicemailNew = 0,
     this.dnd,
@@ -508,6 +578,13 @@ class PhoneSnapshot {
 
   final String aor;
   final Registration registration;
+
+  /// The account's lines, its own first; empty without FCP (or from an
+  /// older one): the account alone.
+  final List<PhoneLine> lines;
+
+  /// The tenant lets the user name their lines.
+  final bool mayRenameLines;
   final List<PhoneCall> calls;
   final int voicemailNew;
   final bool? dnd;
@@ -590,6 +667,22 @@ class PhoneSnapshot {
     return null;
   }
 
+  /// More lines than the account's own: the screens show them.
+  bool get hasLines => lines.length > 1;
+
+  /// A line by key, when the account has it.
+  PhoneLine? lineOf(String? key) {
+    if (key == null) return null;
+    for (final l in lines) {
+      if (l.line == key) return l;
+    }
+    return null;
+  }
+
+  /// The calls on a line: ones FCP named no line for are the account's own.
+  List<PhoneCall> callsOn(String key) =>
+      calls.where((c) => (c.line ?? 'own') == key).toList();
+
   int get missedCalls => recents.where((r) => r.missed).length;
 
   /// New messages: the mailbox's own count once it has been read, else
@@ -614,6 +707,8 @@ class PhoneSnapshot {
 
   PhoneSnapshot copyWith({
     Registration? registration,
+    List<PhoneLine>? lines,
+    bool? mayRenameLines,
     List<PhoneCall>? calls,
     int? voicemailNew,
     bool? dnd,
@@ -652,6 +747,8 @@ class PhoneSnapshot {
   }) => PhoneSnapshot(
     aor: aor,
     registration: registration ?? this.registration,
+    lines: lines ?? this.lines,
+    mayRenameLines: mayRenameLines ?? this.mayRenameLines,
     calls: calls ?? this.calls,
     voicemailNew: voicemailNew ?? this.voicemailNew,
     dnd: dnd ?? this.dnd,
@@ -849,7 +946,12 @@ abstract class PhoneApi {
   PhoneSnapshot snapshot();
   Stream<PhoneEvent> events();
 
-  Future<int> call(String target);
+  /// Dial from one of the lines by key; null is the account's own.
+  Future<int> call(String target, {String? line});
+
+  /// Name one of the lines, where the tenant allows it; empty gives it
+  /// back its administrator's label.
+  Future<void> renameLine(String line, String label);
   Future<void> answer([int? call]);
   Future<void> decline([int? call]);
   Future<void> hangup([int? call]);

@@ -7,7 +7,7 @@ import '../frb_generated.dart';
 
 import 'package:flutter_rust_bridge/flutter_rust_bridge_for_generated.dart';
 
-// These functions are ignored because they are not marked as `pub`: `act`, `devices`, `direction`, `execute`, `kind_only`, `managed`, `on_runtime_pub`, `on_runtime`, `phone`, `place_of`, `remember`, `runtime`, `set_push`, `this_install`, `wake`
+// These functions are ignored because they are not marked as `pub`: `act`, `devices`, `direction`, `execute`, `kind_only`, `managed`, `on_runtime_pub`, `on_runtime`, `phone`, `place_of`, `registration`, `remember`, `runtime`, `set_push`, `this_install`, `wake`
 
 /// This install's managed settings; an ordinary install's are all open.
 ManagedSettings managedSettings() =>
@@ -123,9 +123,15 @@ PhoneState phoneState() => RustLib.instance.api.crateApiPhonePhoneState();
 Stream<PhoneChange> phoneChanges() =>
     RustLib.instance.api.crateApiPhonePhoneChanges();
 
-/// Dial a number, an extension, a name or an address; the new call's id.
-Future<BigInt> placeCall({required String target}) =>
-    RustLib.instance.api.crateApiPhonePlaceCall(target: target);
+/// Dial a number, an extension, a name or an address, from one of the
+/// lines by key (`None`: the account's own); the new call's id.
+Future<BigInt> placeCall({required String target, String? line}) =>
+    RustLib.instance.api.crateApiPhonePlaceCall(target: target, line: line);
+
+/// Name one of the lines, where the tenant allows it; empty gives it back
+/// its administrator's label.
+Future<void> renameLine({required String line, required String label}) =>
+    RustLib.instance.api.crateApiPhoneRenameLine(line: line, label: label);
 
 Future<void> answer({BigInt? call}) =>
     RustLib.instance.api.crateApiPhoneAnswer(call: call);
@@ -397,6 +403,13 @@ class Call {
   /// The user is recording it.
   final bool recording;
 
+  /// The line it is on, by key (`own`, `extension:1005`, …); `None`
+  /// without lines.
+  final String? line;
+
+  /// Ringing on a line that does not ring this app: shown, not sounded.
+  final bool silent;
+
   const Call({
     required this.id,
     required this.direction,
@@ -410,6 +423,8 @@ class Call {
     this.quality,
     this.connectedAt,
     required this.recording,
+    this.line,
+    required this.silent,
   });
 
   @override
@@ -425,7 +440,9 @@ class Call {
       encrypted.hashCode ^
       quality.hashCode ^
       connectedAt.hashCode ^
-      recording.hashCode;
+      recording.hashCode ^
+      line.hashCode ^
+      silent.hashCode;
 
   @override
   bool operator ==(Object other) =>
@@ -443,7 +460,9 @@ class Call {
           encrypted == other.encrypted &&
           quality == other.quality &&
           connectedAt == other.connectedAt &&
-          recording == other.recording;
+          recording == other.recording &&
+          line == other.line &&
+          silent == other.silent;
 }
 
 /// Where a call is.
@@ -642,6 +661,72 @@ class ContactsImported {
 
 /// Which way a call goes.
 enum Direction { incoming, outgoing }
+
+/// One of the account's lines (FCP's `docs/DEVICE_LINES.md`).
+class Line {
+  /// Its key: what a call on it is named by, and a name is set under.
+  final String line;
+
+  /// `own`, `extension`, `shared` or `on_behalf`.
+  final String kind;
+  final String aor;
+
+  /// What it is called: the user's name, the administrator's, else
+  /// `default_label`.
+  final String label;
+  final String defaultLabel;
+  final Registration registration;
+
+  /// New messages in the line's mailbox, once it has said.
+  final int? voicemailNew;
+
+  /// Calls to it ring this app.
+  final bool ring;
+  final bool shared;
+  final int appearances;
+
+  const Line({
+    required this.line,
+    required this.kind,
+    required this.aor,
+    required this.label,
+    required this.defaultLabel,
+    required this.registration,
+    this.voicemailNew,
+    required this.ring,
+    required this.shared,
+    required this.appearances,
+  });
+
+  @override
+  int get hashCode =>
+      line.hashCode ^
+      kind.hashCode ^
+      aor.hashCode ^
+      label.hashCode ^
+      defaultLabel.hashCode ^
+      registration.hashCode ^
+      voicemailNew.hashCode ^
+      ring.hashCode ^
+      shared.hashCode ^
+      appearances.hashCode;
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is Line &&
+          runtimeType == other.runtimeType &&
+          line == other.line &&
+          kind == other.kind &&
+          aor == other.aor &&
+          label == other.label &&
+          defaultLabel == other.defaultLabel &&
+          registration == other.registration &&
+          voicemailNew == other.voicemailNew &&
+          ring == other.ring &&
+          shared == other.shared &&
+          appearances == other.appearances;
+}
 
 /// What the sign-in screen and the app follow on a managed install.
 class ManagedSettings {
@@ -873,7 +958,7 @@ class Person {
 /// What changed: the screen redraws from [`phone_state`] and may say why.
 class PhoneChange {
   /// `registration`, `call`, `call_ended`, `message_waiting`, `dnd`,
-  /// `brand`, `transfer_progress`, `calling`, `recents`, `people`,
+  /// `brand`, `transfer_progress`, `lines`, `calling`, `recents`, `people`,
   /// `person`, `voicemail`, `audio`, `playing`, `push`, `may_record`,
   /// `contacts`.
   final String kind;
@@ -903,6 +988,13 @@ class PhoneChange {
 class PhoneState {
   final String aor;
   final Registration registration;
+
+  /// The account's lines, its own first; empty without FCP (or from an
+  /// older one): the account alone.
+  final List<Line> lines;
+
+  /// The tenant lets the user name their lines.
+  final bool mayRenameLines;
   final List<Call> calls;
   final int voicemailNew;
   final bool? dnd;
@@ -975,6 +1067,8 @@ class PhoneState {
   const PhoneState({
     required this.aor,
     required this.registration,
+    required this.lines,
+    required this.mayRenameLines,
     required this.calls,
     required this.voicemailNew,
     this.dnd,
@@ -1011,6 +1105,8 @@ class PhoneState {
   int get hashCode =>
       aor.hashCode ^
       registration.hashCode ^
+      lines.hashCode ^
+      mayRenameLines.hashCode ^
       calls.hashCode ^
       voicemailNew.hashCode ^
       dnd.hashCode ^
@@ -1049,6 +1145,8 @@ class PhoneState {
           runtimeType == other.runtimeType &&
           aor == other.aor &&
           registration == other.registration &&
+          lines == other.lines &&
+          mayRenameLines == other.mayRenameLines &&
           calls == other.calls &&
           voicemailNew == other.voicemailNew &&
           dnd == other.dnd &&

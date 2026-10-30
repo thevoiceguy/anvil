@@ -114,6 +114,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   int dco_decode_i_32(dynamic raw);
 
   @protected
+  Line dco_decode_line(dynamic raw);
+
+  @protected
   List<String> dco_decode_list_String(dynamic raw);
 
   @protected
@@ -127,6 +130,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   List<ContactNumber> dco_decode_list_contact_number(dynamic raw);
+
+  @protected
+  List<Line> dco_decode_list_line(dynamic raw);
 
   @protected
   List<OwnStatus> dco_decode_list_own_status(dynamic raw);
@@ -353,6 +359,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   int sse_decode_i_32(SseDeserializer deserializer);
 
   @protected
+  Line sse_decode_line(SseDeserializer deserializer);
+
+  @protected
   List<String> sse_decode_list_String(SseDeserializer deserializer);
 
   @protected
@@ -368,6 +377,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   List<ContactNumber> sse_decode_list_contact_number(
     SseDeserializer deserializer,
   );
+
+  @protected
+  List<Line> sse_decode_list_line(SseDeserializer deserializer);
 
   @protected
   List<OwnStatus> sse_decode_list_own_status(SseDeserializer deserializer);
@@ -626,6 +638,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   void sse_encode_i_32(int self, SseSerializer serializer);
 
   @protected
+  void sse_encode_line(Line self, SseSerializer serializer);
+
+  @protected
   void sse_encode_list_String(List<String> self, SseSerializer serializer);
 
   @protected
@@ -645,6 +660,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
     List<ContactNumber> self,
     SseSerializer serializer,
   );
+
+  @protected
+  void sse_encode_list_line(List<Line> self, SseSerializer serializer);
 
   @protected
   void sse_encode_list_own_status(

@@ -836,4 +836,55 @@ class StringsEn extends Strings {
   String idleMinutes(int minutes) {
     return '$minutes minutes';
   }
+
+  @override
+  String get linesTitle => 'Lines';
+
+  @override
+  String lineFrom(String label) {
+    return 'From $label';
+  }
+
+  @override
+  String lineOn(String label) {
+    return 'On $label';
+  }
+
+  @override
+  String get lineReady => 'Ready';
+
+  @override
+  String get lineRegistering => 'Connecting…';
+
+  @override
+  String get lineNotRegistered => 'Not connected';
+
+  @override
+  String get lineRinging => 'Ringing';
+
+  @override
+  String get lineOnCall => 'On a call';
+
+  @override
+  String get lineHeld => 'On hold';
+
+  @override
+  String get lineSilent => 'Doesn\'t ring here';
+
+  @override
+  String lineVoicemail(int count) {
+    return '$count new';
+  }
+
+  @override
+  String get lineChoose => 'Place calls from';
+
+  @override
+  String get lineRename => 'Rename';
+
+  @override
+  String get lineRenameTitle => 'Name this line';
+
+  @override
+  String get lineRenameReset => 'Reset';
 }

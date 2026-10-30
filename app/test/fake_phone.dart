@@ -41,7 +41,7 @@ class FakePhone implements PhoneApi {
   /// The tenant's brand is taken away.
   void unbrand() => set(state.copyWith(clearBrand: true), 'brand');
 
-  void ring(String from, {String? name}) {
+  void ring(String from, {String? name, String? line, bool silent = false}) {
     final id = _next++;
     set(
       state.copyWith(
@@ -53,6 +53,8 @@ class FakePhone implements PhoneApi {
             remote: 'sip:$from@x',
             displayName: name,
             state: CallState.ringing,
+            line: line,
+            silent: silent,
           ),
         ],
       ),
@@ -201,9 +203,9 @@ class FakePhone implements PhoneApi {
   Stream<PhoneEvent> events() => _events.stream;
 
   @override
-  Future<int> call(String target) async {
+  Future<int> call(String target, {String? line}) async {
     _refuse();
-    log.add('call $target');
+    log.add(line == null ? 'call $target' : 'call $target on $line');
     final id = _next++;
     set(
       state.copyWith(
@@ -214,6 +216,7 @@ class FakePhone implements PhoneApi {
             direction: Direction.outgoing,
             remote: target.contains(':') ? target : 'sip:$target@x',
             state: CallState.dialing,
+            line: line,
           ),
         ],
       ),
@@ -221,6 +224,23 @@ class FakePhone implements PhoneApi {
       call: id,
     );
     return id;
+  }
+
+  @override
+  Future<void> renameLine(String line, String label) async {
+    _refuse();
+    log.add('rename $line "$label"');
+    set(
+      state.copyWith(
+        lines: [
+          for (final l in state.lines)
+            l.line == line
+                ? l.copyWith(label: label.isEmpty ? l.defaultLabel : label)
+                : l,
+        ],
+      ),
+      'lines',
+    );
   }
 
   @override
