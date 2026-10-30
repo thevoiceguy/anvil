@@ -555,8 +555,30 @@ With FCP v0.25.488 on (FCP's `docs/DEVICE_LINES.md`, phase 2):
 - Proved against FCP: `the_app_carries_its_lines_from_fcp` (three lines
   registered, a call to the extension on its line, a call from it going out
   as it, renaming allowed by the tenant).
-- Phase 2b is the screens: the lines column (desktop) and picker (mobile),
-  the line a call is on, rename.
+
+### D8 findings 40 and 42: lines (phase 2b, the screens)
+- With more than the account's own line, a window 880 wide or more shows a
+  Lines column beside the page (`screens/lines.dart`, `LinesColumn`): each
+  line's label, what it is doing (ready, connecting, not connected, ringing,
+  on a call, on hold; a call on it says more than its registration), "doesn't
+  ring here" for a line that does not ring the app, and its new messages. A
+  narrower window has a picker above the keypad ("From <label>", a sheet of
+  the lines).
+- Choosing a line places calls from it (`PhoneModel.line`, `dial`), from
+  every page; a consult goes from the held call's line; a line FCP takes
+  away falls back to the account's own.
+- A call ringing in, and the call up, say "On <label>"; a call FCP named no
+  line for is on the account's own; a silent one shows the bell struck out.
+- Where the tenant allows it, a line's menu renames it (kept on FCP, for
+  every device the line is on); Reset gives it back the administrator's
+  label.
+- The bindings: `PhoneState.lines` (`Line`), `may_rename_lines`,
+  `Call.line`/`silent`, `place_call(target, line)`, `rename_line`.
+- Tested: `test/lines_test.dart` (one line shows none; the column and the
+  line chosen; the picker; a call on its line; rename and reset only where
+  allowed; a line taken away).
+- Phase 3 is shared lines in full: appearances shown and seized, barge, a
+  line's held calls retrievable from any device on it.
 
 ### W5: echo cancellation and noise suppression
 - The desktop's microphone is cleaned before it is sent: WebRTC's audio

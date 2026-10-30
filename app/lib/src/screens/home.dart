@@ -7,6 +7,7 @@ import '../../l10n/app_localizations.dart';
 import '../phone/phone_api.dart';
 import '../phone/phone_model.dart';
 import 'calls.dart';
+import 'lines.dart';
 import 'people.dart';
 import 'presence.dart';
 import 'recents.dart';
@@ -77,7 +78,7 @@ class _HomeScreenState extends State<HomeScreen> {
       _page = Section.phone;
       _adding = false;
     });
-    model.run(() => model.api.call(target));
+    model.dial(target);
   }
 
   @override
@@ -121,7 +122,7 @@ class _HomeScreenState extends State<HomeScreen> {
     );
 
     final update = UpdateScope.maybeOf(context);
-    final body = Column(
+    Widget body(bool linesBeside) => Column(
       children: [
         if (update != null)
           UpdateBanner(
@@ -136,13 +137,16 @@ class _HomeScreenState extends State<HomeScreen> {
             onOpen: () => setState(() => _page = Section.phone),
           ),
         if (model.notice != null) _NoticeBanner(model: model),
-        Expanded(child: _pageBody(up)),
+        Expanded(child: _pageBody(up, linesBeside: linesBeside)),
       ],
     );
 
     return LayoutBuilder(
       builder: (context, constraints) {
         final wide = constraints.maxWidth >= 640;
+        // A desk phone's lines beside everything, where there is room;
+        // else a picker above the keypad.
+        final linesBeside = snap.hasLines && constraints.maxWidth >= 880;
         return Scaffold(
           appBar: _appBar(context),
           body: SafeArea(
@@ -165,10 +169,14 @@ class _HomeScreenState extends State<HomeScreen> {
                         ],
                       ),
                       const VerticalDivider(width: 1),
-                      Expanded(child: body),
+                      Expanded(child: body(linesBeside)),
+                      if (linesBeside) ...[
+                        const VerticalDivider(width: 1),
+                        SizedBox(width: 260, child: LinesColumn(model: model)),
+                      ],
                     ],
                   )
-                : body,
+                : body(false),
           ),
           bottomNavigationBar: wide
               ? null
@@ -190,24 +198,30 @@ class _HomeScreenState extends State<HomeScreen> {
     );
   }
 
-  Widget _pageBody(List<PhoneCall> up) => switch (_page) {
-    Section.phone =>
-      up.isNotEmpty && !_adding
-          ? InCallPanel(
-              model: model,
-              onAddCall: () => setState(() => _adding = true),
-            )
-          : Keypad(
-              key: ValueKey(_fills),
-              initial: _filled,
-              onCall: _dial,
-              onBack: up.isEmpty ? null : () => setState(() => _adding = false),
-            ),
-    Section.recents => RecentsPage(model: model, onDial: _dial),
-    Section.people => PeoplePage(model: model, onDial: _dial),
-    Section.voicemail => VoicemailPage(model: model, onDial: _dial),
-    Section.settings => SettingsPage(model: model),
-  };
+  Widget _pageBody(List<PhoneCall> up, {required bool linesBeside}) =>
+      switch (_page) {
+        Section.phone =>
+          up.isNotEmpty && !_adding
+              ? InCallPanel(
+                  model: model,
+                  onAddCall: () => setState(() => _adding = true),
+                )
+              : Keypad(
+                  key: ValueKey(_fills),
+                  initial: _filled,
+                  onCall: _dial,
+                  onBack: up.isEmpty
+                      ? null
+                      : () => setState(() => _adding = false),
+                  from: model.snapshot.hasLines && !linesBeside
+                      ? LinePicker(model: model)
+                      : null,
+                ),
+        Section.recents => RecentsPage(model: model, onDial: _dial),
+        Section.people => PeoplePage(model: model, onDial: _dial),
+        Section.voicemail => VoicemailPage(model: model, onDial: _dial),
+        Section.settings => SettingsPage(model: model),
+      };
 
   PreferredSizeWidget _appBar(BuildContext context) {
     final s = Strings.of(context);

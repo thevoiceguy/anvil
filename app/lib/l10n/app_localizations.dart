@@ -1610,6 +1610,96 @@ abstract class Strings {
   /// In en, this message translates to:
   /// **'{minutes} minutes'**
   String idleMinutes(int minutes);
+
+  /// No description provided for @linesTitle.
+  ///
+  /// In en, this message translates to:
+  /// **'Lines'**
+  String get linesTitle;
+
+  /// No description provided for @lineFrom.
+  ///
+  /// In en, this message translates to:
+  /// **'From {label}'**
+  String lineFrom(String label);
+
+  /// No description provided for @lineOn.
+  ///
+  /// In en, this message translates to:
+  /// **'On {label}'**
+  String lineOn(String label);
+
+  /// No description provided for @lineReady.
+  ///
+  /// In en, this message translates to:
+  /// **'Ready'**
+  String get lineReady;
+
+  /// No description provided for @lineRegistering.
+  ///
+  /// In en, this message translates to:
+  /// **'Connecting…'**
+  String get lineRegistering;
+
+  /// No description provided for @lineNotRegistered.
+  ///
+  /// In en, this message translates to:
+  /// **'Not connected'**
+  String get lineNotRegistered;
+
+  /// No description provided for @lineRinging.
+  ///
+  /// In en, this message translates to:
+  /// **'Ringing'**
+  String get lineRinging;
+
+  /// No description provided for @lineOnCall.
+  ///
+  /// In en, this message translates to:
+  /// **'On a call'**
+  String get lineOnCall;
+
+  /// No description provided for @lineHeld.
+  ///
+  /// In en, this message translates to:
+  /// **'On hold'**
+  String get lineHeld;
+
+  /// No description provided for @lineSilent.
+  ///
+  /// In en, this message translates to:
+  /// **'Doesn\'t ring here'**
+  String get lineSilent;
+
+  /// No description provided for @lineVoicemail.
+  ///
+  /// In en, this message translates to:
+  /// **'{count} new'**
+  String lineVoicemail(int count);
+
+  /// No description provided for @lineChoose.
+  ///
+  /// In en, this message translates to:
+  /// **'Place calls from'**
+  String get lineChoose;
+
+  /// No description provided for @lineRename.
+  ///
+  /// In en, this message translates to:
+  /// **'Rename'**
+  String get lineRename;
+
+  /// No description provided for @lineRenameTitle.
+  ///
+  /// In en, this message translates to:
+  /// **'Name this line'**
+  String get lineRenameTitle;
+
+  /// No description provided for @lineRenameReset.
+  ///
+  /// In en, this message translates to:
+  /// **'Reset'**
+  String get lineRenameReset;
 }
 
 class _StringsDelegate extends LocalizationsDelegate<Strings> {
