@@ -1022,6 +1022,13 @@ pub fn phone_changes(sink: StreamSink<PhoneChange>) -> anyhow::Result<()> {
                     call: Some(call.id),
                     reason: None,
                 },
+                // Shown by the app's screens in phase 2b (FCP's
+                // `docs/DEVICE_LINES.md`); a redraw for now.
+                C::Lines { .. } => PhoneChange {
+                    kind: "lines".into(),
+                    call: None,
+                    reason: None,
+                },
                 C::CallEnded { id, reason } => PhoneChange {
                     kind: "call_ended".into(),
                     call: Some(id),
@@ -1124,7 +1131,7 @@ async fn execute(command: Command) -> anyhow::Result<Option<u64>> {
 
 /// Dial a number, an extension, a name or an address; the new call's id.
 pub async fn place_call(target: String) -> anyhow::Result<u64> {
-    execute(Command::Call { target })
+    execute(Command::Call { target, line: None })
         .await?
         .ok_or_else(|| anyhow::anyhow!("no call was placed"))
 }

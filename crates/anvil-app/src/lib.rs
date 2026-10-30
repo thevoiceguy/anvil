@@ -42,7 +42,7 @@ pub use clip::{decode_wav, Clip};
 pub use command::{AudioKind, Command, Imported, Response};
 pub use state::{
     AudioDevice, AudioDevices, AudioProcessing, AudioTest, AudioTestStage, AudioVolume, Brand,
-    CallState, CallView, Change, Contact, ContactNumber, Direction, DirectoryListing,
+    CallState, CallView, Change, Contact, ContactNumber, Direction, DirectoryListing, LineView,
     MessageWaiting, MyPresence, OwnStatus, Person, Push, Quality, Recent, Registration, Ringtone,
     State, Voicemail,
 };
@@ -249,15 +249,40 @@ impl Phone {
     /// Carry out a command.
     pub async fn execute(&self, command: Command) -> Result<Response, PhoneError> {
         match command {
-            Command::Call { target } => {
+            Command::Call { target, line } => {
                 let target = self.dial_target(&target);
+                // From one of the lines, by its key: its address is the
+                // INVITE's From. The account's own line is the account.
+                let from = match line.as_deref() {
+                    None | Some("own") => None,
+                    Some(key) => Some(
+                        self.inner
+                            .state
+                            .lock()
+                            .lines
+                            .iter()
+                            .find(|l| l.line == key)
+                            .map(|l| l.aor.clone())
+                            .ok_or_else(|| PhoneError::Refused(format!("no line {key}")))?,
+                    ),
+                };
                 self.hold_the_others(None).await?;
                 let to = target.clone();
-                let call = self.anvil().await?.place_call(&to).await?;
+                let call = self
+                    .anvil()
+                    .await?
+                    .place_call_from(&to, from.as_deref())
+                    .await?;
                 self.update_call(
                     call.0,
-                    |c| c.remote = target.clone(),
-                    || CallView::new(call.0, Direction::Outgoing, &target, CallState::Dialing),
+                    |c| {
+                        c.remote = target.clone();
+                        c.line = line.clone();
+                    },
+                    || CallView {
+                        line: line.clone(),
+                        ..CallView::new(call.0, Direction::Outgoing, &target, CallState::Dialing)
+                    },
                 );
                 Ok(Response {
                     call: Some(call.0),
@@ -680,6 +705,12 @@ impl Phone {
                 tokio::fs::write(&path, contact_file::write(format, &contacts))
                     .await
                     .map_err(|e| PhoneError::Refused(format!("{path}: {e}")))?;
+                Ok(Response::ok())
+            }
+            Command::RenameLine { line, label } => {
+                let fcp = Arc::clone(self.fcp("naming lines")?);
+                fcp.set_line_label(&line, label.trim()).await?;
+                data::refresh_softphone(&self.inner, &fcp).await;
                 Ok(Response::ok())
             }
             Command::DirectoryListed { on } => {
@@ -1487,6 +1518,90 @@ impl Inner {
     }
 
     /// Show `recents`, less those cleared or removed here.
+    /// Change the lines `which` picks, telling the app when any changed.
+    fn update_line(&self, which: impl Fn(&LineView) -> bool, change: impl Fn(&mut LineView)) {
+        let lines = {
+            let mut state = self.state.lock();
+            let before = state.lines.clone();
+            for line in state.lines.iter_mut().filter(|l| which(l)) {
+                change(line);
+            }
+            (state.lines != before).then(|| state.lines.clone())
+        };
+        if let Some(lines) = lines {
+            let _ = self.changes.send(Change::Lines { lines });
+        }
+    }
+
+    /// The lines FCP says the app has: a new line registered, a gone one
+    /// let go, each keeping what is known of its registration and messages.
+    pub(crate) async fn set_lines(&self, lines: Vec<anvil_fcp::SoftphoneLine>, may_rename: bool) {
+        let (added, removed, changed) = {
+            let mut state = self.state.lock();
+            let own = state.registration;
+            let own_mw = state.message_waiting;
+            let before = std::mem::take(&mut state.lines);
+            let next: Vec<LineView> = lines
+                .iter()
+                .map(|l| {
+                    let kept = before.iter().find(|b| b.line == l.line && b.aor == l.aor);
+                    let own_line = l.kind == "own";
+                    LineView {
+                        line: l.line.clone(),
+                        kind: l.kind.clone(),
+                        aor: l.aor.clone(),
+                        label: l.label.clone(),
+                        default_label: l.default_label.clone(),
+                        registration: if own_line {
+                            own
+                        } else {
+                            kept.map(|k| k.registration)
+                                .unwrap_or(Registration::Unregistered)
+                        },
+                        message_waiting: if own_line {
+                            own_mw
+                        } else {
+                            kept.and_then(|k| k.message_waiting)
+                        },
+                        ring: l.ring,
+                        shared: l.shared,
+                        appearances: l.appearances,
+                    }
+                })
+                .collect();
+            let others = |ls: &[LineView]| -> Vec<String> {
+                ls.iter()
+                    .filter(|l| l.kind != "own")
+                    .map(|l| l.aor.clone())
+                    .collect()
+            };
+            let (was, now) = (others(&before), others(&next));
+            let added: Vec<String> = now.iter().filter(|a| !was.contains(a)).cloned().collect();
+            let removed: Vec<String> = was.iter().filter(|a| !now.contains(a)).cloned().collect();
+            let changed = next != before || state.may_rename_lines != may_rename;
+            state.lines = next;
+            state.may_rename_lines = may_rename;
+            (added, removed, changed)
+        };
+        if changed {
+            let lines = self.state.lock().lines.clone();
+            let _ = self.changes.send(Change::Lines { lines });
+        }
+        if added.is_empty() && removed.is_empty() {
+            return;
+        }
+        let anvil = self.anvil.read().await;
+        let Some(anvil) = anvil.as_ref() else { return };
+        for aor in removed {
+            anvil.remove_line(&aor).await;
+        }
+        for aor in added {
+            if let Err(e) = anvil.add_line(&aor).await {
+                tracing::warn!(%e, %aor, "a line did not register");
+            }
+        }
+    }
+
     fn set_may_record(&self, on: bool) {
         let changed = std::mem::replace(&mut self.state.lock().may_record, on) != on;
         if changed {
@@ -1675,6 +1790,8 @@ async fn follow(inner: std::sync::Weak<Inner>, mut events: EventStream) {
                 let state = Registration::from(state);
                 inner.state.lock().registration = state;
                 let _ = inner.changes.send(Change::Registration { state, reason });
+                // The account's own line is the account.
+                inner.update_line(|l| l.kind == "own", |l| l.registration = state);
             }
             Event::PushChanged { state } => {
                 let push = Push::from(state);
@@ -1686,10 +1803,22 @@ async fn follow(inner: std::sync::Weak<Inner>, mut events: EventStream) {
                 from,
                 display_name,
                 server_call,
+                line,
             } => {
+                // A line that does not ring this app shows its call, quietly.
+                let silent = line.as_deref().is_some_and(|key| {
+                    inner
+                        .state
+                        .lock()
+                        .lines
+                        .iter()
+                        .any(|l| l.line == key && !l.ring)
+                });
                 let view = CallView {
                     display_name,
                     server_call,
+                    line,
+                    silent,
                     ..CallView::new(call.0, Direction::Incoming, &from, CallState::Ringing)
                 };
                 let v = view.clone();
@@ -1760,6 +1889,24 @@ async fn follow(inner: std::sync::Weak<Inner>, mut events: EventStream) {
                         data::refresh_recents(&inner, &fcp).await;
                     });
                 }
+            }
+            Event::LineRegistration { aor, state, .. } => {
+                let state = Registration::from(state);
+                inner.update_line(
+                    |l| l.kind != "own" && l.aor == aor,
+                    |l| l.registration = state,
+                );
+            }
+            Event::LineMessageWaiting { aor, summary } => {
+                let mw = MessageWaiting {
+                    waiting: summary.waiting,
+                    new: summary.new,
+                    old: summary.old,
+                };
+                inner.update_line(
+                    |l| l.kind != "own" && l.aor.eq_ignore_ascii_case(&aor),
+                    |l| l.message_waiting = Some(mw),
+                );
             }
             Event::MessageWaiting { summary } => {
                 let mw = MessageWaiting {

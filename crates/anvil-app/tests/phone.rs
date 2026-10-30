@@ -172,6 +172,7 @@ async fn a_running_phone_is_driven_through_its_control_socket() {
     let placed = control
         .request(&Command::Call {
             target: format!("sip:bob@{}", bob.sip_address()),
+            line: None,
         })
         .await
         .unwrap();
@@ -674,6 +675,7 @@ async fn answering_a_second_call_holds_the_first_and_resuming_swaps() {
     let first = alice
         .execute(Command::Call {
             target: format!("sip:bob@{}", bob.sip_address()),
+            line: None,
         })
         .await
         .unwrap()
@@ -705,6 +707,7 @@ async fn answering_a_second_call_holds_the_first_and_resuming_swaps() {
     carol
         .execute(Command::Call {
             target: format!("sip:alice@{}", alice.sip_address()),
+            line: None,
         })
         .await
         .unwrap();
@@ -903,6 +906,7 @@ async fn a_call_rings_until_answered_and_a_second_is_a_tone_in_the_call() {
     let in_calls = heard.in_calls();
     bob.execute(Command::Call {
         target: format!("sip:alice@{}", alice.sip_address()),
+        line: None,
     })
     .await
     .unwrap();
@@ -932,6 +936,7 @@ async fn a_call_rings_until_answered_and_a_second_is_a_tone_in_the_call() {
     carol
         .execute(Command::Call {
             target: format!("sip:alice@{}", alice.sip_address()),
+            line: None,
         })
         .await
         .unwrap();
@@ -1452,6 +1457,7 @@ async fn rings(alice: &Phone, heard: &Heard, caller: &Phone) -> bool {
     caller
         .execute(Command::Call {
             target: format!("sip:alice@{}", alice.sip_address()),
+            line: None,
         })
         .await
         .unwrap();

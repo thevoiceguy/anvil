@@ -106,6 +106,9 @@ pub enum Event {
         /// The server's id for the call (FCP's `X-FCP-Call-Id`): what a
         /// push that woke the app called it.
         server_call: Option<String>,
+        /// Which of the account's lines the call is for (FCP's
+        /// `X-FCP-Line`, a line's key: `own`, `extension:1005`, …).
+        line: Option<String>,
     },
     CallRinging {
         call: CallId,
@@ -138,6 +141,17 @@ pub enum Event {
     /// The mailbox's counts (RFC 3842), from an unsolicited NOTIFY or a
     /// [`subscribe_mwi`](crate::Anvil::subscribe_mwi) subscription.
     MessageWaiting {
+        summary: crate::mwi::MessageSummary,
+    },
+    /// Another line's registration changed ([`crate::Anvil::add_line`]).
+    LineRegistration {
+        aor: String,
+        state: RegState,
+        reason: Option<String>,
+    },
+    /// Another line's message summary (its mailbox, as the server says).
+    LineMessageWaiting {
+        aor: String,
         summary: crate::mwi::MessageSummary,
     },
     /// A transfer of `call` progressed (RFC 3515): the server's status for

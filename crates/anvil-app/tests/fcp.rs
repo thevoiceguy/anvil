@@ -183,6 +183,7 @@ async fn the_running_phone_calls_through_fcp_and_sets_do_not_disturb() {
     let placed = control
         .request(&Command::Call {
             target: bob.clone(),
+            line: None,
         })
         .await
         .unwrap();
@@ -360,6 +361,7 @@ async fn the_phone_keeps_the_users_data() {
     let call = alice_phone
         .execute(Command::Call {
             target: bob.clone(),
+            line: None,
         })
         .await
         .unwrap()
@@ -417,6 +419,7 @@ async fn the_phone_keeps_the_users_data() {
     let parked = alice_phone
         .execute(Command::Call {
             target: bob.clone(),
+            line: None,
         })
         .await
         .unwrap()
@@ -658,7 +661,13 @@ async fn a_user_records_a_call_they_placed_when_fcp_lets_them() {
     })
     .await;
 
-    let placed = alice.execute(Command::Call { target: bob }).await.unwrap();
+    let placed = alice
+        .execute(Command::Call {
+            target: bob,
+            line: None,
+        })
+        .await
+        .unwrap();
     let call = placed.call.unwrap();
     until(&bob_phone, "Bob rings", |s| {
         s.calls.iter().any(|c| c.state == CallState::Ringing)
@@ -1012,4 +1021,213 @@ async fn the_user_sets_their_presence_with_statuses_of_their_own() {
     assert_eq!(p.status, "available", "deleted while in use");
     assert!(p.statuses.is_empty());
     phone.shutdown().await;
+}
+
+/// An admin call against FCP's API, as the tests' platform token.
+async fn admin_call(
+    admin: &str,
+    token: &str,
+    tenant: &str,
+    method: reqwest::Method,
+    path: &str,
+    body: serde_json::Value,
+) -> serde_json::Value {
+    let res = reqwest::Client::new()
+        .request(method, format!("{admin}/api/v1{path}"))
+        .bearer_auth(token)
+        .header("X-FCP-Tenant-Id", tenant)
+        .json(&body)
+        .send()
+        .await
+        .unwrap();
+    let status = res.status();
+    let body: serde_json::Value = res.json().await.unwrap_or_default();
+    assert!(status.is_success(), "{path}: {status} {body}");
+    body
+}
+
+/// Lines on the app (FCP's `docs/DEVICE_LINES.md`, Anvil phase 2a): Bob's
+/// app carries his own line, another extension of his and Mary's as her
+/// assistant; each registers, a call to the extension rings it on that
+/// line, a call placed from that line goes out as it, and a line is named
+/// where the tenant allows.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn the_app_carries_its_lines_from_fcp() {
+    use rand::Rng;
+    let (Ok(admin), Ok(token)) = (
+        std::env::var("ANVIL_FCP_ADMIN"),
+        std::env::var("ANVIL_FCP_TOKEN"),
+    ) else {
+        eprintln!("ANVIL_FCP_ADMIN and ANVIL_FCP_TOKEN not set; skipping");
+        return;
+    };
+    let tenant = anvil_tenant(&admin, &token).await;
+    let put = reqwest::Method::PUT;
+    let (alice_fcp, alice) = signed_in(&admin, &token, "alice").await;
+    let (bob_fcp, bob) = signed_in(&admin, &token, "bob").await;
+    let (_, mary) = signed_in(&admin, &token, "mary").await;
+    let n: u32 = rand::thread_rng().gen_range(10_000..99_999);
+    let (bobs, extra) = (format!("{n}1"), format!("{n}5"));
+    admin_call(
+        &admin,
+        &token,
+        &tenant,
+        put.clone(),
+        &format!("/users/{bob}"),
+        serde_json::json!({ "extension": bobs }),
+    )
+    .await;
+    let bob_id = admin_call(
+        &admin,
+        &token,
+        &tenant,
+        reqwest::Method::GET,
+        &format!("/users/{bob}"),
+        serde_json::json!({}),
+    )
+    .await["id"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    admin_call(
+        &admin,
+        &token,
+        &tenant,
+        reqwest::Method::POST,
+        "/extensions",
+        serde_json::json!({ "number": extra, "target": { "type": "user", "id": bob_id } }),
+    )
+    .await;
+    admin_call(
+        &admin,
+        &token,
+        &tenant,
+        put.clone(),
+        &format!("/users/{mary}/calling"),
+        serde_json::json!({ "executive": { "enabled": true, "assistants": [bob] } }),
+    )
+    .await;
+
+    // The admin gives Bob's app its lines.
+    let device = bob_fcp.softphone().await.unwrap().device_id;
+    admin_call(
+        &admin,
+        &token,
+        &tenant,
+        reqwest::Method::PATCH,
+        &format!("/devices/{device}"),
+        serde_json::json!({ "lines": [
+            { "kind": "own" },
+            { "kind": "extension", "value": extra, "label": "Sales" },
+            { "kind": "on_behalf", "value": mary },
+        ] }),
+    )
+    .await;
+    let alice_phone = phone(alice_fcp, "127.0.0.122").await;
+    let bob_phone = phone(bob_fcp, "127.0.0.123").await;
+    let ext_line = format!("extension:{extra}");
+    until(&bob_phone, "Bob's three lines registered", |s| {
+        s.lines.len() == 3
+            && s.lines
+                .iter()
+                .all(|l| l.registration == Registration::Registered)
+    })
+    .await;
+    let lines = bob_phone.state().lines;
+    assert_eq!(lines[0].line, "own");
+    assert_eq!(lines[1].line, ext_line);
+    assert_eq!(lines[1].label, "Sales");
+    assert_eq!(lines[2].line, format!("on_behalf:{mary}"));
+    assert!(!bob_phone.state().may_rename_lines);
+    until(&alice_phone, "Alice registers", |s| {
+        s.registration == Registration::Registered
+    })
+    .await;
+
+    // Alice calls the extension: Bob's app rings on that line.
+    alice_phone
+        .execute(Command::Call {
+            target: extra.clone(),
+            line: None,
+        })
+        .await
+        .unwrap();
+    until(&bob_phone, "Bob rings on the extension's line", |s| {
+        s.calls
+            .iter()
+            .any(|c| c.state == CallState::Ringing && c.line.as_deref() == Some(&ext_line))
+    })
+    .await;
+    bob_phone
+        .execute(Command::Decline { call: None })
+        .await
+        .unwrap();
+    until(&alice_phone, "Alice's call ends", |s| s.calls.is_empty()).await;
+    until(&bob_phone, "Bob's call ends", |s| s.calls.is_empty()).await;
+
+    // Bob calls Alice from the extension's line: she sees the extension.
+    bob_phone
+        .execute(Command::Call {
+            target: alice.clone(),
+            line: Some(ext_line.clone()),
+        })
+        .await
+        .unwrap();
+    until(
+        &alice_phone,
+        "Alice rings with Bob's extension's call",
+        |s| {
+            s.calls
+                .iter()
+                .any(|c| c.state == CallState::Ringing && c.remote.contains(&format!("{extra}@")))
+        },
+    )
+    .await;
+    alice_phone
+        .execute(Command::Decline { call: None })
+        .await
+        .unwrap();
+    until(&bob_phone, "Bob's call ends", |s| s.calls.is_empty()).await;
+
+    // Named once the tenant lets its users rename.
+    let refused = bob_phone
+        .execute(Command::RenameLine {
+            line: "own".into(),
+            label: "Desk".into(),
+        })
+        .await;
+    assert!(
+        refused.is_err() || !refused.unwrap().ok,
+        "renaming is the tenant's to allow"
+    );
+    admin_call(
+        &admin,
+        &token,
+        &tenant,
+        put,
+        &format!("/tenants/{tenant}"),
+        serde_json::json!({ "lines": { "users_may_rename": true } }),
+    )
+    .await;
+    let named = bob_phone
+        .execute(Command::RenameLine {
+            line: "own".into(),
+            label: "Desk".into(),
+        })
+        .await
+        .unwrap();
+    assert!(named.ok, "{named:?}");
+    until(&bob_phone, "the own line named", |s| {
+        s.may_rename_lines && s.lines.first().is_some_and(|l| l.label == "Desk")
+    })
+    .await;
+    admin_call(
+        &admin,
+        &token,
+        &tenant,
+        reqwest::Method::PUT,
+        &format!("/tenants/{tenant}"),
+        serde_json::json!({ "lines": { "users_may_rename": false } }),
+    )
+    .await;
 }

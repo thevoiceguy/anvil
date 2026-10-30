@@ -43,7 +43,7 @@ pub(crate) fn wanted(calls: &[crate::CallView]) -> Option<Sound> {
     use crate::{CallState, Direction};
     let ringing_in = calls
         .iter()
-        .any(|c| c.direction == Direction::Incoming && c.state == CallState::Ringing);
+        .any(|c| c.direction == Direction::Incoming && c.state == CallState::Ringing && !c.silent);
     if !ringing_in {
         return None;
     }

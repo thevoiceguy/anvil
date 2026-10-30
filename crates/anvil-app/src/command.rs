@@ -10,8 +10,16 @@ use crate::state::State;
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "cmd", rename_all = "snake_case")]
 pub enum Command {
-    /// Dial a number, an extension, a name or a SIP address.
-    Call { target: String },
+    /// Dial a number, an extension, a name or a SIP address; from one of
+    /// the account's lines by its key (`extension:1005`), else its own.
+    Call {
+        target: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        line: Option<String>,
+    },
+    /// Name one of the lines (FCP keeps it, for every device the line is
+    /// on); an empty name gives it back its administrator's label.
+    RenameLine { line: String, label: String },
     Answer {
         #[serde(default)]
         call: Option<u64>,
@@ -294,8 +302,20 @@ impl Command {
             return Err("an empty line".into());
         };
         Ok(match verb.to_ascii_lowercase().as_str() {
+            // `call 1002`, or `call 1002 on extension:1005` from a line.
             "call" | "dial" => Command::Call {
                 target: need(words.get(1), "a number or address")?,
+                line: match (words.get(2), words.get(3)) {
+                    (Some(on), Some(line)) if on.eq_ignore_ascii_case("on") => {
+                        Some(line.to_string())
+                    }
+                    (None, _) => None,
+                    _ => return Err("call <number> [on <line>]".into()),
+                },
+            },
+            "rename-line" => Command::RenameLine {
+                line: need(words.get(1), "a line")?,
+                label: words[2.min(words.len())..].join(" "),
             },
             "answer" => Command::Answer {
                 call: id(words.get(1))?,
@@ -593,7 +613,22 @@ mod tests {
         assert_eq!(
             Command::parse_line("call 1002").unwrap(),
             Command::Call {
-                target: "1002".into()
+                target: "1002".into(),
+                line: None,
+            }
+        );
+        assert_eq!(
+            Command::parse_line("call 1002 on extension:1005").unwrap(),
+            Command::Call {
+                target: "1002".into(),
+                line: Some("extension:1005".into()),
+            }
+        );
+        assert_eq!(
+            Command::parse_line("rename-line own My desk").unwrap(),
+            Command::RenameLine {
+                line: "own".into(),
+                label: "My desk".into(),
             }
         );
         assert_eq!(

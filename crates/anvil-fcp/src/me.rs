@@ -477,6 +477,21 @@ impl FcpClient {
         Ok(())
     }
 
+    /// Name one of the user's lines, on every device that has it; an empty
+    /// name gives it back its administrator's label. FCP refuses (403)
+    /// unless the tenant lets its users rename.
+    pub async fn set_line_label(&self, line: &str, label: &str) -> Result<(), FcpError> {
+        let body = serde_json::json!({ "label": label });
+        let line = line.replace('+', "%2B");
+        self.api_with(
+            reqwest::Method::PUT,
+            &format!("/me/lines/{line}/label"),
+            Some(&body),
+        )
+        .await?;
+        Ok(())
+    }
+
     /// Delete one of the user's contacts, from every app and their site.
     pub async fn delete_contact(&self, id: &str) -> Result<(), FcpError> {
         self.api_with(reqwest::Method::DELETE, &format!("/me/contacts/{id}"), None)

@@ -216,6 +216,11 @@ impl UasRequestHandler for AnvilUasHandler {
             .get(SERVER_CALL_HEADER)
             .map(|v| v.trim().to_string())
             .filter(|v| !v.is_empty());
+        let line = request
+            .headers()
+            .get(LINE_HEADER)
+            .map(|v| v.trim().to_string())
+            .filter(|v| !v.is_empty());
         let call_id = next_call_id();
 
         let pending = PendingInbound {
@@ -249,6 +254,7 @@ impl UasRequestHandler for AnvilUasHandler {
                 from: from_uri,
                 display_name: from_display,
                 server_call,
+                line,
             })
             .await;
 
@@ -383,6 +389,24 @@ fn extract_uri_from_nameaddr(value: &str) -> Option<String> {
 /// FCP names the call in every INVITE it sends a phone, as a push named
 /// it (FCP's `docs/PUSH.md` §2.5).
 pub(crate) const SERVER_CALL_HEADER: &str = "X-FCP-Call-Id";
+
+/// The user part and the `sip:user@host` address a `From`/`To` value names.
+pub(crate) fn user_and_host(value: &str) -> Option<(String, String)> {
+    let inner = match (value.find('<'), value.find('>')) {
+        (Some(a), Some(b)) if b > a => &value[a + 1..b],
+        _ => value.split(';').next().unwrap_or(value),
+    };
+    let rest = inner
+        .trim()
+        .strip_prefix("sips:")
+        .or_else(|| inner.trim().strip_prefix("sip:"))?;
+    let (user, host) = rest.split_once('@')?;
+    let host = host.split([';', '>']).next().unwrap_or(host);
+    (!user.is_empty()).then(|| (user.to_string(), format!("sip:{user}@{host}")))
+}
+
+/// Which of the account's lines a call is for (FCP's `docs/DEVICE_LINES.md`).
+pub(crate) const LINE_HEADER: &str = "X-FCP-Line";
 
 fn display_name_from_header(from: Option<&str>) -> Option<String> {
     let v = from?;

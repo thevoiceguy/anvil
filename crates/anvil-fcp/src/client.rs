@@ -53,6 +53,38 @@ pub struct SoftphoneConfig {
     /// ([`FcpClient::set_directory_listed`]).
     #[serde(default)]
     pub may_change_directory_listing: bool,
+    /// The app's lines, its own first (FCP v0.25.487, `docs/DEVICE_LINES.md`);
+    /// empty from an older FCP, which has the account alone.
+    #[serde(default)]
+    pub lines: Vec<SoftphoneLine>,
+    /// The tenant lets its users name their lines
+    /// ([`FcpClient::set_line_label`]).
+    #[serde(default)]
+    pub may_rename_lines: bool,
+}
+
+/// A line on the app: an account it registers with its own credentials and
+/// takes calls on.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SoftphoneLine {
+    /// 1 for the first, which is the user's own.
+    pub index: u32,
+    /// `own`, `extension`, `shared` or `on_behalf`.
+    pub kind: String,
+    /// The line's key: what `X-FCP-Line` names on a call for it, and what
+    /// a name for it is set under.
+    pub line: String,
+    /// What the app registers it as.
+    pub aor: String,
+    pub label: String,
+    pub default_label: String,
+    #[serde(default)]
+    pub shared: bool,
+    #[serde(default)]
+    pub appearances: u32,
+    /// Whether calls to the line ring the app.
+    #[serde(default = "listed")]
+    pub ring: bool,
 }
 
 fn listed() -> bool {
