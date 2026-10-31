@@ -1904,7 +1904,24 @@ async fn follow(inner: std::sync::Weak<Inner>, mut events: EventStream) {
                 }
             }
             Event::CallEnded { call, reason } => {
-                inner.state.lock().calls.retain(|c| c.id != call.0);
+                let ended = {
+                    let mut state = inner.state.lock();
+                    let ended = state.call(call.0).cloned();
+                    state.calls.retain(|c| c.id != call.0);
+                    ended
+                };
+                // The call's final figures, to FCP (CALL_DIAGNOSTICS §2): what
+                // an administrator troubleshoots from, sent for every call.
+                let report = ended
+                    .as_ref()
+                    .and_then(|c| data::quality_report(c, unix_now()));
+                if let (Some(fcp), Some((server_call, report))) = (inner.fcp.clone(), report) {
+                    tokio::spawn(async move {
+                        if let Err(e) = fcp.report_call_quality(&server_call, &report).await {
+                            tracing::debug!(%e, call = %server_call, "call quality not reported");
+                        }
+                    });
+                }
                 let _ = inner.changes.send(Change::CallEnded {
                     id: call.0,
                     reason: end_reason(&reason),

@@ -2926,8 +2926,8 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   Recent dco_decode_recent(dynamic raw) {
     // Codec=Dco (DartCObject based), see doc to use other codecs
     final arr = raw as List<dynamic>;
-    if (arr.length != 7)
-      throw Exception('unexpected arr length: expect 7 but see ${arr.length}');
+    if (arr.length != 9)
+      throw Exception('unexpected arr length: expect 9 but see ${arr.length}');
     return Recent(
       id: dco_decode_String(arr[0]),
       direction: dco_decode_direction(arr[1]),
@@ -2936,6 +2936,8 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       missed: dco_decode_bool(arr[4]),
       startedAt: dco_decode_String(arr[5]),
       durationSecs: dco_decode_opt_box_autoadd_u_64(arr[6]),
+      mosHundredths: dco_decode_opt_box_autoadd_u_16(arr[7]),
+      poor: dco_decode_bool(arr[8]),
     );
   }
 
@@ -4009,6 +4011,8 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     var var_missed = sse_decode_bool(deserializer);
     var var_startedAt = sse_decode_String(deserializer);
     var var_durationSecs = sse_decode_opt_box_autoadd_u_64(deserializer);
+    var var_mosHundredths = sse_decode_opt_box_autoadd_u_16(deserializer);
+    var var_poor = sse_decode_bool(deserializer);
     return Recent(
       id: var_id,
       direction: var_direction,
@@ -4017,6 +4021,8 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       missed: var_missed,
       startedAt: var_startedAt,
       durationSecs: var_durationSecs,
+      mosHundredths: var_mosHundredths,
+      poor: var_poor,
     );
   }
 
@@ -4912,6 +4918,8 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     sse_encode_bool(self.missed, serializer);
     sse_encode_String(self.startedAt, serializer);
     sse_encode_opt_box_autoadd_u_64(self.durationSecs, serializer);
+    sse_encode_opt_box_autoadd_u_16(self.mosHundredths, serializer);
+    sse_encode_bool(self.poor, serializer);
   }
 
   @protected

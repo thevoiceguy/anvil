@@ -1416,6 +1416,11 @@ class Recent {
   final String startedAt;
   final BigInt? durationSecs;
 
+  /// How it went, when one of the user's phones reported it: the lower
+  /// score (MOS) in hundredths, and whether it was poor (under 3.1).
+  final int? mosHundredths;
+  final bool poor;
+
   const Recent({
     required this.id,
     required this.direction,
@@ -1424,6 +1429,8 @@ class Recent {
     required this.missed,
     required this.startedAt,
     this.durationSecs,
+    this.mosHundredths,
+    required this.poor,
   });
 
   @override
@@ -1434,7 +1441,9 @@ class Recent {
       displayName.hashCode ^
       missed.hashCode ^
       startedAt.hashCode ^
-      durationSecs.hashCode;
+      durationSecs.hashCode ^
+      mosHundredths.hashCode ^
+      poor.hashCode;
 
   @override
   bool operator ==(Object other) =>
@@ -1447,7 +1456,9 @@ class Recent {
           displayName == other.displayName &&
           missed == other.missed &&
           startedAt == other.startedAt &&
-          durationSecs == other.durationSecs;
+          durationSecs == other.durationSecs &&
+          mosHundredths == other.mosHundredths &&
+          poor == other.poor;
 }
 
 /// Whether the account is registered.

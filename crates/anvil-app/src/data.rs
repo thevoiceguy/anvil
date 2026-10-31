@@ -42,7 +42,56 @@ pub(crate) fn recent(r: &CallRecord) -> Recent {
         missed: r.missed,
         started_at: r.start_time.clone(),
         duration_secs: r.duration_seconds,
+        mos_hundredths: r.quality.map(|q| {
+            let worst = q.far_mos.map_or(q.mos, |far| far.min(q.mos));
+            (worst * 100.0).round() as u16
+        }),
+        poor: r.quality.is_some_and(|q| q.poor),
     }
+}
+
+/// What to tell FCP of a call that has ended: its last second's figures,
+/// by the server's id for it. Nothing for a call never measured or never
+/// named by the server.
+pub(crate) fn quality_report(
+    call: &crate::state::CallView,
+    ended_at: u64,
+) -> Option<(String, anvil_fcp::CallQualityReport)> {
+    let server_call = call.server_call.clone()?;
+    let q = call.quality.as_deref()?;
+    if q.mos_hundredths == 0 {
+        return None;
+    }
+    let pct = |permille: u32| permille as f32 / 10.0;
+    let mos = |hundredths: u16| (f32::from(hundredths) / 100.0).clamp(1.0, 4.5);
+    Some((
+        server_call,
+        anvil_fcp::CallQualityReport {
+            direction: match call.direction {
+                crate::state::Direction::Incoming => "incoming",
+                crate::state::Direction::Outgoing => "outgoing",
+            }
+            .to_string(),
+            codec: call.codec.clone().unwrap_or_else(|| "unknown".into()),
+            srtp: call.encrypted,
+            duration_seconds: call
+                .connected_at
+                .map(|at| ended_at.saturating_sub(at).min(u64::from(u32::MAX)) as u32),
+            packets_sent: q.packets_sent,
+            packets_received: q.rtp_received,
+            packets_expected: q.packets_expected,
+            packets_lost: q.packets_lost.min(q.packets_expected),
+            jitter_ms: q.jitter_ms as f32,
+            rtt_ms: q.rtt_ms.map(|r| r as f32),
+            far_loss_pct: q.far_loss_permille.map(|p| pct(p).min(100.0)),
+            far_jitter_ms: q.far_jitter_ms.map(|j| j as f32),
+            far_lost: q.far_lost,
+            mos: mos(q.mos_hundredths),
+            far_mos: q.far_mos_hundredths.map(mos),
+            local_rtp: q.local_rtp.map(|a| a.to_string()),
+            remote_rtp: q.remote_rtp.map(|a| a.to_string()),
+        },
+    ))
 }
 
 pub(crate) fn person(e: &DirectoryEntry, favourite: impl Fn(&str) -> bool) -> Option<Person> {
@@ -365,6 +414,67 @@ pub(crate) fn user_of(aor: &str) -> &str {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_measured_call_is_reported_by_the_servers_id_and_an_unmeasured_one_is_not() {
+        use crate::state::{CallState, CallView, Direction, Quality};
+        let mut call = CallView::new(7, Direction::Outgoing, "sip:1002@x", CallState::Connected);
+        call.codec = Some("opus".into());
+        call.encrypted = true;
+        call.connected_at = Some(1_000);
+        assert!(quality_report(&call, 1_060).is_none(), "nothing measured");
+        call.quality = Some(Box::new(Quality {
+            jitter_ms: 3,
+            packet_loss_permille: 2,
+            rtt_ms: Some(42),
+            packets_received: 3000,
+            packets_played: 3000,
+            packets_dropped: 0,
+            unexpected_pt: None,
+            last_source: None,
+            recent_loss_permille: 0,
+            packets_sent: 3001,
+            bytes_sent: 1,
+            rtp_received: 2994,
+            bytes_received: 1,
+            packets_expected: 3000,
+            packets_lost: 6,
+            send_kbps: 0,
+            recv_kbps: 0,
+            send_pps: 0,
+            recv_pps: 0,
+            far_loss_permille: Some(15),
+            far_jitter_ms: Some(2),
+            far_lost: Some(9),
+            rtcp: true,
+            rtcp_sent: 12,
+            rtcp_received: 12,
+            clock_rate: 48_000,
+            ptime_ms: 20,
+            local_rtp: Some("192.168.1.20:40000".parse().unwrap()),
+            remote_rtp: Some("203.0.113.5:30000".parse().unwrap()),
+            mos_hundredths: 431,
+            far_mos_hundredths: Some(402),
+        }));
+        assert!(
+            quality_report(&call, 1_060).is_none(),
+            "the server never named it"
+        );
+        call.server_call = Some("call-abc".into());
+        let (id, r) = quality_report(&call, 1_060).unwrap();
+        assert_eq!(id, "call-abc");
+        assert_eq!(r.direction, "outgoing");
+        assert_eq!(r.codec, "opus");
+        assert!(r.srtp);
+        assert_eq!(r.duration_seconds, Some(60));
+        assert_eq!(
+            (r.packets_received, r.packets_expected, r.packets_lost),
+            (2994, 3000, 6)
+        );
+        assert_eq!(r.far_loss_pct, Some(1.5));
+        assert_eq!((r.mos, r.far_mos), (4.31, Some(4.02)));
+        assert_eq!(r.remote_rtp.as_deref(), Some("203.0.113.5:30000"));
+    }
 
     #[test]
     fn an_address_names_its_user() {

@@ -40,8 +40,9 @@ pub use discovery::{
     discover, discovery_login, sign_in_methods, Server, SignInMethods, SsoProvider,
 };
 pub use me::{
-    CallQuery, CallRecord, ContactFields, ContactImport, ContactImportSkip, ContactNumber,
-    DirectoryEntry, MailboxStats, Page, PersonalContact, UserEvent, UserEvents, VoicemailMessage,
+    CallQualityReport, CallQuery, CallRecord, CallRecordQuality, ContactFields, ContactImport,
+    ContactImportSkip, ContactNumber, DirectoryEntry, MailboxStats, Page, PersonalContact,
+    UserEvent, UserEvents, VoicemailMessage,
 };
 pub use presence::{MyPresence, OwnStatus, Presence, PresenceUpdate};
 pub use remember::LastSignIn;

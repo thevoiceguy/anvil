@@ -18,7 +18,7 @@ pub struct Page<T> {
 }
 
 /// One call in the user's history (`/me/calls`).
-#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize)]
+#[derive(Debug, Clone, PartialEq, Deserialize, Serialize)]
 pub struct CallRecord {
     pub cdr_id: String,
     pub call_id: String,
@@ -36,6 +36,44 @@ pub struct CallRecord {
     pub answer_time: Option<String>,
     pub end_time: Option<String>,
     pub duration_seconds: Option<u64>,
+    /// How the call went, when one of the user's phones reported it
+    /// (FCP's `docs/CALL_DIAGNOSTICS.md` §2; FCP 0.25.490 and later).
+    #[serde(default)]
+    pub quality: Option<CallRecordQuality>,
+}
+
+/// A call's scores as the user's phone reported them.
+#[derive(Debug, Clone, Copy, PartialEq, Deserialize, Serialize)]
+pub struct CallRecordQuality {
+    /// What the user heard and what the far end heard (E-model MOS).
+    pub mos: f32,
+    pub far_mos: Option<f32>,
+    /// Either under 3.1.
+    pub poor: bool,
+}
+
+/// A call's final figures, sent when it ends
+/// (`POST /me/calls/{call_id}/quality`).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct CallQualityReport {
+    /// `incoming` or `outgoing`, from this phone's side.
+    pub direction: String,
+    pub codec: String,
+    pub srtp: bool,
+    pub duration_seconds: Option<u32>,
+    pub packets_sent: u64,
+    pub packets_received: u64,
+    pub packets_expected: u64,
+    pub packets_lost: u64,
+    pub jitter_ms: f32,
+    pub rtt_ms: Option<f32>,
+    pub far_loss_pct: Option<f32>,
+    pub far_jitter_ms: Option<f32>,
+    pub far_lost: Option<i64>,
+    pub mos: f32,
+    pub far_mos: Option<f32>,
+    pub local_rtp: Option<String>,
+    pub remote_rtp: Option<String>,
 }
 
 /// One entry in the tenant's directory (`/me/directory`): a user, or an
@@ -509,6 +547,24 @@ impl FcpClient {
             reqwest::Method::POST,
             &format!("/me/calls/{server_call}/recording/start"),
             None,
+        )
+        .await?;
+        Ok(())
+    }
+
+    /// Send a call's final figures, by the server's id for it
+    /// (`X-FCP-Call-Id`). FCP keeps one report per phone per call, shows it
+    /// on the call's record and in recents, and announces a poor call.
+    pub async fn report_call_quality(
+        &self,
+        server_call: &str,
+        report: &CallQualityReport,
+    ) -> Result<(), FcpError> {
+        let body = serde_json::to_value(report).expect("a report is JSON");
+        self.api_with(
+            reqwest::Method::POST,
+            &format!("/me/calls/{server_call}/quality"),
+            Some(&body),
         )
         .await?;
         Ok(())

@@ -3391,6 +3391,8 @@ impl SseDecode for crate::api::phone::Recent {
         let mut var_missed = <bool>::sse_decode(deserializer);
         let mut var_startedAt = <String>::sse_decode(deserializer);
         let mut var_durationSecs = <Option<u64>>::sse_decode(deserializer);
+        let mut var_mosHundredths = <Option<u16>>::sse_decode(deserializer);
+        let mut var_poor = <bool>::sse_decode(deserializer);
         return crate::api::phone::Recent {
             id: var_id,
             direction: var_direction,
@@ -3399,6 +3401,8 @@ impl SseDecode for crate::api::phone::Recent {
             missed: var_missed,
             started_at: var_startedAt,
             duration_secs: var_durationSecs,
+            mos_hundredths: var_mosHundredths,
+            poor: var_poor,
         };
     }
 }
@@ -4163,6 +4167,8 @@ impl flutter_rust_bridge::IntoDart for crate::api::phone::Recent {
             self.missed.into_into_dart().into_dart(),
             self.started_at.into_into_dart().into_dart(),
             self.duration_secs.into_into_dart().into_dart(),
+            self.mos_hundredths.into_into_dart().into_dart(),
+            self.poor.into_into_dart().into_dart(),
         ]
         .into_dart()
     }
@@ -5006,6 +5012,8 @@ impl SseEncode for crate::api::phone::Recent {
         <bool>::sse_encode(self.missed, serializer);
         <String>::sse_encode(self.started_at, serializer);
         <Option<u64>>::sse_encode(self.duration_secs, serializer);
+        <Option<u16>>::sse_encode(self.mos_hundredths, serializer);
+        <bool>::sse_encode(self.poor, serializer);
     }
 }
 
