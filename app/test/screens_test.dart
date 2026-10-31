@@ -4,6 +4,7 @@
 import 'package:anvil/src/app.dart';
 import 'package:clock/clock.dart';
 import 'package:anvil/src/phone/phone_api.dart';
+import 'package:anvil/src/screens/calls.dart' show dialSuggestions;
 import 'package:anvil/src/screens/contacts.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -833,6 +834,49 @@ void main() {
     await tapKey(tester, 'directoryListed');
     expect(phone.log, contains('directory false'));
     expect(tester.widget<SwitchListTile>(listed).value, isFalse);
+  });
+
+  test('the keypad suggests people and contacts by name or number', () {
+    const jo = Contact(
+      id: 'c1',
+      name: 'Jo Smith',
+      numbers: [ContactNumber(label: 'mobile', number: '+1 518 321 7034')],
+    );
+    String names(String q) => dialSuggestions(
+      q,
+      const [ann, bob, cy],
+      const [jo],
+    ).map((m) => '${m.name}=${m.dial}').join(', ');
+    expect(names(''), '');
+    expect(names('an'), 'Ann Lee=1002');
+    expect(names('lee'), 'Ann Lee=1002', reason: 'any word of the name');
+    expect(names('100'), 'Ann Lee=1002, Bob Ray=1003');
+    expect(names('3217'), 'Jo Smith=+1 518 321 7034');
+    expect(names('smi'), 'Jo Smith=+1 518 321 7034');
+    expect(names('zz'), '');
+  });
+
+  testWidgets('typing on the keypad offers matches, and a tap calls', (
+    tester,
+  ) async {
+    final phone = await signedIn(tester, seed: withData);
+    await tester.enterText(find.byKey(const Key('target')), 'bo');
+    await tester.pumpAndSettle();
+    expect(find.byKey(const Key('suggestion-1003')), findsOneWidget);
+    expect(find.byKey(const Key('suggestion-1002')), findsNothing);
+    await tapKey(tester, 'suggestion-1003');
+    expect(phone.callOf(1).remote, contains('1003'));
+  });
+
+  testWidgets('new voicemail stands apart from heard', (tester) async {
+    await signedIn(tester, seed: withData);
+    await go(tester, 'Voicemail');
+    expect(find.byKey(const Key('newLabel-m1')), findsOneWidget);
+    expect(find.byKey(const Key('heardLabel-m1')), findsNothing);
+    expect(find.byKey(const Key('heardLabel-m2')), findsOneWidget);
+    Card card(String id) => tester.widget<Card>(find.byKey(Key('message-$id')));
+    expect(card('m1').color, isNotNull, reason: 'a new one is tinted');
+    expect(card('m2').color, isNull);
   });
 
   testWidgets('captures show only while allowed, and are chosen and deleted', (

@@ -2005,6 +2005,18 @@ abstract class Strings {
   /// In en, this message translates to:
   /// **'Delete'**
   String get deleteCaptures;
+
+  /// No description provided for @voicemailNew.
+  ///
+  /// In en, this message translates to:
+  /// **'New'**
+  String get voicemailNew;
+
+  /// No description provided for @voicemailHeard.
+  ///
+  /// In en, this message translates to:
+  /// **'Heard'**
+  String get voicemailHeard;
 }
 
 class _StringsDelegate extends LocalizationsDelegate<Strings> {

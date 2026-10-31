@@ -1074,4 +1074,10 @@ class StringsEn extends Strings {
 
   @override
   String get deleteCaptures => 'Delete';
+
+  @override
+  String get voicemailNew => 'New';
+
+  @override
+  String get voicemailHeard => 'Heard';
 }
