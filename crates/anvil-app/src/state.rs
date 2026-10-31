@@ -372,6 +372,72 @@ pub struct LineView {
     pub ring: bool,
     pub shared: bool,
     pub appearances: u32,
+    /// A shared line whose active calls the app may join.
+    #[serde(default)]
+    pub barge_in: bool,
+    /// A shared line's appearances in use, as the server last said, by
+    /// index; empty when it is idle.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub in_use: Vec<AppearanceView>,
+}
+
+/// One appearance of a shared line in use (FCP's
+/// `docs/ENTERPRISE_CALLING.md` §3.9).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct AppearanceView {
+    /// 1 for the first.
+    pub index: u8,
+    /// `alerting`, `progressing`, `active`, `held` or `seized`.
+    pub state: String,
+    /// The far party, when the server names one.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub remote: Option<String>,
+}
+
+impl AppearanceView {
+    /// Held: any phone on the line may pick it up.
+    pub fn held(&self) -> bool {
+        self.state == "held"
+    }
+
+    /// Up: joined by barging in, where the line allows it.
+    pub fn active(&self) -> bool {
+        self.state == "active"
+    }
+}
+
+impl State {
+    /// Whether an appearance of `line` (by key) is one of this app's own
+    /// calls: a call on the line with the appearance's far party.
+    pub fn appearance_is_ours(&self, line: &str, appearance: &AppearanceView) -> bool {
+        let Some(remote) = appearance.remote.as_deref() else {
+            return false;
+        };
+        let user = |address: &str| {
+            let inner = match (address.find('<'), address.rfind('>')) {
+                (Some(a), Some(b)) if b > a => &address[a + 1..b],
+                _ => address,
+            };
+            let inner = inner.trim();
+            let inner = inner
+                .strip_prefix("sips:")
+                .or_else(|| inner.strip_prefix("sip:"))
+                .or_else(|| inner.strip_prefix("tel:"))
+                .unwrap_or(inner);
+            inner
+                .split(['@', ';'])
+                .next()
+                .unwrap_or("")
+                .trim_start_matches('+')
+                .to_ascii_lowercase()
+        };
+        let theirs = user(remote);
+        !theirs.is_empty()
+            && self
+                .calls
+                .iter()
+                .any(|c| c.line.as_deref() == Some(line) && user(&c.remote) == theirs)
+    }
 }
 
 /// A connected call's media, as last measured.

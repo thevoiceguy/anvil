@@ -20,6 +20,7 @@ pub(crate) mod media;
 pub mod mwi;
 mod push;
 mod registration;
+pub mod sca;
 mod srtp;
 pub(crate) mod stun;
 pub(crate) mod transport;
@@ -552,8 +553,10 @@ impl Anvil {
     /// credentials, refreshed apart, and its message summary subscribed
     /// (FCP's `docs/DEVICE_LINES.md`). Its state arrives as
     /// [`Event::LineRegistration`], its messages as
-    /// [`Event::LineMessageWaiting`]. Adding a line already held renews it.
-    pub async fn add_line(&self, aor: &str) -> Result<(), AnvilError> {
+    /// [`Event::LineMessageWaiting`]. A shared line's appearances are
+    /// watched too ([`sca`]), arriving as [`Event::LineAppearances`].
+    /// Adding a line already held renews it.
+    pub async fn add_line(&self, aor: &str, shared: bool) -> Result<(), AnvilError> {
         let account = SipUri::parse(aor)
             .map_err(|e| AnvilError::Config(format!("invalid line {aor:?}: {e:?}")))?;
         self.remove_line_tasks(aor);
@@ -602,9 +605,26 @@ impl Anvil {
             granted,
             self.events.clone(),
         ));
-        let mwi = tokio::spawn(keep_line_subscribed(Arc::clone(&self.uac), account));
-        self.lines
-            .insert(aor.to_string(), LineTasks { refresh, mwi });
+        let mwi = tokio::spawn(keep_line_subscribed(
+            Arc::clone(&self.uac),
+            account.clone(),
+            mwi::EVENT,
+        ));
+        let call_info = shared.then(|| {
+            tokio::spawn(keep_line_subscribed(
+                Arc::clone(&self.uac),
+                account,
+                sca::EVENT,
+            ))
+        });
+        self.lines.insert(
+            aor.to_string(),
+            LineTasks {
+                refresh,
+                mwi,
+                call_info,
+            },
+        );
         Ok(())
     }
 
@@ -635,6 +655,9 @@ impl Anvil {
             Some((_, tasks)) => {
                 tasks.refresh.abort();
                 tasks.mwi.abort();
+                if let Some(call_info) = tasks.call_info {
+                    call_info.abort();
+                }
                 true
             }
             None => false,
@@ -665,6 +688,29 @@ impl Anvil {
         &self,
         target: &str,
         line: Option<&str>,
+    ) -> Result<CallId, AnvilError> {
+        self.place_call_with(target, line, None).await
+    }
+
+    /// Take appearance `index` of the shared line `line` (its address):
+    /// an INVITE from and to the line naming it, which picks up a call
+    /// held there, or joins an active one where the line allows barging
+    /// in (FCP's `docs/ENTERPRISE_CALLING.md` §3.9, §3.11). The server
+    /// lets the phone that had the call go.
+    pub async fn take_appearance(&self, line: &str, index: u8) -> Result<CallId, AnvilError> {
+        let host = SipUri::parse(line)
+            .map_err(|e| AnvilError::Config(format!("invalid line {line:?}: {e:?}")))?
+            .host()
+            .to_string();
+        self.place_call_with(line, Some(line), Some(sca::take(&host, index)))
+            .await
+    }
+
+    async fn place_call_with(
+        &self,
+        target: &str,
+        line: Option<&str>,
+        call_info: Option<String>,
     ) -> Result<CallId, AnvilError> {
         let from = line
             .map(|l| {
@@ -697,11 +743,23 @@ impl Anvil {
         );
 
         tracing::debug!(%target, rtp_port, "sending INVITE");
-        let handle = self
-            .uac
-            .invite_with_from(target_uri, Some(&sdp_body), from)
-            .await
-            .map_err(|e| AnvilError::Transport(format!("INVITE: {e}")))?;
+        let handle = match call_info {
+            None => {
+                self.uac
+                    .invite_with_from(target_uri, Some(&sdp_body), from)
+                    .await
+            }
+            Some(call_info) => {
+                let mut options = sip_uac::InviteOptions::with_sdp(Some(&sdp_body));
+                options.from = from;
+                options
+                    .extra_headers
+                    .push("Call-Info", call_info)
+                    .map_err(|e| AnvilError::Transport(format!("Call-Info: {e}")))?;
+                self.uac.invite_with_options(target_uri, options).await
+            }
+        }
+        .map_err(|e| AnvilError::Transport(format!("INVITE: {e}")))?;
 
         let handle = Arc::new(handle);
         let call_id = call::next_call_id();
@@ -1305,6 +1363,8 @@ async fn register_once(
 struct LineTasks {
     refresh: JoinHandle<()>,
     mwi: JoinHandle<()>,
+    /// A shared line's `call-info` watch.
+    call_info: Option<JoinHandle<()>>,
 }
 
 /// One REGISTER of a line; the expiry granted.
@@ -1392,12 +1452,12 @@ async fn keep_line_registered(
 /// Keep a line's message summary subscribed: a SUBSCRIBE from and to the
 /// line, so the server's mailbox is the line's (an executive's on an
 /// assistant's phone), renewed as [`Anvil::subscribe_mwi`]'s is.
-async fn keep_line_subscribed(uac: Arc<IntegratedUAC>, account: SipUri) {
+async fn keep_line_subscribed(uac: Arc<IntegratedUAC>, account: SipUri, event: &'static str) {
     loop {
-        let granted = match subscribe_as(&uac, &account, mwi::EVENT).await {
+        let granted = match subscribe_as(&uac, &account, event).await {
             Ok(g) => g,
             Err(e) => {
-                tracing::debug!(%e, aor = %account.as_str(), "a line's message summary was not subscribed");
+                tracing::debug!(%e, aor = %account.as_str(), event, "a line's subscription was not made");
                 60
             }
         };
@@ -1660,6 +1720,25 @@ async fn dispatch_request(
                                     handler.events.send(Event::MessageWaiting { summary }).await;
                             }
                         }
+                    }
+                    (200, "OK")
+                }
+                // A shared line's appearances, to the line's address.
+                "call-info" => {
+                    let to = request.headers().get("To").map(|t| t.to_string());
+                    let call_info: Vec<String> = request
+                        .headers()
+                        .get_all("Call-Info")
+                        .map(|v| v.to_string())
+                        .collect();
+                    if let Some((_, aor)) = to.as_deref().and_then(uas::user_and_host) {
+                        let _ = handler
+                            .events
+                            .send(Event::LineAppearances {
+                                aor,
+                                appearances: sca::parse(&call_info.join(",")),
+                            })
+                            .await;
                     }
                     (200, "OK")
                 }

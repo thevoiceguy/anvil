@@ -82,6 +82,9 @@ pub struct SoftphoneLine {
     pub shared: bool,
     #[serde(default)]
     pub appearances: u32,
+    /// A shared line whose active calls the app may join (FCP v0.25.489).
+    #[serde(default)]
+    pub barge_in: bool,
     /// Whether calls to the line ring the app.
     #[serde(default = "listed")]
     pub ring: bool,

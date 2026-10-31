@@ -1700,6 +1700,54 @@ abstract class Strings {
   /// In en, this message translates to:
   /// **'Reset'**
   String get lineRenameReset;
+
+  /// No description provided for @appearanceAlerting.
+  ///
+  /// In en, this message translates to:
+  /// **'Ringing'**
+  String get appearanceAlerting;
+
+  /// No description provided for @appearanceProgressing.
+  ///
+  /// In en, this message translates to:
+  /// **'Calling'**
+  String get appearanceProgressing;
+
+  /// No description provided for @appearanceActive.
+  ///
+  /// In en, this message translates to:
+  /// **'On a call'**
+  String get appearanceActive;
+
+  /// No description provided for @appearanceHeld.
+  ///
+  /// In en, this message translates to:
+  /// **'On hold'**
+  String get appearanceHeld;
+
+  /// No description provided for @appearanceSeized.
+  ///
+  /// In en, this message translates to:
+  /// **'In use'**
+  String get appearanceSeized;
+
+  /// No description provided for @appearanceYours.
+  ///
+  /// In en, this message translates to:
+  /// **'yours'**
+  String get appearanceYours;
+
+  /// No description provided for @appearancePickUp.
+  ///
+  /// In en, this message translates to:
+  /// **'Pick up'**
+  String get appearancePickUp;
+
+  /// No description provided for @appearanceJoin.
+  ///
+  /// In en, this message translates to:
+  /// **'Join'**
+  String get appearanceJoin;
 }
 
 class _StringsDelegate extends LocalizationsDelegate<Strings> {

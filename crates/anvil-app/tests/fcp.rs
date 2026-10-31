@@ -1231,3 +1231,198 @@ async fn the_app_carries_its_lines_from_fcp() {
     )
     .await;
 }
+
+/// FCP's `docs/DEVICE_LINES.md` phase 3: a shared line on Bob's app and
+/// Carol's. A call to it rings both; each sees the other's call on the
+/// line's appearances; Bob holds it and Carol picks it up, Bob's app let
+/// go and the caller kept.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_shared_line_shows_its_appearances_and_any_app_picks_up_a_held_call() {
+    use rand::Rng;
+    let (Ok(admin), Ok(token)) = (
+        std::env::var("ANVIL_FCP_ADMIN"),
+        std::env::var("ANVIL_FCP_TOKEN"),
+    ) else {
+        eprintln!("ANVIL_FCP_ADMIN and ANVIL_FCP_TOKEN not set; skipping");
+        return;
+    };
+    let tenant = anvil_tenant(&admin, &token).await;
+    let (alice_fcp, _) = signed_in(&admin, &token, "alice").await;
+    let (bob_fcp, bob) = signed_in(&admin, &token, "bob").await;
+    let (carol_fcp, _) = signed_in(&admin, &token, "carol").await;
+    let bob_id = admin_call(
+        &admin,
+        &token,
+        &tenant,
+        reqwest::Method::GET,
+        &format!("/users/{bob}"),
+        serde_json::json!({}),
+    )
+    .await["id"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    let bob_device = bob_fcp.softphone().await.unwrap().device_id;
+    let carol_device = carol_fcp.softphone().await.unwrap().device_id;
+
+    // A shared line of Bob's, on both apps, two appearances, barge allowed.
+    let n: u32 = rand::thread_rng().gen_range(1_000_000..9_999_999);
+    let e164 = format!("+1555{n}");
+    let number = admin_call(
+        &admin,
+        &token,
+        &tenant,
+        reqwest::Method::POST,
+        "/phone-numbers",
+        serde_json::json!({ "e164": e164, "tenant_id": tenant }),
+    )
+    .await;
+    let on = |device: &str| {
+        serde_json::json!({ "device_id": device, "priority": 1, "line_appearance": 2,
+            "shared_line": true, "enabled": true })
+    };
+    admin_call(
+        &admin,
+        &token,
+        &tenant,
+        reqwest::Method::POST,
+        "/line-bindings",
+        serde_json::json!({
+            "phone_number_id": number["id"],
+            "owner_user_id": bob_id,
+            "binding_type": "user",
+            "tenant_id": tenant,
+            "devices": [on(&bob_device), on(&carol_device)],
+            "shared": true,
+            "max_appearances": 2,
+            "barge_in": true,
+        }),
+    )
+    .await;
+    for device in [&bob_device, &carol_device] {
+        admin_call(
+            &admin,
+            &token,
+            &tenant,
+            reqwest::Method::PATCH,
+            &format!("/devices/{device}"),
+            serde_json::json!({ "lines": [{ "kind": "own" }, { "kind": "shared", "value": e164 }] }),
+        )
+        .await;
+    }
+    let line = format!("shared:{e164}");
+    let told = bob_fcp.softphone().await.unwrap();
+    if !told.lines.iter().any(|l| l.line == line && l.barge_in) {
+        eprintln!("this FCP tells the app no shared line's barge-in (before v0.25.489); skipping");
+        return;
+    }
+    let alice_phone = phone(alice_fcp, "127.0.0.124").await;
+    let bob_phone = phone(bob_fcp, "127.0.0.125").await;
+    let carol_phone = phone(carol_fcp, "127.0.0.126").await;
+    for (who, p) in [("Bob", &bob_phone), ("Carol", &carol_phone)] {
+        until(p, &format!("{who}'s shared line registered"), |s| {
+            s.lines.len() == 2
+                && s.lines[1].line == line
+                && s.lines[1].shared
+                && s.lines[1].barge_in
+                && s.lines[1].appearances == 2
+                && s.lines
+                    .iter()
+                    .all(|l| l.registration == Registration::Registered)
+        })
+        .await;
+    }
+    until(&alice_phone, "Alice registers", |s| {
+        s.registration == Registration::Registered
+    })
+    .await;
+    // The watches are up before the call, so its first lamp is seen.
+    tokio::time::sleep(Duration::from_millis(500)).await;
+
+    let appearance = |s: &anvil_app::State| s.lines[1].in_use.first().cloned();
+    alice_phone
+        .execute(Command::Call {
+            target: e164.clone(),
+            line: None,
+        })
+        .await
+        .unwrap();
+    for (who, p) in [("Bob", &bob_phone), ("Carol", &carol_phone)] {
+        until(p, &format!("{who} rings on the shared line"), |s| {
+            s.calls
+                .iter()
+                .any(|c| c.state == CallState::Ringing && c.line.as_deref() == Some(&line))
+        })
+        .await;
+    }
+    until(&carol_phone, "Carol sees the line alerting", |s| {
+        appearance(s).is_some_and(|a| a.index == 1 && a.state == "alerting")
+    })
+    .await;
+
+    bob_phone
+        .execute(Command::Answer { call: None })
+        .await
+        .unwrap();
+    until(&carol_phone, "Carol sees Bob's call active", |s| {
+        s.calls.is_empty() && appearance(s).is_some_and(|a| a.active())
+    })
+    .await;
+    let seen = appearance(&carol_phone.state()).unwrap();
+    assert!(
+        !carol_phone.state().appearance_is_ours(&line, &seen),
+        "Bob's call is not Carol's"
+    );
+    until(&bob_phone, "Bob knows the appearance is his", |s| {
+        appearance(s).is_some_and(|a| s.appearance_is_ours(&line, &a))
+    })
+    .await;
+
+    bob_phone
+        .execute(Command::Hold { call: None })
+        .await
+        .unwrap();
+    until(&carol_phone, "Carol sees the call held", |s| {
+        appearance(s).is_some_and(|a| a.held())
+    })
+    .await;
+
+    // Carol picks it up: she has Alice, Bob's app is let go.
+    let taken = carol_phone
+        .execute(Command::TakeAppearance {
+            line: line.clone(),
+            index: 1,
+        })
+        .await
+        .unwrap();
+    assert!(taken.ok, "{taken:?}");
+    until(&carol_phone, "Carol has the call", |s| {
+        s.calls
+            .iter()
+            .any(|c| c.state == CallState::Connected && c.line.as_deref() == Some(&line))
+    })
+    .await;
+    until(&bob_phone, "Bob's app is let go", |s| s.calls.is_empty()).await;
+    until(&bob_phone, "Bob sees Carol's call active", |s| {
+        appearance(s).is_some_and(|a| a.active())
+    })
+    .await;
+    assert!(
+        alice_phone
+            .state()
+            .calls
+            .iter()
+            .any(|c| c.state == CallState::Connected),
+        "Alice stays on the call"
+    );
+
+    carol_phone
+        .execute(Command::Hangup { call: None })
+        .await
+        .unwrap();
+    until(&alice_phone, "Alice's call ends", |s| s.calls.is_empty()).await;
+    until(&bob_phone, "the line goes idle", |s| {
+        s.lines[1].in_use.is_empty()
+    })
+    .await;
+}

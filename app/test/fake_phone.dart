@@ -227,6 +227,33 @@ class FakePhone implements PhoneApi {
   }
 
   @override
+  Future<int> takeAppearance(String line, int index) async {
+    _refuse();
+    log.add('take $line $index');
+    final id = _next++;
+    final taken = state.lineOf(line)?.inUse.where((a) => a.index == index);
+    set(
+      state.copyWith(
+        calls: [
+          ..._othersHeld(null),
+          PhoneCall(
+            id: id,
+            direction: Direction.outgoing,
+            remote: taken == null || taken.isEmpty
+                ? 'sip:$line@x'
+                : taken.first.remote ?? 'sip:$line@x',
+            state: CallState.connected,
+            line: line,
+          ),
+        ],
+      ),
+      'call',
+      call: id,
+    );
+    return id;
+  }
+
+  @override
   Future<void> renameLine(String line, String label) async {
     _refuse();
     log.add('rename $line "$label"');

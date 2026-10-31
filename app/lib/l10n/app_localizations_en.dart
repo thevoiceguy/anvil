@@ -887,4 +887,28 @@ class StringsEn extends Strings {
 
   @override
   String get lineRenameReset => 'Reset';
+
+  @override
+  String get appearanceAlerting => 'Ringing';
+
+  @override
+  String get appearanceProgressing => 'Calling';
+
+  @override
+  String get appearanceActive => 'On a call';
+
+  @override
+  String get appearanceHeld => 'On hold';
+
+  @override
+  String get appearanceSeized => 'In use';
+
+  @override
+  String get appearanceYours => 'yours';
+
+  @override
+  String get appearancePickUp => 'Pick up';
+
+  @override
+  String get appearanceJoin => 'Join';
 }

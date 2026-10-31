@@ -128,6 +128,12 @@ Stream<PhoneChange> phoneChanges() =>
 Future<BigInt> placeCall({required String target, String? line}) =>
     RustLib.instance.api.crateApiPhonePlaceCall(target: target, line: line);
 
+/// Take appearance `index` of a shared line (by key): pick up the call
+/// held there, or join the one up where the line allows barging in; the
+/// new call's id.
+Future<BigInt> takeAppearance({required String line, required int index}) =>
+    RustLib.instance.api.crateApiPhoneTakeAppearance(line: line, index: index);
+
 /// Name one of the lines, where the tenant allows it; empty gives it back
 /// its administrator's label.
 Future<void> renameLine({required String line, required String label}) =>
@@ -353,6 +359,41 @@ class Account {
           runtimeType == other.runtimeType &&
           username == other.username &&
           server == other.server;
+}
+
+/// One appearance of a shared line in use.
+class Appearance {
+  final int index;
+
+  /// `alerting`, `progressing`, `active`, `held` or `seized`.
+  final String state;
+
+  /// The far party, when the server names one.
+  final String? remote;
+
+  /// One of this app's own calls.
+  final bool ours;
+
+  const Appearance({
+    required this.index,
+    required this.state,
+    this.remote,
+    required this.ours,
+  });
+
+  @override
+  int get hashCode =>
+      index.hashCode ^ state.hashCode ^ remote.hashCode ^ ours.hashCode;
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is Appearance &&
+          runtimeType == other.runtimeType &&
+          index == other.index &&
+          state == other.state &&
+          remote == other.remote &&
+          ours == other.ours;
 }
 
 /// A microphone or a speaker.
@@ -685,6 +726,12 @@ class Line {
   final bool shared;
   final int appearances;
 
+  /// A shared line whose active calls the app may join.
+  final bool bargeIn;
+
+  /// A shared line's appearances in use, by index.
+  final List<Appearance> inUse;
+
   const Line({
     required this.line,
     required this.kind,
@@ -696,6 +743,8 @@ class Line {
     required this.ring,
     required this.shared,
     required this.appearances,
+    required this.bargeIn,
+    required this.inUse,
   });
 
   @override
@@ -709,7 +758,9 @@ class Line {
       voicemailNew.hashCode ^
       ring.hashCode ^
       shared.hashCode ^
-      appearances.hashCode;
+      appearances.hashCode ^
+      bargeIn.hashCode ^
+      inUse.hashCode;
 
   @override
   bool operator ==(Object other) =>
@@ -725,7 +776,9 @@ class Line {
           voicemailNew == other.voicemailNew &&
           ring == other.ring &&
           shared == other.shared &&
-          appearances == other.appearances;
+          appearances == other.appearances &&
+          bargeIn == other.bargeIn &&
+          inUse == other.inUse;
 }
 
 /// What the sign-in screen and the app follow on a managed install.

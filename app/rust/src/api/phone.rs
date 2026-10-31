@@ -584,6 +584,21 @@ pub struct Line {
     pub ring: bool,
     pub shared: bool,
     pub appearances: u32,
+    /// A shared line whose active calls the app may join.
+    pub barge_in: bool,
+    /// A shared line's appearances in use, by index.
+    pub in_use: Vec<Appearance>,
+}
+
+/// One appearance of a shared line in use.
+pub struct Appearance {
+    pub index: u8,
+    /// `alerting`, `progressing`, `active`, `held` or `seized`.
+    pub state: String,
+    /// The far party, when the server names one.
+    pub remote: Option<String>,
+    /// One of this app's own calls.
+    pub ours: bool,
 }
 
 /// A connected call's media, as last measured.
@@ -866,25 +881,39 @@ pub struct PhoneChange {
 #[frb(sync)]
 pub fn phone_state() -> anyhow::Result<PhoneState> {
     let s = phone()?.state();
+    let in_use = |l: &anvil_app::LineView| -> Vec<Appearance> {
+        l.in_use
+            .iter()
+            .map(|a| Appearance {
+                index: a.index,
+                state: a.state.clone(),
+                remote: a.remote.clone(),
+                ours: s.appearance_is_ours(&l.line, a),
+            })
+            .collect()
+    };
+    let lines = s
+        .lines
+        .iter()
+        .map(|l| Line {
+            line: l.line.clone(),
+            kind: l.kind.clone(),
+            aor: l.aor.clone(),
+            label: l.label.clone(),
+            default_label: l.default_label.clone(),
+            registration: registration(l.registration),
+            voicemail_new: l.message_waiting.map(|m| m.new),
+            ring: l.ring,
+            shared: l.shared,
+            appearances: l.appearances,
+            barge_in: l.barge_in,
+            in_use: in_use(l),
+        })
+        .collect();
     Ok(PhoneState {
         aor: s.aor,
         registration: registration(s.registration),
-        lines: s
-            .lines
-            .into_iter()
-            .map(|l| Line {
-                line: l.line,
-                kind: l.kind,
-                aor: l.aor,
-                label: l.label,
-                default_label: l.default_label,
-                registration: registration(l.registration),
-                voicemail_new: l.message_waiting.map(|m| m.new),
-                ring: l.ring,
-                shared: l.shared,
-                appearances: l.appearances,
-            })
-            .collect(),
+        lines,
         may_rename_lines: s.may_rename_lines,
         calls: s
             .calls
@@ -1186,6 +1215,15 @@ pub async fn place_call(target: String, line: Option<String>) -> anyhow::Result<
     execute(Command::Call { target, line })
         .await?
         .ok_or_else(|| anyhow::anyhow!("no call was placed"))
+}
+
+/// Take appearance `index` of a shared line (by key): pick up the call
+/// held there, or join the one up where the line allows barging in; the
+/// new call's id.
+pub async fn take_appearance(line: String, index: u8) -> anyhow::Result<u64> {
+    execute(Command::TakeAppearance { line, index })
+        .await?
+        .ok_or_else(|| anyhow::anyhow!("no appearance was taken"))
 }
 
 /// Name one of the lines, where the tenant allows it; empty gives it back

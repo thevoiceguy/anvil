@@ -446,5 +446,13 @@
   "lineChoose": "Place calls from",
   "lineRename": "Rename",
   "lineRenameTitle": "Name this line",
-  "lineRenameReset": "Reset"
+  "lineRenameReset": "Reset",
+  "appearanceAlerting": "Ringing",
+  "appearanceProgressing": "Calling",
+  "appearanceActive": "On a call",
+  "appearanceHeld": "On hold",
+  "appearanceSeized": "In use",
+  "appearanceYours": "yours",
+  "appearancePickUp": "Pick up",
+  "appearanceJoin": "Join"
 }

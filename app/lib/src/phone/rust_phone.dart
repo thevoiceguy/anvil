@@ -180,6 +180,16 @@ class RustPhone implements PhoneApi {
             ring: l.ring,
             shared: l.shared,
             appearances: l.appearances,
+            bargeIn: l.bargeIn,
+            inUse: [
+              for (final a in l.inUse)
+                LineAppearance(
+                  index: a.index,
+                  state: a.state,
+                  remote: a.remote,
+                  ours: a.ours,
+                ),
+            ],
           ),
       ],
       mayRenameLines: s.mayRenameLines,
@@ -348,6 +358,10 @@ class RustPhone implements PhoneApi {
   @override
   Future<int> call(String target, {String? line}) async =>
       (await rust.placeCall(target: target, line: line)).toInt();
+
+  @override
+  Future<int> takeAppearance(String line, int index) async =>
+      (await rust.takeAppearance(line: line, index: index)).toInt();
 
   @override
   Future<void> renameLine(String line, String label) =>

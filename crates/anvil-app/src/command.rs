@@ -20,6 +20,9 @@ pub enum Command {
     /// Name one of the lines (FCP keeps it, for every device the line is
     /// on); an empty name gives it back its administrator's label.
     RenameLine { line: String, label: String },
+    /// Take appearance `index` of a shared line (by key): pick up the call
+    /// held there, or join the one up where the line allows barging in.
+    TakeAppearance { line: String, index: u8 },
     Answer {
         #[serde(default)]
         call: Option<u64>,
@@ -287,7 +290,8 @@ impl Command {
     /// `ringtone classic`, `ringtone default`, `ringtone file <path>`,
     /// `ringtone remove <id>`, `test mic`, `test speaker`, `test ring`,
     /// `test stop`,
-    /// `refresh`, `register`, `status`. A trailing number names the call.
+    /// `refresh`, `register`, `status`, `take <line> <appearance>`. A
+    /// trailing number names the call.
     pub fn parse_line(line: &str) -> Result<Self, String> {
         let words: Vec<&str> = line.split_whitespace().collect();
         let id = |w: Option<&&str>| -> Result<Option<u64>, String> {
@@ -312,6 +316,13 @@ impl Command {
                     (None, _) => None,
                     _ => return Err("call <number> [on <line>]".into()),
                 },
+            },
+            // `take shared:+15551234567 2`
+            "take" | "take-appearance" => Command::TakeAppearance {
+                line: need(words.get(1), "a line")?,
+                index: need(words.get(2), "an appearance")?
+                    .parse()
+                    .map_err(|_| "an appearance is a number".to_string())?,
             },
             "rename-line" => Command::RenameLine {
                 line: need(words.get(1), "a line")?,
@@ -631,6 +642,14 @@ mod tests {
                 label: "My desk".into(),
             }
         );
+        assert_eq!(
+            Command::parse_line("take shared:+15551234567 2").unwrap(),
+            Command::TakeAppearance {
+                line: "shared:+15551234567".into(),
+                index: 2,
+            }
+        );
+        assert!(Command::parse_line("take shared:+15551234567 two").is_err());
         assert_eq!(
             Command::parse_line("hangup 3").unwrap(),
             Command::Hangup { call: Some(3) }

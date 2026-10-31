@@ -154,6 +154,12 @@ pub enum Event {
         aor: String,
         summary: crate::mwi::MessageSummary,
     },
+    /// A shared line's appearances in use, as the server last said
+    /// ([`crate::sca`]); empty when the line is idle.
+    LineAppearances {
+        aor: String,
+        appearances: Vec<crate::sca::Appearance>,
+    },
     /// A transfer of `call` progressed (RFC 3515): the server's status for
     /// the transferred party's new call — 1xx while it is placed, a final
     /// when done. On success the server then ends `call`.
