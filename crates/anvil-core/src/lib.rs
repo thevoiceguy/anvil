@@ -20,6 +20,8 @@ pub(crate) mod media;
 pub mod mwi;
 mod push;
 mod registration;
+pub(crate) mod rtcp;
+pub use rtcp::RemoteReport;
 pub mod sca;
 mod srtp;
 pub(crate) mod stun;
@@ -37,7 +39,9 @@ pub use config::{
     AccountConfig, AnvilConfig, BrandConfig, MediaConfig, PushAddress, PushProvider, Transport,
 };
 pub use error::AnvilError;
-pub use event::{EndReason, Event, EventStream, MediaStats, PushState, ReceiveCounts, RegState};
+pub use event::{
+    CallStats, EndReason, Event, EventStream, MediaStats, PushState, ReceiveCounts, RegState,
+};
 
 use std::net::IpAddr;
 use std::sync::Arc;
@@ -771,7 +775,7 @@ impl Anvil {
                 inbound: None,
                 dialog: None,
                 negotiated_codec: None,
-                rtp_socket: Arc::clone(&rtp_socket),
+                rtp_socket: rtp_socket.clone(),
                 pipeline: None,
                 srtp: ours.map(|ours| call::CallSrtp { ours, theirs: None }),
                 parked: None,
@@ -1076,6 +1080,16 @@ impl Anvil {
             .muted
             .store(on, std::sync::atomic::Ordering::Relaxed);
         Ok(())
+    }
+
+    /// A call's media as it stands: packets and bytes each way, loss and
+    /// jitter on what arrives, what the far end reports of ours over RTCP,
+    /// the round trip, the codec and where media flows. `None` while the
+    /// call has no media.
+    pub fn call_stats(&self, call: CallId) -> Option<event::CallStats> {
+        self.calls
+            .get(&call)
+            .and_then(|e| e.pipeline.as_ref().map(media::MediaPipeline::stats))
     }
 
     /// Whether a call's media is encrypted: SRTP keyed both ways.
@@ -1831,7 +1845,7 @@ fn map_transport(kind: sip_transport::TransportKind) -> sip_transaction::Transpo
 async fn drive_outgoing_call(
     call_id: CallId,
     handle: Arc<sip_uac::integrated::CallHandle>,
-    rtp_socket: Arc<tokio::net::UdpSocket>,
+    rtp_socket: crate::call::MediaSockets,
     audio: Arc<dyn AudioHost>,
     calls: Arc<DashMap<CallId, CallEntry>>,
     events: mpsc::Sender<Event>,
@@ -1996,7 +2010,7 @@ async fn start_media(
     call: CallId,
     codec: Codec,
     audio: &Arc<dyn AudioHost>,
-    rtp_socket: Arc<tokio::net::UdpSocket>,
+    rtp_socket: crate::call::MediaSockets,
     remote: std::net::SocketAddr,
     events: mpsc::Sender<Event>,
     srtp: Option<forge_rtp::srtp::SrtpContext>,

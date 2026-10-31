@@ -99,10 +99,15 @@ pub fn account(
 }
 
 pub async fn start(account: AccountConfig) -> (Anvil, EventStream) {
+    start_with(account, MediaConfig::default()).await
+}
+
+/// An Anvil with its own media settings (SRTP, codecs).
+pub async fn start_with(account: AccountConfig, media: MediaConfig) -> (Anvil, EventStream) {
     log();
     Anvil::start(AnvilConfig {
         account,
-        media: MediaConfig::default(),
+        media,
         audio: Box::new(Quiet),
         brand: BrandConfig::default(),
     })

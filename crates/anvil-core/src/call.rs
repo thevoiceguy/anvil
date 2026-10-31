@@ -34,7 +34,7 @@ pub(crate) struct PendingInbound {
     pub server_handle: ServerTransactionHandle,
     pub dialog: Dialog,
     pub sdp_answer_sent: bool,
-    pub rtp_socket: Arc<UdpSocket>,
+    pub rtp_socket: MediaSockets,
 }
 
 /// Runtime state for one active call.
@@ -48,7 +48,7 @@ pub(crate) struct CallEntry {
     /// the BYE target if the app hangs up first.
     pub dialog: Option<Dialog>,
     pub negotiated_codec: Option<Codec>,
-    pub rtp_socket: Arc<UdpSocket>,
+    pub rtp_socket: MediaSockets,
     /// Populated when the call reaches `CallEstablished` and the RTP
     /// pipeline starts. `None` until then. Dropping it aborts the
     /// send / receive tasks.
@@ -79,20 +79,65 @@ impl CallSrtp {
     }
 }
 
-/// Bind a UDP socket for RTP: at the media IP when it is this machine's,
-/// else (a STUN-discovered public address) on every interface.
-pub(crate) async fn bind_rtp_socket(media_ip: IpAddr) -> std::io::Result<Arc<UdpSocket>> {
-    match UdpSocket::bind(SocketAddr::new(media_ip, 0)).await {
-        Ok(sock) => Ok(Arc::new(sock)),
-        Err(e) if e.kind() == std::io::ErrorKind::AddrNotAvailable => {
-            let any = match media_ip {
-                IpAddr::V4(_) => IpAddr::V4(Ipv4Addr::UNSPECIFIED),
-                IpAddr::V6(_) => IpAddr::V6(std::net::Ipv6Addr::UNSPECIFIED),
-            };
-            Ok(Arc::new(UdpSocket::bind(SocketAddr::new(any, 0)).await?))
-        }
-        Err(e) => Err(e),
+/// A call's media sockets: RTP, and RTCP on the next port up (RFC 3550
+/// §11), where the far end sends it when the SDP names no other. Derefs to
+/// the RTP socket.
+#[derive(Clone)]
+pub(crate) struct MediaSockets {
+    pub rtp: Arc<UdpSocket>,
+    /// `None` when the port above RTP's could not be had: the call goes
+    /// on without RTCP.
+    pub rtcp: Option<Arc<UdpSocket>>,
+}
+
+impl std::ops::Deref for MediaSockets {
+    type Target = UdpSocket;
+    fn deref(&self) -> &UdpSocket {
+        &self.rtp
     }
+}
+
+impl From<Arc<UdpSocket>> for MediaSockets {
+    fn from(rtp: Arc<UdpSocket>) -> Self {
+        Self { rtp, rtcp: None }
+    }
+}
+
+/// How many RTP ports are tried for one whose next port up is free.
+const PAIR_ATTEMPTS: usize = 16;
+
+/// Bind a call's media sockets: at the media IP when it is this machine's,
+/// else (a STUN-discovered public address) on every interface; RTP on an
+/// even port and RTCP on the one above it when a pair can be had.
+pub(crate) async fn bind_rtp_socket(media_ip: IpAddr) -> std::io::Result<MediaSockets> {
+    let ip = match UdpSocket::bind(SocketAddr::new(media_ip, 0)).await {
+        Ok(_) => media_ip,
+        Err(e) if e.kind() == std::io::ErrorKind::AddrNotAvailable => match media_ip {
+            IpAddr::V4(_) => IpAddr::V4(Ipv4Addr::UNSPECIFIED),
+            IpAddr::V6(_) => IpAddr::V6(std::net::Ipv6Addr::UNSPECIFIED),
+        },
+        Err(e) => return Err(e),
+    };
+    let mut fallback = None;
+    for _ in 0..PAIR_ATTEMPTS {
+        let rtp = UdpSocket::bind(SocketAddr::new(ip, 0)).await?;
+        let port = rtp.local_addr()?.port();
+        if port % 2 == 0 {
+            if let Ok(rtcp) = UdpSocket::bind(SocketAddr::new(ip, port + 1)).await {
+                return Ok(MediaSockets {
+                    rtp: Arc::new(rtp),
+                    rtcp: Some(Arc::new(rtcp)),
+                });
+            }
+        }
+        fallback.get_or_insert(rtp);
+    }
+    tracing::info!("no RTP port with a free one above it; the call has no RTCP");
+    let rtp = match fallback {
+        Some(rtp) => rtp,
+        None => UdpSocket::bind(SocketAddr::new(ip, 0)).await?,
+    };
+    Ok(Arc::new(rtp).into())
 }
 
 /// The media IP when the account pins none: this machine's address on the
@@ -207,5 +252,17 @@ mod tests {
             .await
             .unwrap();
         assert!(sock.local_addr().unwrap().ip().is_loopback());
+    }
+
+    #[tokio::test]
+    async fn rtcp_is_bound_on_the_port_above_rtp() {
+        let sock = bind_rtp_socket(IpAddr::V4(Ipv4Addr::LOCALHOST))
+            .await
+            .unwrap();
+        let rtp = sock.rtp.local_addr().unwrap().port();
+        let rtcp = sock.rtcp.as_ref().expect("a pair").local_addr().unwrap();
+        assert_eq!(rtp % 2, 0);
+        assert_eq!(rtcp.port(), rtp + 1);
+        assert!(rtcp.ip().is_loopback());
     }
 }
