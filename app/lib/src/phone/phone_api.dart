@@ -150,6 +150,8 @@ class PhoneLine {
     this.ring = true,
     this.shared = false,
     this.appearances = 0,
+    this.bargeIn = false,
+    this.inUse = const [],
   });
 
   /// Its key: what a call on it is named by, and a name is set under.
@@ -173,12 +175,22 @@ class PhoneLine {
   final bool shared;
   final int appearances;
 
+  /// A shared line whose active calls the app may join.
+  final bool bargeIn;
+
+  /// A shared line's appearances in use, by index.
+  final List<LineAppearance> inUse;
+
   bool get isOwn => line == 'own';
 
   /// The user has named it something other than its label.
   bool get renamed => label != defaultLabel;
 
-  PhoneLine copyWith({String? label, Registration? registration}) => PhoneLine(
+  PhoneLine copyWith({
+    String? label,
+    Registration? registration,
+    List<LineAppearance>? inUse,
+  }) => PhoneLine(
     line: line,
     kind: kind,
     aor: aor,
@@ -189,7 +201,44 @@ class PhoneLine {
     ring: ring,
     shared: shared,
     appearances: appearances,
+    bargeIn: bargeIn,
+    inUse: inUse ?? this.inUse,
   );
+}
+
+/// One appearance of a shared line in use, as FCP last said.
+class LineAppearance {
+  const LineAppearance({
+    required this.index,
+    required this.state,
+    this.remote,
+    this.ours = false,
+  });
+
+  /// 1 for the first.
+  final int index;
+
+  /// `alerting`, `progressing`, `active`, `held` or `seized`.
+  final String state;
+
+  /// The far party, when FCP names one (`"Bob" <sip:bob@x>`).
+  final String? remote;
+
+  /// One of this app's own calls.
+  final bool ours;
+
+  bool get held => state == 'held';
+  bool get active => state == 'active';
+
+  /// The far party as a person reads it: the name, else the number.
+  String? get who {
+    final r = remote;
+    if (r == null) return null;
+    final name = RegExp(r'^\s*"((?:[^"\\]|\\.)*)"').firstMatch(r)?.group(1);
+    if (name != null && name.isNotEmpty) return name.replaceAll(r'\', '');
+    final lt = r.indexOf('<'), gt = r.lastIndexOf('>');
+    return shortAddress(lt >= 0 && gt > lt ? r.substring(lt + 1, gt) : r);
+  }
 }
 
 /// A contact the user keeps: on this device, or on their FCP account where
@@ -952,6 +1001,10 @@ abstract class PhoneApi {
   /// Name one of the lines, where the tenant allows it; empty gives it
   /// back its administrator's label.
   Future<void> renameLine(String line, String label);
+
+  /// Take appearance `index` of a shared line: pick up the call held
+  /// there, or join the one up where the line allows barging in.
+  Future<int> takeAppearance(String line, int index);
   Future<void> answer([int? call]);
   Future<void> decline([int? call]);
   Future<void> hangup([int? call]);

@@ -167,4 +167,94 @@ void main() {
     await dial(tester, '1002');
     expect(phone.log.last, 'call 1002');
   });
+
+  testWidgets('a shared line shows its appearances and picks up or joins', (
+    tester,
+  ) async {
+    const shared = PhoneLine(
+      line: 'shared:+15551234567',
+      kind: 'shared',
+      label: '+15551234567 - Front desk',
+      shared: true,
+      appearances: 3,
+      bargeIn: true,
+      inUse: [
+        LineAppearance(
+          index: 1,
+          state: 'active',
+          remote: '"Alice" <sip:1001@x>',
+        ),
+        LineAppearance(index: 2, state: 'held', remote: '<sip:+15550001@x>'),
+        LineAppearance(
+          index: 3,
+          state: 'held',
+          remote: '<sip:1004@x>',
+          ours: true,
+        ),
+      ],
+    );
+    final phone = await running(
+      tester,
+      size: wide,
+      withLines: [lines.first, shared],
+    );
+    String row(int i) => tester
+        .widget<Text>(
+          find
+              .descendant(
+                of: find.byKey(Key('appearance-${shared.line}-$i')),
+                matching: find.byType(Text),
+              )
+              .first,
+        )
+        .data!;
+    expect(row(1), '1. On a call · Alice');
+    expect(row(2), '2. On hold · +15550001');
+    expect(row(3), '3. On hold · 1004 · yours');
+    // The line's own call is the app's to resume, not to pick up.
+    expect(find.byKey(Key('take-${shared.line}-3')), findsNothing);
+    expect(find.text('Join'), findsOneWidget);
+
+    await tapKey(tester, 'take-${shared.line}-2');
+    expect(phone.log.last, 'take ${shared.line} 2');
+    expect(find.byKey(const Key('callLine')), findsOneWidget);
+    expect(find.text('On +15551234567 - Front desk'), findsOneWidget);
+  });
+
+  testWidgets('a line without barge-in offers no join', (tester) async {
+    const shared = PhoneLine(
+      line: 'shared:+15551234567',
+      kind: 'shared',
+      label: 'Front desk',
+      shared: true,
+      inUse: [
+        LineAppearance(index: 1, state: 'active', remote: '<sip:1001@x>'),
+      ],
+    );
+    await running(tester, size: wide, withLines: [lines.first, shared]);
+    expect(find.byKey(Key('appearance-${shared.line}-1')), findsOneWidget);
+    expect(find.byKey(Key('take-${shared.line}-1')), findsNothing);
+  });
+
+  testWidgets('a narrow window picks up from the sheet and closes it', (
+    tester,
+  ) async {
+    const shared = PhoneLine(
+      line: 'shared:+15551234567',
+      kind: 'shared',
+      label: 'Front desk',
+      shared: true,
+      inUse: [LineAppearance(index: 1, state: 'held', remote: '<sip:1001@x>')],
+    );
+    final phone = await running(
+      tester,
+      size: narrow,
+      withLines: [lines.first, shared],
+    );
+    await tapKey(tester, 'linePicker');
+    await tapKey(tester, 'take-${shared.line}-1');
+    expect(phone.log.last, 'take ${shared.line} 1');
+    expect(find.byKey(const Key('lineSheet')), findsNothing);
+    expect(find.byKey(const Key('callLine')), findsOneWidget);
+  });
 }

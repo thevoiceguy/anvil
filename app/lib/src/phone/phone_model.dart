@@ -55,6 +55,10 @@ class PhoneModel extends ChangeNotifier {
   Future<void> dial(String target) =>
       run(() async => api.call(target, line: line));
 
+  /// Pick up a shared line's held call, or join its call up.
+  Future<void> takeAppearance(String line, int index) =>
+      run(() => api.takeAppearance(line, index));
+
   /// Name a line, or give it back its label with an empty name.
   Future<void> renameLine(String line, String label) =>
       run(() => api.renameLine(line, label.trim()));

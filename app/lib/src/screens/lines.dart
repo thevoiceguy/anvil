@@ -166,7 +166,7 @@ class LineTile extends StatelessWidget {
       Registration.registered => (s.lineReady, null),
     };
     final waiting = line.voicemailNew ?? 0;
-    return ListTile(
+    final tile = ListTile(
       key: Key('line-${line.line}'),
       selected: selected,
       onTap: onTap,
@@ -202,6 +202,83 @@ class LineTile extends StatelessWidget {
           : waiting > 0
           ? Badge(label: Text('$waiting'), child: const Icon(Icons.voicemail))
           : null,
+    );
+    if (!line.shared || line.inUse.isEmpty) return tile;
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        tile,
+        for (final a in line.inUse)
+          _AppearanceRow(model: model, line: line, appearance: a),
+      ],
+    );
+  }
+}
+
+/// One of a shared line's appearances in use: its index, what it is doing
+/// and with whom; a held call another phone has can be picked up, and one
+/// up joined where the line allows barging in.
+class _AppearanceRow extends StatelessWidget {
+  const _AppearanceRow({
+    required this.model,
+    required this.line,
+    required this.appearance,
+  });
+  final PhoneModel model;
+  final PhoneLine line;
+  final LineAppearance appearance;
+
+  @override
+  Widget build(BuildContext context) {
+    final s = Strings.of(context);
+    final a = appearance;
+    final state = switch (a.state) {
+      'alerting' => s.appearanceAlerting,
+      'progressing' => s.appearanceProgressing,
+      'active' => s.appearanceActive,
+      'held' => s.appearanceHeld,
+      _ => s.appearanceSeized,
+    };
+    final text = [
+      '${a.index}. $state',
+      ?a.who,
+      if (a.ours) s.appearanceYours,
+    ].join(' · ');
+    final take = a.ours
+        ? null
+        : a.held
+        ? (s.appearancePickUp, Icons.call)
+        : a.active && line.bargeIn
+        ? (s.appearanceJoin, Icons.call_merge)
+        : null;
+    return Padding(
+      key: Key('appearance-${line.line}-${a.index}'),
+      padding: const EdgeInsets.fromLTRB(56, 0, 8, 4),
+      child: Row(
+        children: [
+          Expanded(
+            child: Text(
+              text,
+              style: Theme.of(context).textTheme.bodySmall
+                  ?.copyWith(color: a.held ? AnvilColors.held : null),
+              overflow: TextOverflow.ellipsis,
+            ),
+          ),
+          if (take case (final label, final icon))
+            TextButton.icon(
+              key: Key('take-${line.line}-${a.index}'),
+              onPressed: () {
+                // From the narrow window's sheet: back to the call.
+                if (ModalRoute.of(context) is PopupRoute) {
+                  Navigator.of(context).pop();
+                }
+                model.takeAppearance(line.line, a.index);
+              },
+              icon: Icon(icon, size: 16),
+              label: Text(label),
+            ),
+        ],
+      ),
     );
   }
 }

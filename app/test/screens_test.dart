@@ -354,7 +354,9 @@ void main() {
       reason: 'named from the directory',
     );
     expect(find.textContaining('Missed'), findsOneWidget);
-    expect(find.textContaining('2:05'), findsOneWidget);
+    // The call's length, not a time of day that happens to end in it
+    // (a missed call at 12:05).
+    expect(find.textContaining(RegExp(r'· 2:05$')), findsOneWidget);
     await tapKey(tester, 'callBack-r2');
     expect(phone.log, contains('call sip:+15125550100@x'));
     expect(

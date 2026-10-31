@@ -37,6 +37,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   Account dco_decode_account(dynamic raw);
 
   @protected
+  Appearance dco_decode_appearance(dynamic raw);
+
+  @protected
   AudioDevice dco_decode_audio_device(dynamic raw);
 
   @protected
@@ -116,6 +119,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   List<String> dco_decode_list_String(dynamic raw);
+
+  @protected
+  List<Appearance> dco_decode_list_appearance(dynamic raw);
 
   @protected
   List<AudioDevice> dco_decode_list_audio_device(dynamic raw);
@@ -276,6 +282,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   Account sse_decode_account(SseDeserializer deserializer);
 
   @protected
+  Appearance sse_decode_appearance(SseDeserializer deserializer);
+
+  @protected
   AudioDevice sse_decode_audio_device(SseDeserializer deserializer);
 
   @protected
@@ -361,6 +370,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   List<String> sse_decode_list_String(SseDeserializer deserializer);
+
+  @protected
+  List<Appearance> sse_decode_list_appearance(SseDeserializer deserializer);
 
   @protected
   List<AudioDevice> sse_decode_list_audio_device(SseDeserializer deserializer);
@@ -537,6 +549,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   void sse_encode_account(Account self, SseSerializer serializer);
 
   @protected
+  void sse_encode_appearance(Appearance self, SseSerializer serializer);
+
+  @protected
   void sse_encode_audio_device(AudioDevice self, SseSerializer serializer);
 
   @protected
@@ -640,6 +655,12 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   void sse_encode_list_String(List<String> self, SseSerializer serializer);
+
+  @protected
+  void sse_encode_list_appearance(
+    List<Appearance> self,
+    SseSerializer serializer,
+  );
 
   @protected
   void sse_encode_list_audio_device(

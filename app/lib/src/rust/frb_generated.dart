@@ -70,7 +70,7 @@ class RustLib extends BaseEntrypoint<RustLibApi, RustLibApiImpl, RustLibWire> {
   String get codegenVersion => '2.13.0';
 
   @override
-  int get rustContentHash => 252921367;
+  int get rustContentHash => -1989727006;
 
   static const kDefaultExternalLibraryLoaderConfig =
       ExternalLibraryLoaderConfig(
@@ -249,6 +249,11 @@ abstract class RustLibApi extends BaseApi {
     required String dir,
     String? name,
     Uint8List? icon,
+  });
+
+  Future<BigInt> crateApiPhoneTakeAppearance({
+    required String line,
+    required int index,
   });
 
   Future<void> crateApiPhoneTestMicrophone();
@@ -2117,6 +2122,41 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   );
 
   @override
+  Future<BigInt> crateApiPhoneTakeAppearance({
+    required String line,
+    required int index,
+  }) {
+    return handler.executeNormal(
+      NormalTask(
+        callFfi: (port_) {
+          final serializer = SseSerializer(generalizedFrbRustBinding);
+          sse_encode_String(line, serializer);
+          sse_encode_u_8(index, serializer);
+          pdeCallFfi(
+            generalizedFrbRustBinding,
+            serializer,
+            funcId: 64,
+            port: port_,
+          );
+        },
+        codec: SseCodec(
+          decodeSuccessData: sse_decode_u_64,
+          decodeErrorData: sse_decode_AnyhowException,
+        ),
+        constMeta: kCrateApiPhoneTakeAppearanceConstMeta,
+        argValues: [line, index],
+        apiImpl: this,
+      ),
+    );
+  }
+
+  TaskConstMeta get kCrateApiPhoneTakeAppearanceConstMeta =>
+      const TaskConstMeta(
+        debugName: "take_appearance",
+        argNames: ["line", "index"],
+      );
+
+  @override
   Future<void> crateApiPhoneTestMicrophone() {
     return handler.executeNormal(
       NormalTask(
@@ -2125,7 +2165,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 64,
+            funcId: 65,
             port: port_,
           );
         },
@@ -2153,7 +2193,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 65,
+            funcId: 66,
             port: port_,
           );
         },
@@ -2182,7 +2222,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 66,
+            funcId: 67,
             port: port_,
           );
         },
@@ -2214,7 +2254,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 67,
+            funcId: 68,
             port: port_,
           );
         },
@@ -2264,6 +2304,20 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     return Account(
       username: dco_decode_String(arr[0]),
       server: dco_decode_String(arr[1]),
+    );
+  }
+
+  @protected
+  Appearance dco_decode_appearance(dynamic raw) {
+    // Codec=Dco (DartCObject based), see doc to use other codecs
+    final arr = raw as List<dynamic>;
+    if (arr.length != 4)
+      throw Exception('unexpected arr length: expect 4 but see ${arr.length}');
+    return Appearance(
+      index: dco_decode_u_8(arr[0]),
+      state: dco_decode_String(arr[1]),
+      remote: dco_decode_opt_String(arr[2]),
+      ours: dco_decode_bool(arr[3]),
     );
   }
 
@@ -2492,8 +2546,8 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   Line dco_decode_line(dynamic raw) {
     // Codec=Dco (DartCObject based), see doc to use other codecs
     final arr = raw as List<dynamic>;
-    if (arr.length != 10)
-      throw Exception('unexpected arr length: expect 10 but see ${arr.length}');
+    if (arr.length != 12)
+      throw Exception('unexpected arr length: expect 12 but see ${arr.length}');
     return Line(
       line: dco_decode_String(arr[0]),
       kind: dco_decode_String(arr[1]),
@@ -2505,6 +2559,8 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       ring: dco_decode_bool(arr[7]),
       shared: dco_decode_bool(arr[8]),
       appearances: dco_decode_u_32(arr[9]),
+      bargeIn: dco_decode_bool(arr[10]),
+      inUse: dco_decode_list_appearance(arr[11]),
     );
   }
 
@@ -2512,6 +2568,12 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   List<String> dco_decode_list_String(dynamic raw) {
     // Codec=Dco (DartCObject based), see doc to use other codecs
     return (raw as List<dynamic>).map(dco_decode_String).toList();
+  }
+
+  @protected
+  List<Appearance> dco_decode_list_appearance(dynamic raw) {
+    // Codec=Dco (DartCObject based), see doc to use other codecs
+    return (raw as List<dynamic>).map(dco_decode_appearance).toList();
   }
 
   @protected
@@ -3010,6 +3072,21 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   }
 
   @protected
+  Appearance sse_decode_appearance(SseDeserializer deserializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    var var_index = sse_decode_u_8(deserializer);
+    var var_state = sse_decode_String(deserializer);
+    var var_remote = sse_decode_opt_String(deserializer);
+    var var_ours = sse_decode_bool(deserializer);
+    return Appearance(
+      index: var_index,
+      state: var_state,
+      remote: var_remote,
+      ours: var_ours,
+    );
+  }
+
+  @protected
   AudioDevice sse_decode_audio_device(SseDeserializer deserializer) {
     // Codec=Sse (Serialization based), see doc to use other codecs
     var var_id = sse_decode_String(deserializer);
@@ -3266,6 +3343,8 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     var var_ring = sse_decode_bool(deserializer);
     var var_shared = sse_decode_bool(deserializer);
     var var_appearances = sse_decode_u_32(deserializer);
+    var var_bargeIn = sse_decode_bool(deserializer);
+    var var_inUse = sse_decode_list_appearance(deserializer);
     return Line(
       line: var_line,
       kind: var_kind,
@@ -3277,6 +3356,8 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       ring: var_ring,
       shared: var_shared,
       appearances: var_appearances,
+      bargeIn: var_bargeIn,
+      inUse: var_inUse,
     );
   }
 
@@ -3288,6 +3369,18 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     var ans_ = <String>[];
     for (var idx_ = 0; idx_ < len_; ++idx_) {
       ans_.add(sse_decode_String(deserializer));
+    }
+    return ans_;
+  }
+
+  @protected
+  List<Appearance> sse_decode_list_appearance(SseDeserializer deserializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+
+    var len_ = sse_decode_i_32(deserializer);
+    var ans_ = <Appearance>[];
+    for (var idx_ = 0; idx_ < len_; ++idx_) {
+      ans_.add(sse_decode_appearance(deserializer));
     }
     return ans_;
   }
@@ -3987,6 +4080,15 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   }
 
   @protected
+  void sse_encode_appearance(Appearance self, SseSerializer serializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    sse_encode_u_8(self.index, serializer);
+    sse_encode_String(self.state, serializer);
+    sse_encode_opt_String(self.remote, serializer);
+    sse_encode_bool(self.ours, serializer);
+  }
+
+  @protected
   void sse_encode_audio_device(AudioDevice self, SseSerializer serializer) {
     // Codec=Sse (Serialization based), see doc to use other codecs
     sse_encode_String(self.id, serializer);
@@ -4209,6 +4311,8 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     sse_encode_bool(self.ring, serializer);
     sse_encode_bool(self.shared, serializer);
     sse_encode_u_32(self.appearances, serializer);
+    sse_encode_bool(self.bargeIn, serializer);
+    sse_encode_list_appearance(self.inUse, serializer);
   }
 
   @protected
@@ -4217,6 +4321,18 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     sse_encode_i_32(self.length, serializer);
     for (final item in self) {
       sse_encode_String(item, serializer);
+    }
+  }
+
+  @protected
+  void sse_encode_list_appearance(
+    List<Appearance> self,
+    SseSerializer serializer,
+  ) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    sse_encode_i_32(self.length, serializer);
+    for (final item in self) {
+      sse_encode_appearance(item, serializer);
     }
   }
 

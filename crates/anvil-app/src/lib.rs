@@ -41,10 +41,10 @@ pub use anvil_fcp::{CallingSettings, CallingUpdate};
 pub use clip::{decode_wav, Clip};
 pub use command::{AudioKind, Command, Imported, Response};
 pub use state::{
-    AudioDevice, AudioDevices, AudioProcessing, AudioTest, AudioTestStage, AudioVolume, Brand,
-    CallState, CallView, Change, Contact, ContactNumber, Direction, DirectoryListing, LineView,
-    MessageWaiting, MyPresence, OwnStatus, Person, Push, Quality, Recent, Registration, Ringtone,
-    State, Voicemail,
+    AppearanceView, AudioDevice, AudioDevices, AudioProcessing, AudioTest, AudioTestStage,
+    AudioVolume, Brand, CallState, CallView, Change, Contact, ContactNumber, Direction,
+    DirectoryListing, LineView, MessageWaiting, MyPresence, OwnStatus, Person, Push, Quality,
+    Recent, Registration, Ringtone, State, Voicemail,
 };
 
 use settings::LocalSettings;
@@ -706,6 +706,39 @@ impl Phone {
                     .await
                     .map_err(|e| PhoneError::Refused(format!("{path}: {e}")))?;
                 Ok(Response::ok())
+            }
+            Command::TakeAppearance { line, index } => {
+                let (aor, remote) = {
+                    let state = self.inner.state.lock();
+                    let found = state
+                        .lines
+                        .iter()
+                        .find(|l| l.line == line && l.shared)
+                        .ok_or_else(|| PhoneError::Refused(format!("no shared line {line}")))?;
+                    let remote = found
+                        .in_use
+                        .iter()
+                        .find(|a| a.index == index)
+                        .and_then(|a| a.remote.clone());
+                    (found.aor.clone(), remote)
+                };
+                self.hold_the_others(None).await?;
+                let call = self.anvil().await?.take_appearance(&aor, index).await?;
+                // Shown as the far party the line named, until the call
+                // says otherwise.
+                let shown = remote.unwrap_or_else(|| aor.clone());
+                self.update_call(
+                    call.0,
+                    |c| c.line = Some(line.clone()),
+                    || CallView {
+                        line: Some(line.clone()),
+                        ..CallView::new(call.0, Direction::Outgoing, &shown, CallState::Dialing)
+                    },
+                );
+                Ok(Response {
+                    call: Some(call.0),
+                    ..Response::ok()
+                })
             }
             Command::RenameLine { line, label } => {
                 let fcp = Arc::clone(self.fcp("naming lines")?);
@@ -1566,6 +1599,8 @@ impl Inner {
                         ring: l.ring,
                         shared: l.shared,
                         appearances: l.appearances,
+                        barge_in: l.barge_in,
+                        in_use: kept.map(|k| k.in_use.clone()).unwrap_or_default(),
                     }
                 })
                 .collect();
@@ -1595,8 +1630,13 @@ impl Inner {
         for aor in removed {
             anvil.remove_line(&aor).await;
         }
+        let shared: Vec<String> = lines
+            .iter()
+            .filter(|l| l.shared)
+            .map(|l| l.aor.clone())
+            .collect();
         for aor in added {
-            if let Err(e) = anvil.add_line(&aor).await {
+            if let Err(e) = anvil.add_line(&aor, shared.contains(&aor)).await {
                 tracing::warn!(%e, %aor, "a line did not register");
             }
         }
@@ -1906,6 +1946,20 @@ async fn follow(inner: std::sync::Weak<Inner>, mut events: EventStream) {
                 inner.update_line(
                     |l| l.kind != "own" && l.aor.eq_ignore_ascii_case(&aor),
                     |l| l.message_waiting = Some(mw),
+                );
+            }
+            Event::LineAppearances { aor, appearances } => {
+                let in_use: Vec<AppearanceView> = appearances
+                    .into_iter()
+                    .map(|a| AppearanceView {
+                        index: a.index,
+                        state: a.state,
+                        remote: a.remote,
+                    })
+                    .collect();
+                inner.update_line(
+                    |l| l.shared && l.aor.eq_ignore_ascii_case(&aor),
+                    |l| l.in_use = in_use.clone(),
                 );
             }
             Event::MessageWaiting { summary } => {

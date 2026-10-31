@@ -577,8 +577,34 @@ With FCP v0.25.488 on (FCP's `docs/DEVICE_LINES.md`, phase 2):
 - Tested: `test/lines_test.dart` (one line shows none; the column and the
   line chosen; the picker; a call on its line; rename and reset only where
   allowed; a line taken away).
-- Phase 3 is shared lines in full: appearances shown and seized, barge, a
-  line's held calls retrievable from any device on it.
+
+### D8 findings 40 and 42: shared lines (phase 3)
+With FCP v0.25.489 on (its `docs/ENTERPRISE_CALLING.md` §3.9, §3.11):
+- `anvil-core`: a shared line (`add_line(aor, true)`) also watches the
+  line's `call-info`, subscribed from and to the line and renewed as its
+  message summary is; FCP's NOTIFYs carry the line's appearances in
+  `Call-Info` (`sca::parse`: index, state, far party; the idle rest left
+  out) and arrive as `Event::LineAppearances`. `take_appearance(line,
+  index)` sends an INVITE from and to the line naming the appearance
+  (`Call-Info: <sip:host>;appearance-index=N`): FCP gives the phone the
+  line's leg of a held call (and lets the phone that held it go), or joins
+  an active one where the line allows barging in.
+- `anvil-fcp`: `SoftphoneLine.barge_in`.
+- `anvil-app`: `LineView.barge_in` and `in_use` (`AppearanceView`),
+  `State::appearance_is_ours` (a call of this app's on the line with the
+  appearance's far party), `Command::TakeAppearance`; the CLI's
+  `take <line> <appearance>`.
+- The screens: under a shared line, each appearance in use (its number,
+  ringing / calling / on a call / on hold / in use, with whom, "yours");
+  Pick up on a held call another phone has, Join on one up where the line
+  allows it; from the narrow window's sheet it closes the sheet.
+- Not done: seizing an appearance before dialling (`line-seize`). A desk
+  phone seizes when it goes off hook; the app dials with the number
+  already typed, and FCP gives the call the lowest free appearance.
+- Proved against FCP: `a_shared_line_shows_its_appearances_and_any_app_picks_up_a_held_call`
+  (two apps on the line; ringing both, alerting, active and held seen by
+  the other, picked up by the other app with the caller kept, idle after);
+  `test/lines_test.dart` for the screens.
 
 ### W5: echo cancellation and noise suppression
 - The desktop's microphone is cleaned before it is sent: WebRTC's audio
