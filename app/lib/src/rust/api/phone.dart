@@ -1256,6 +1256,45 @@ class Quality {
   /// Where the last packet came from.
   final String? lastSource;
 
+  /// The far end's packets lost over the last five seconds, per thousand.
+  final int recentLossPermille;
+  final BigInt packetsSent;
+  final BigInt bytesSent;
+
+  /// RTP received, played or not.
+  final BigInt rtpReceived;
+  final BigInt bytesReceived;
+
+  /// The far end's packets its sequence numbers say were sent, and those
+  /// that never arrived.
+  final BigInt packetsExpected;
+  final BigInt packetsLost;
+
+  /// What flowed in the last second.
+  final int sendKbps;
+  final int recvKbps;
+  final int sendPps;
+  final int recvPps;
+
+  /// What the far end last reported of ours (RTCP).
+  final int? farLossPermille;
+  final int? farJitterMs;
+  final PlatformInt64? farLost;
+  final bool rtcp;
+  final BigInt rtcpSent;
+  final BigInt rtcpReceived;
+  final int clockRate;
+  final int ptimeMs;
+
+  /// Where media flows between (`address:port`).
+  final String? localRtp;
+  final String? remoteRtp;
+
+  /// The estimated score (MOS) in hundredths: what the user hears, and
+  /// what the far end hears once it has reported.
+  final int mosHundredths;
+  final int? farMosHundredths;
+
   const Quality({
     required this.jitterMs,
     required this.packetLossPermille,
@@ -1266,6 +1305,29 @@ class Quality {
     this.unexpectedPt,
     this.expectedPt,
     this.lastSource,
+    required this.recentLossPermille,
+    required this.packetsSent,
+    required this.bytesSent,
+    required this.rtpReceived,
+    required this.bytesReceived,
+    required this.packetsExpected,
+    required this.packetsLost,
+    required this.sendKbps,
+    required this.recvKbps,
+    required this.sendPps,
+    required this.recvPps,
+    this.farLossPermille,
+    this.farJitterMs,
+    this.farLost,
+    required this.rtcp,
+    required this.rtcpSent,
+    required this.rtcpReceived,
+    required this.clockRate,
+    required this.ptimeMs,
+    this.localRtp,
+    this.remoteRtp,
+    required this.mosHundredths,
+    this.farMosHundredths,
   });
 
   @override
@@ -1278,7 +1340,30 @@ class Quality {
       packetsDropped.hashCode ^
       unexpectedPt.hashCode ^
       expectedPt.hashCode ^
-      lastSource.hashCode;
+      lastSource.hashCode ^
+      recentLossPermille.hashCode ^
+      packetsSent.hashCode ^
+      bytesSent.hashCode ^
+      rtpReceived.hashCode ^
+      bytesReceived.hashCode ^
+      packetsExpected.hashCode ^
+      packetsLost.hashCode ^
+      sendKbps.hashCode ^
+      recvKbps.hashCode ^
+      sendPps.hashCode ^
+      recvPps.hashCode ^
+      farLossPermille.hashCode ^
+      farJitterMs.hashCode ^
+      farLost.hashCode ^
+      rtcp.hashCode ^
+      rtcpSent.hashCode ^
+      rtcpReceived.hashCode ^
+      clockRate.hashCode ^
+      ptimeMs.hashCode ^
+      localRtp.hashCode ^
+      remoteRtp.hashCode ^
+      mosHundredths.hashCode ^
+      farMosHundredths.hashCode;
 
   @override
   bool operator ==(Object other) =>
@@ -1293,7 +1378,30 @@ class Quality {
           packetsDropped == other.packetsDropped &&
           unexpectedPt == other.unexpectedPt &&
           expectedPt == other.expectedPt &&
-          lastSource == other.lastSource;
+          lastSource == other.lastSource &&
+          recentLossPermille == other.recentLossPermille &&
+          packetsSent == other.packetsSent &&
+          bytesSent == other.bytesSent &&
+          rtpReceived == other.rtpReceived &&
+          bytesReceived == other.bytesReceived &&
+          packetsExpected == other.packetsExpected &&
+          packetsLost == other.packetsLost &&
+          sendKbps == other.sendKbps &&
+          recvKbps == other.recvKbps &&
+          sendPps == other.sendPps &&
+          recvPps == other.recvPps &&
+          farLossPermille == other.farLossPermille &&
+          farJitterMs == other.farJitterMs &&
+          farLost == other.farLost &&
+          rtcp == other.rtcp &&
+          rtcpSent == other.rtcpSent &&
+          rtcpReceived == other.rtcpReceived &&
+          clockRate == other.clockRate &&
+          ptimeMs == other.ptimeMs &&
+          localRtp == other.localRtp &&
+          remoteRtp == other.remoteRtp &&
+          mosHundredths == other.mosHundredths &&
+          farMosHundredths == other.farMosHundredths;
 }
 
 /// One call in the user's history.

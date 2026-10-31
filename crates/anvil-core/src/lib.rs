@@ -22,6 +22,7 @@ mod push;
 mod registration;
 pub(crate) mod rtcp;
 pub use rtcp::RemoteReport;
+pub mod quality;
 pub mod sca;
 mod srtp;
 pub(crate) mod stun;
@@ -2033,8 +2034,7 @@ async fn start_media(
 
     let sink = media::StatsSink {
         call,
-        codec,
-        interval: std::time::Duration::from_secs(2),
+        interval: std::time::Duration::from_secs(1),
         events,
     };
     let encrypted = srtp.is_some();

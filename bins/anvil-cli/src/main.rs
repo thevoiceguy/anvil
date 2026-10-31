@@ -1254,22 +1254,31 @@ async fn run(cli: Cli, cfg: AnvilConfig, tone_stats: Option<Arc<ToneStats>>) -> 
                         println!("[event] DtmfReceived {{ call: {call:?}, digit: {digit:?} }}");
                     }
                     Event::MediaStats { call, stats } => {
+                        let c = &stats.call;
+                        let far = c.remote.map(|r| {
+                            format!("{:.1}%/{:.1}ms", r.fraction_lost_pct, r.jitter_ms)
+                        });
                         println!(
-                            "[stats] call={call:?} codec={:?} jitter={:.1}ms loss={:.1}% rx={:.1}kbps tx={:.1}kbps \
+                            "[stats] call={call:?} codec={:?} mos={:.2} far_mos={:?} jitter={:.1}ms \
+                             loss={:.1}% (5s {:.1}%) rtt={:?} far={far:?} rx={:.1}kbps tx={:.1}kbps \
                              received={} played={} dropped={} (pt {} {:?}, srtp {}, malformed {}) from={:?}",
-                            stats.codec,
-                            stats.jitter_ms,
-                            stats.packet_loss_pct,
+                            c.codec,
+                            stats.mos.score,
+                            stats.far_mos.map(|m| (m.score * 100.0).round() / 100.0),
+                            c.jitter_ms,
+                            c.loss_pct(),
+                            stats.recent_loss_pct,
+                            c.rtt_ms.map(|r| r.round()),
                             stats.recv_kbps,
                             stats.send_kbps,
-                            stats.receive.received,
-                            stats.receive.played,
-                            stats.receive.dropped(),
-                            stats.receive.dropped_payload_type,
-                            stats.receive.last_unexpected_pt,
-                            stats.receive.dropped_srtp,
-                            stats.receive.dropped_malformed,
-                            stats.receive.last_source,
+                            c.receive.received,
+                            c.receive.played,
+                            c.receive.dropped(),
+                            c.receive.dropped_payload_type,
+                            c.receive.last_unexpected_pt,
+                            c.receive.dropped_srtp,
+                            c.receive.dropped_malformed,
+                            c.receive.last_source,
                         );
                     }
                     Event::CallEnded { call, reason } => {

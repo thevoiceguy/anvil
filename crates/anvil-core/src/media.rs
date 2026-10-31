@@ -8,7 +8,7 @@
 use std::net::SocketAddr;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::Arc;
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
 use bytes::Bytes;
 use forge_codecs::g711;
@@ -69,34 +69,50 @@ impl MediaPipeline {
 
     /// The call's media as it stands (`Anvil::call_stats`).
     pub(crate) fn stats(&self) -> crate::event::CallStats {
-        let m = &self.metrics;
-        let (expected, received) = m.expected_and_received();
-        let lost = expected.saturating_sub(received);
-        let (remote, rtt_ms, rtcp_sent, rtcp_received) = {
-            let mut r = self.rtcp.lock();
-            (r.remote(), r.rtt_ms(), r.reports_sent, r.reports_received)
-        };
-        crate::event::CallStats {
-            codec: self.info.codec,
-            clock_rate: self.info.clock_rate,
-            ptime_ms: FRAME_MS,
-            srtp: self.info.srtp,
-            local_rtp: self.info.local_rtp,
-            remote_rtp: self.info.remote_rtp,
-            rtcp: self.rtcp_tasks.is_some(),
-            packets_sent: m.packets_tx.load(Ordering::Relaxed),
-            bytes_sent: m.bytes_tx.load(Ordering::Relaxed),
-            packets_received: m.packets_rx.load(Ordering::Relaxed),
-            bytes_received: m.bytes_rx.load(Ordering::Relaxed),
-            packets_expected: expected,
-            packets_lost: lost,
-            jitter_ms: m.jitter_ms(),
-            remote,
-            rtt_ms,
-            rtcp_sent,
-            rtcp_received,
-            receive: m.receive_counts(),
-        }
+        snapshot(
+            &self.metrics,
+            &self.rtcp,
+            &self.info,
+            self.rtcp_tasks.is_some(),
+        )
+    }
+}
+
+/// A call's media as it stands, from its counters and its RTCP.
+fn snapshot(
+    m: &MediaMetrics,
+    rtcp: &Mutex<crate::rtcp::RtcpState>,
+    info: &MediaInfo,
+    rtcp_on: bool,
+) -> crate::event::CallStats {
+    let (expected, received) = m.expected_and_received();
+    let lost = expected.saturating_sub(received);
+    // One lock: its guard would live to the end of a statement that took
+    // it twice.
+    let (remote, rtt_ms, rtcp_sent, rtcp_received) = {
+        let mut r = rtcp.lock();
+        (r.remote(), r.rtt_ms(), r.reports_sent, r.reports_received)
+    };
+    crate::event::CallStats {
+        codec: info.codec,
+        clock_rate: info.clock_rate,
+        ptime_ms: FRAME_MS,
+        srtp: info.srtp,
+        local_rtp: info.local_rtp,
+        remote_rtp: info.remote_rtp,
+        rtcp: rtcp_on,
+        packets_sent: m.packets_tx.load(Ordering::Relaxed),
+        bytes_sent: m.bytes_tx.load(Ordering::Relaxed),
+        packets_received: m.packets_rx.load(Ordering::Relaxed),
+        bytes_received: m.bytes_rx.load(Ordering::Relaxed),
+        packets_expected: expected,
+        packets_lost: lost,
+        jitter_ms: m.jitter_ms(),
+        remote,
+        rtt_ms,
+        rtcp_sent,
+        rtcp_received,
+        receive: m.receive_counts(),
     }
 }
 
@@ -1093,11 +1109,11 @@ pub(crate) fn start_pipeline(
         )
     });
 
-    // Stats task: periodically snapshot the counters and emit MediaStats.
+    // Stats task: each interval, snapshot the call and emit MediaStats.
     let stats_task = {
         let metrics = Arc::clone(&metrics);
         let rtcp = Arc::clone(&rtcp);
-        let clock = send_spec.rtp_clock_rate;
+        let rtcp_on = rtcp_tasks.is_some();
         tokio::spawn(async move {
             let Some(sink) = stats_sink else { return };
             let mut ticker = tokio::time::interval(sink.interval);
@@ -1106,9 +1122,14 @@ pub(crate) fn start_pipeline(
             // elapsed intervals.
             ticker.tick().await;
 
-            let mut prev_bytes_tx = 0u64;
-            let mut prev_bytes_rx = 0u64;
+            let mut prev = snapshot(&metrics, &rtcp, &info, rtcp_on);
             let mut prev_wall = Instant::now();
+            // (expected, lost) at each of the last few samples: loss over
+            // the last five seconds is the newest less the oldest.
+            let window = (Duration::from_secs(5).as_millis() / sink.interval.as_millis().max(1))
+                .max(1) as usize;
+            let mut seen = std::collections::VecDeque::with_capacity(window + 1);
+            seen.push_back((prev.packets_expected, prev.packets_lost));
 
             loop {
                 ticker.tick().await;
@@ -1118,53 +1139,48 @@ pub(crate) fn start_pipeline(
                     .as_secs_f32()
                     .max(0.001);
                 prev_wall = now;
+                let call = snapshot(&metrics, &rtcp, &info, rtcp_on);
+                let rate = |now: u64, then: u64| now.saturating_sub(then) as f32 / elapsed;
 
-                let bytes_tx = metrics.bytes_tx.load(Ordering::Relaxed);
-                let bytes_rx = metrics.bytes_rx.load(Ordering::Relaxed);
-                let send_kbps =
-                    (bytes_tx.saturating_sub(prev_bytes_tx) as f32 * 8.0) / elapsed / 1000.0;
-                let recv_kbps =
-                    (bytes_rx.saturating_sub(prev_bytes_rx) as f32 * 8.0) / elapsed / 1000.0;
-                prev_bytes_tx = bytes_tx;
-                prev_bytes_rx = bytes_rx;
-
-                let jitter_ticks = metrics.jitter.lock().current;
-                let jitter_ms = jitter_ticks as f32 * 1000.0 / clock as f32;
-
-                let (expected, received) = {
-                    let s = metrics.seq.lock();
-                    let expected = match s.first {
-                        Some(first) => {
-                            let extended = (s.cycles as i64) * 65_536 + s.highest as i64;
-                            (extended - first as i64 + 1).max(0) as u64
-                        }
-                        None => 0,
-                    };
-                    (expected, s.received as u64)
-                };
-                let packet_loss_pct = if expected == 0 {
+                seen.push_back((call.packets_expected, call.packets_lost));
+                if seen.len() > window + 1 {
+                    seen.pop_front();
+                }
+                let (e0, l0) = seen.front().copied().unwrap_or_default();
+                let expected = call.packets_expected.saturating_sub(e0);
+                let recent_loss_pct = if expected == 0 {
                     0.0
                 } else {
-                    let lost = expected.saturating_sub(received);
-                    (lost as f32 * 100.0) / expected as f32
+                    call.packets_lost.saturating_sub(l0) as f32 * 100.0 / expected as f32
                 };
 
-                // One lock: its guard would live to the end of a statement
-                // that took it twice.
-                let (rtt_ms, remote) = {
-                    let mut r = rtcp.lock();
-                    (r.rtt_ms(), r.remote())
-                };
+                let mos = crate::quality::estimate(
+                    call.codec,
+                    call.ptime_ms,
+                    recent_loss_pct,
+                    call.jitter_ms,
+                    call.rtt_ms,
+                );
+                let far_mos = call.remote.map(|r| {
+                    crate::quality::estimate(
+                        call.codec,
+                        call.ptime_ms,
+                        r.fraction_lost_pct,
+                        r.jitter_ms,
+                        call.rtt_ms,
+                    )
+                });
                 let stats = crate::event::MediaStats {
-                    codec: sink.codec,
-                    jitter_ms,
-                    packet_loss_pct,
-                    rtt_ms,
-                    remote,
-                    recv_kbps,
-                    send_kbps,
-                    receive: metrics.receive_counts(),
+                    call,
+                    send_kbps: rate(call.bytes_sent, prev.bytes_sent) * 8.0 / 1000.0,
+                    recv_kbps: rate(call.bytes_received, prev.bytes_received) * 8.0 / 1000.0,
+                    send_pps: rate(call.packets_sent, prev.packets_sent),
+                    recv_pps: rate(call.packets_received, prev.packets_received),
+                    recent_loss_pct,
+                    mos,
+                    far_mos,
                 };
+                prev = call;
                 // Drop silently if the event stream is full; stats are
                 // strictly advisory.
                 let _ = sink
@@ -1306,7 +1322,6 @@ async fn handle_inbound_dtmf(
 /// Sink for periodic `MediaStats` events.
 pub(crate) struct StatsSink {
     pub call: crate::CallId,
-    pub codec: Codec,
     pub interval: std::time::Duration,
     pub events: tokio::sync::mpsc::Sender<crate::event::Event>,
 }
@@ -1851,7 +1866,6 @@ mod tests {
             }),
             Some(StatsSink {
                 call: crate::CallId(7),
-                codec: Codec::Pcmu,
                 interval: Duration::from_millis(200),
                 events,
             }),
@@ -1871,10 +1885,10 @@ mod tests {
         })
         .await
         .expect("a MediaStats event");
-        assert_eq!(stats.receive.received, 1);
-        assert_eq!(stats.receive.dropped_payload_type, 1);
-        assert_eq!(stats.receive.last_unexpected_pt, Some(8));
-        assert_eq!(stats.receive.expected_pt, 0);
+        assert_eq!(stats.call.receive.received, 1);
+        assert_eq!(stats.call.receive.dropped_payload_type, 1);
+        assert_eq!(stats.call.receive.last_unexpected_pt, Some(8));
+        assert_eq!(stats.call.receive.expected_pt, 0);
         drop(pipe);
     }
 

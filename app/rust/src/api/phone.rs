@@ -618,6 +618,38 @@ pub struct Quality {
     pub expected_pt: Option<u8>,
     /// Where the last packet came from.
     pub last_source: Option<String>,
+    /// The far end's packets lost over the last five seconds, per thousand.
+    pub recent_loss_permille: u32,
+    pub packets_sent: u64,
+    pub bytes_sent: u64,
+    /// RTP received, played or not.
+    pub rtp_received: u64,
+    pub bytes_received: u64,
+    /// The far end's packets its sequence numbers say were sent, and those
+    /// that never arrived.
+    pub packets_expected: u64,
+    pub packets_lost: u64,
+    /// What flowed in the last second.
+    pub send_kbps: u32,
+    pub recv_kbps: u32,
+    pub send_pps: u32,
+    pub recv_pps: u32,
+    /// What the far end last reported of ours (RTCP).
+    pub far_loss_permille: Option<u32>,
+    pub far_jitter_ms: Option<u32>,
+    pub far_lost: Option<i64>,
+    pub rtcp: bool,
+    pub rtcp_sent: u64,
+    pub rtcp_received: u64,
+    pub clock_rate: u32,
+    pub ptime_ms: u32,
+    /// Where media flows between (`address:port`).
+    pub local_rtp: Option<String>,
+    pub remote_rtp: Option<String>,
+    /// The estimated score (MOS) in hundredths: what the user hears, and
+    /// what the far end hears once it has reported.
+    pub mos_hundredths: u16,
+    pub far_mos_hundredths: Option<u16>,
 }
 
 /// One call in the user's history.
@@ -942,6 +974,29 @@ pub fn phone_state() -> anyhow::Result<PhoneState> {
                     unexpected_pt: q.unexpected_pt.map(|(pt, _)| pt),
                     expected_pt: q.unexpected_pt.map(|(_, want)| want),
                     last_source: q.last_source.map(|a| a.to_string()),
+                    recent_loss_permille: q.recent_loss_permille,
+                    packets_sent: q.packets_sent,
+                    bytes_sent: q.bytes_sent,
+                    rtp_received: q.rtp_received,
+                    bytes_received: q.bytes_received,
+                    packets_expected: q.packets_expected,
+                    packets_lost: q.packets_lost,
+                    send_kbps: q.send_kbps,
+                    recv_kbps: q.recv_kbps,
+                    send_pps: q.send_pps,
+                    recv_pps: q.recv_pps,
+                    far_loss_permille: q.far_loss_permille,
+                    far_jitter_ms: q.far_jitter_ms,
+                    far_lost: q.far_lost,
+                    rtcp: q.rtcp,
+                    rtcp_sent: q.rtcp_sent,
+                    rtcp_received: q.rtcp_received,
+                    clock_rate: q.clock_rate,
+                    ptime_ms: q.ptime_ms,
+                    local_rtp: q.local_rtp.map(|a| a.to_string()),
+                    remote_rtp: q.remote_rtp.map(|a| a.to_string()),
+                    mos_hundredths: q.mos_hundredths,
+                    far_mos_hundredths: q.far_mos_hundredths,
                 }),
                 connected_at: c.connected_at,
                 recording: c.recording,

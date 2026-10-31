@@ -309,9 +309,10 @@ pub struct CallView {
     /// The media is encrypted (SRTP).
     #[serde(default)]
     pub encrypted: bool,
-    /// How the media is doing, once measured.
+    /// How the media is doing, once measured (boxed: it is most of a
+    /// call's size, and a call rides in every change).
     #[serde(default)]
-    pub quality: Option<Quality>,
+    pub quality: Option<Box<Quality>>,
     /// When it connected, in Unix seconds: what a call timer counts from.
     #[serde(default)]
     pub connected_at: Option<u64>,
@@ -463,6 +464,64 @@ pub struct Quality {
     /// Where the last packet came from.
     #[serde(default)]
     pub last_source: Option<std::net::SocketAddr>,
+    /// The far end's packets lost over the last five seconds, per thousand.
+    #[serde(default)]
+    pub recent_loss_permille: u32,
+    /// RTP sent and received (that played or not), since the call began.
+    #[serde(default)]
+    pub packets_sent: u64,
+    #[serde(default)]
+    pub bytes_sent: u64,
+    #[serde(default)]
+    pub rtp_received: u64,
+    #[serde(default)]
+    pub bytes_received: u64,
+    /// The far end's packets its sequence numbers say were sent, and those
+    /// that never arrived.
+    #[serde(default)]
+    pub packets_expected: u64,
+    #[serde(default)]
+    pub packets_lost: u64,
+    /// What flowed in the last second.
+    #[serde(default)]
+    pub send_kbps: u32,
+    #[serde(default)]
+    pub recv_kbps: u32,
+    #[serde(default)]
+    pub send_pps: u32,
+    #[serde(default)]
+    pub recv_pps: u32,
+    /// What the far end last reported of ours (RTCP): its loss in its last
+    /// interval per thousand, its jitter, and what it has lost in all.
+    #[serde(default)]
+    pub far_loss_permille: Option<u32>,
+    #[serde(default)]
+    pub far_jitter_ms: Option<u32>,
+    #[serde(default)]
+    pub far_lost: Option<i64>,
+    /// The call has RTCP, and the reports sent and read.
+    #[serde(default)]
+    pub rtcp: bool,
+    #[serde(default)]
+    pub rtcp_sent: u64,
+    #[serde(default)]
+    pub rtcp_received: u64,
+    /// The codec's RTP clock in Hz and its audio per packet in ms.
+    #[serde(default)]
+    pub clock_rate: u32,
+    #[serde(default)]
+    pub ptime_ms: u32,
+    /// Where media flows between: our RTP socket and the far end's.
+    #[serde(default)]
+    pub local_rtp: Option<std::net::SocketAddr>,
+    #[serde(default)]
+    pub remote_rtp: Option<std::net::SocketAddr>,
+    /// The estimated score (E-model MOS, 1 to 4.5) in hundredths of what
+    /// the user hears, and of what the far end hears once it has reported.
+    #[serde(default)]
+    pub mos_hundredths: u16,
+    #[serde(default)]
+    pub far_mos_hundredths: Option<u16>,
 }
 
 /// One call in the user's history.

@@ -1892,25 +1892,13 @@ async fn follow(inner: std::sync::Weak<Inner>, mut events: EventStream) {
                 )
             }
             Event::MediaStats { call, stats } => {
-                let quality = Quality {
-                    jitter_ms: stats.jitter_ms.round() as u32,
-                    packet_loss_permille: (stats.packet_loss_pct * 10.0).round() as u32,
-                    rtt_ms: stats.rtt_ms.map(|r| r.round() as u32),
-                    packets_received: stats.receive.received,
-                    packets_played: stats.receive.played,
-                    packets_dropped: stats.receive.dropped(),
-                    unexpected_pt: stats
-                        .receive
-                        .last_unexpected_pt
-                        .map(|pt| (pt, stats.receive.expected_pt)),
-                    last_source: stats.receive.last_source,
-                };
+                let quality = quality_of(&stats);
                 let known = inner.state.lock().call(call.0).is_some();
                 if known {
                     update_call(
                         &inner,
                         call.0,
-                        |c| c.quality = Some(quality),
+                        |c| c.quality = Some(Box::new(quality)),
                         || outgoing(call.0),
                     );
                 }
@@ -2019,6 +2007,49 @@ fn unix_now() -> u64 {
 
 fn outgoing(id: u64) -> CallView {
     CallView::new(id, Direction::Outgoing, "", CallState::Dialing)
+}
+
+/// A second's media stats as the app shows them.
+fn quality_of(stats: &anvil_core::MediaStats) -> Quality {
+    let c = &stats.call;
+    let permille = |pct: f32| (pct * 10.0).round() as u32;
+    let hundredths = |m: anvil_core::quality::Mos| (m.score * 100.0).round() as u16;
+    Quality {
+        jitter_ms: c.jitter_ms.round() as u32,
+        packet_loss_permille: permille(c.loss_pct()),
+        rtt_ms: c.rtt_ms.map(|r| r.round() as u32),
+        packets_received: c.receive.received,
+        packets_played: c.receive.played,
+        packets_dropped: c.receive.dropped(),
+        unexpected_pt: c
+            .receive
+            .last_unexpected_pt
+            .map(|pt| (pt, c.receive.expected_pt)),
+        last_source: c.receive.last_source,
+        recent_loss_permille: permille(stats.recent_loss_pct),
+        packets_sent: c.packets_sent,
+        bytes_sent: c.bytes_sent,
+        rtp_received: c.packets_received,
+        bytes_received: c.bytes_received,
+        packets_expected: c.packets_expected,
+        packets_lost: c.packets_lost,
+        send_kbps: stats.send_kbps.round() as u32,
+        recv_kbps: stats.recv_kbps.round() as u32,
+        send_pps: stats.send_pps.round() as u32,
+        recv_pps: stats.recv_pps.round() as u32,
+        far_loss_permille: c.remote.map(|r| permille(r.fraction_lost_pct)),
+        far_jitter_ms: c.remote.map(|r| r.jitter_ms.round() as u32),
+        far_lost: c.remote.map(|r| i64::from(r.cumulative_lost)),
+        rtcp: c.rtcp,
+        rtcp_sent: c.rtcp_sent,
+        rtcp_received: c.rtcp_received,
+        clock_rate: c.clock_rate,
+        ptime_ms: c.ptime_ms,
+        local_rtp: c.local_rtp,
+        remote_rtp: Some(c.remote_rtp),
+        mos_hundredths: hundredths(stats.mos),
+        far_mos_hundredths: stats.far_mos.map(hundredths),
+    }
 }
 
 fn end_reason(reason: &EndReason) -> String {

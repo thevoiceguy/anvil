@@ -636,6 +636,40 @@ FCP's `docs/CALL_DIAGNOSTICS.md` phase 1:
   FCP `each_phone_reads_the_others_reports_through_fcp`.
 - Phase 2 is the panel in the app.
 
+### D8 finding 43: the call's stats in the app (diagnostics phase 2)
+FCP's `docs/CALL_DIAGNOSTICS.md` phase 2:
+- `anvil-core/src/quality.rs`: the ITU-T G.107 E-model, narrowband — one
+  way's delay as half the round trip, the codec's frame and look-ahead and
+  twice the jitter; `Ie`/`Bpl` from G.113 Appendix I without concealment
+  (Anvil plays packets as they arrive: no jitter buffer, no loss
+  concealment); R to a MOS of 1 to 4.5. `Rating`: good from 4.0, poor under
+  3.1 (FCP's `call.quality_poor`).
+- `MediaStats` is now each second's `CallStats` with the last second's
+  rates (kb/s, packets/s), loss over the last five seconds, the score of
+  what the user hears (our loss and jitter) and, once the far end has
+  reported over RTCP, of what it hears (its loss and jitter on ours);
+  `worst_mos()` is how the call is going. Sampled every second (was two).
+- The app's `Quality` carries all of it (boxed in `CallView`); the C FFI's
+  `AnvilMediaStats` keeps its layout; the CLI's `[stats]` line prints the
+  scores, the five-second loss, the round trip and the far end's report.
+- The call screen's quality indicator shows the score (the lower of the
+  two) beside its bars, and its level comes from the score once there is
+  one. Tapping it opens **Call stats** (`screens/call_stats.dart`): a dialog
+  on a wide window, a sheet under 600 px, live, closed when the call ends —
+  the scores each way, codec, clock and packet time, encryption, the
+  addresses media flows between, sent and received (rates and totals),
+  loss over five seconds and the call, jitter, packets not played and why,
+  the far end's report (or that there is none yet, or no RTCP), the round
+  trip and the reports exchanged. The jitter buffer's depth the design
+  names is left out: there is no jitter buffer to measure.
+- Tested: `quality.rs`'s unit tests, peer
+  `each_side_reads_the_others_reports_and_the_round_trip` (each second's
+  stats on a clean call: 50 packets/s each way, good both ways),
+  `test/call_stats_test.dart` (the score, the dialog's rows, live updates,
+  closing at hangup, the sheet, before the first measurement), the in-call
+  goldens.
+- Phase 3 sends each call's final figures to FCP.
+
 ### W5: echo cancellation and noise suppression
 - The desktop's microphone is cleaned before it is sent: WebRTC's audio
   processing — AEC3, its noise suppressor and its high-pass filter — as

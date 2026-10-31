@@ -175,6 +175,30 @@ async fn each_side_reads_the_others_reports_and_the_round_trip() {
             }
         }
 
+        // Each second's stats carry the rates and a score each way (phase 2):
+        // a clean loopback call is good both ways at 50 packets a second.
+        let deadline = tokio::time::Instant::now() + std::time::Duration::from_secs(5);
+        let stats = loop {
+            let event = tokio::time::timeout_at(deadline, alice_events.recv())
+                .await
+                .expect("stats with the far end's score within five seconds")
+                .expect("the stream is open");
+            if let anvil_core::Event::MediaStats { call, stats } = event {
+                if call == out && stats.far_mos.is_some() {
+                    break stats;
+                }
+            }
+        };
+        assert_eq!(stats.recent_loss_pct, 0.0, "{stats:?}");
+        assert!((40.0..60.0).contains(&stats.send_pps), "{stats:?}");
+        assert!((40.0..60.0).contains(&stats.recv_pps), "{stats:?}");
+        assert!(stats.send_kbps > 10.0, "{stats:?}");
+        assert_eq!(
+            stats.worst_mos().rating(),
+            anvil_core::quality::Rating::Good,
+            "{stats:?}"
+        );
+
         alice.hangup(out).await.expect("BYE");
         hung_up_by_the_other_side(&mut bob_events, incoming).await;
         assert!(
