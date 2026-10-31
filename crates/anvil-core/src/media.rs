@@ -35,6 +35,12 @@ pub(crate) struct MediaPipeline {
     send_task: JoinHandle<()>,
     recv_task: JoinHandle<()>,
     stats_task: JoinHandle<()>,
+    /// Reports sent and the far end's read; `None` without an RTCP socket.
+    rtcp_tasks: Option<(JoinHandle<()>, JoinHandle<()>)>,
+    /// The call's RTCP: what the far end reports of ours, the round trip.
+    pub(crate) rtcp: Arc<parking_lot::Mutex<crate::rtcp::RtcpState>>,
+    /// What the call's stats snapshot says of its media.
+    pub(crate) info: MediaInfo,
     /// Queue for outgoing DTMF. `Anvil::send_dtmf` pushes; the send task
     /// interleaves them into the RTP stream as RFC 2833 event packets.
     pub(crate) dtmf_tx: mpsc::Sender<char>,
@@ -55,6 +61,42 @@ impl MediaPipeline {
         self.send_task.abort();
         self.recv_task.abort();
         self.stats_task.abort();
+        if let Some((send, recv)) = &self.rtcp_tasks {
+            send.abort();
+            recv.abort();
+        }
+    }
+
+    /// The call's media as it stands (`Anvil::call_stats`).
+    pub(crate) fn stats(&self) -> crate::event::CallStats {
+        let m = &self.metrics;
+        let (expected, received) = m.expected_and_received();
+        let lost = expected.saturating_sub(received);
+        let (remote, rtt_ms, rtcp_sent, rtcp_received) = {
+            let mut r = self.rtcp.lock();
+            (r.remote(), r.rtt_ms(), r.reports_sent, r.reports_received)
+        };
+        crate::event::CallStats {
+            codec: self.info.codec,
+            clock_rate: self.info.clock_rate,
+            ptime_ms: FRAME_MS,
+            srtp: self.info.srtp,
+            local_rtp: self.info.local_rtp,
+            remote_rtp: self.info.remote_rtp,
+            rtcp: self.rtcp_tasks.is_some(),
+            packets_sent: m.packets_tx.load(Ordering::Relaxed),
+            bytes_sent: m.bytes_tx.load(Ordering::Relaxed),
+            packets_received: m.packets_rx.load(Ordering::Relaxed),
+            bytes_received: m.bytes_rx.load(Ordering::Relaxed),
+            packets_expected: expected,
+            packets_lost: lost,
+            jitter_ms: m.jitter_ms(),
+            remote,
+            rtt_ms,
+            rtcp_sent,
+            rtcp_received,
+            receive: m.receive_counts(),
+        }
     }
 }
 
@@ -79,6 +121,16 @@ impl Drop for MediaPipeline {
             "rtp: receive summary"
         );
     }
+}
+
+/// What a call's media is, for its stats snapshot.
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct MediaInfo {
+    codec: Codec,
+    clock_rate: u32,
+    srtp: bool,
+    local_rtp: Option<SocketAddr>,
+    remote_rtp: SocketAddr,
 }
 
 /// Per-call counters shared between send task, receive task, and the
@@ -224,6 +276,25 @@ impl MediaMetrics {
         // Out-of-order packets don't advance `highest`; they're still
         // counted via `received` above so the expected - received delta
         // works out.
+    }
+
+    /// Packets the far end's sequence numbers say were sent, and those
+    /// received (RFC 3550 §A.3).
+    fn expected_and_received(&self) -> (u64, u64) {
+        let s = self.seq.lock();
+        let expected = match s.first {
+            Some(first) => {
+                let extended = (s.cycles as i64) * 65_536 + s.highest as i64;
+                (extended - first as i64 + 1).max(0) as u64
+            }
+            None => 0,
+        };
+        (expected, s.received as u64)
+    }
+
+    /// The jitter estimate, in milliseconds.
+    fn jitter_ms(&self) -> f32 {
+        self.jitter.lock().current as f32 * 1000.0 / self.rtp_clock_rate.max(1) as f32
     }
 
     fn on_rtp_tx(&self, bytes: usize) {
@@ -737,7 +808,7 @@ fn codec_from_pt(
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn start_pipeline(
     codec: Codec,
-    rtp_socket: Arc<UdpSocket>,
+    rtp_socket: crate::call::MediaSockets,
     remote_rtp: SocketAddr,
     mut capture: Box<dyn AudioSource>,
     mut playback: Box<dyn AudioSink>,
@@ -764,6 +835,19 @@ pub(crate) fn start_pipeline(
     let payload_type = send_spec.payload_type;
 
     let metrics = MediaMetrics::new(send_spec.rtp_clock_rate);
+    // A random CNAME (RFC 7022): nothing of the user's on the wire.
+    let rtcp = crate::rtcp::RtcpState::new(
+        ssrc,
+        send_spec.rtp_clock_rate,
+        format!("{:016x}@anvil", rng.next_u64()),
+    );
+    let info = MediaInfo {
+        codec,
+        clock_rate: send_spec.rtp_clock_rate,
+        srtp: srtp.is_some(),
+        local_rtp: rtp_socket.local_addr().ok(),
+        remote_rtp,
+    };
     metrics.rx.lock().expected_pt = recv_spec.payload_type;
     let call = stats_sink.as_ref().map(|s| s.call.0);
     let hold = HoldState::new(MediaDirection::Sendrecv);
@@ -774,7 +858,8 @@ pub(crate) fn start_pipeline(
 
     // Send task: pull frames from the mic, encode, RTP-wrap, send.
     // Also interleaves RFC 2833 DTMF packets when the app queues a digit.
-    let sock_send = Arc::clone(&rtp_socket);
+    let sock_send = Arc::clone(&rtp_socket.rtp);
+    let rtcp_send = Arc::clone(&rtcp);
     let metrics_send = Arc::clone(&metrics);
     let hold_send = Arc::clone(&hold);
     let muted = Arc::new(AtomicBool::new(false));
@@ -854,8 +939,12 @@ pub(crate) fn start_pipeline(
                         ts = ts.wrapping_add(ts_per_frame);
                         continue;
                     };
+                    let payload_len = packet.payload.len();
                     match sock_send.send_to(&bytes, remote_rtp).await {
-                        Ok(_) => metrics_send.on_rtp_tx(bytes.len()),
+                        Ok(_) => {
+                            metrics_send.on_rtp_tx(bytes.len());
+                            rtcp_send.lock().on_sent(ts, payload_len, Instant::now());
+                        }
                         Err(e) => tracing::warn!(%e, %remote_rtp, "rtp send failed"),
                     }
 
@@ -872,7 +961,8 @@ pub(crate) fn start_pipeline(
     // Receive task: read UDP, parse RTP, decode, push to speaker.
     // Also picks RFC 2833 (PT 101) packets out of the stream and publishes
     // DtmfReceived events on the end-of-digit transition.
-    let sock_recv = Arc::clone(&rtp_socket);
+    let sock_recv = Arc::clone(&rtp_socket.rtp);
+    let rtcp_recv = Arc::clone(&rtcp);
     let recv_pt = recv_spec.payload_type;
     let recv_fmt = recv_spec.audio_format();
     let metrics_recv = Arc::clone(&metrics);
@@ -964,6 +1054,12 @@ pub(crate) fn start_pipeline(
                 len,
                 arrival,
             );
+            rtcp_recv.lock().on_received(
+                packet.header.ssrc,
+                packet.header.sequence_number,
+                packet.header.timestamp,
+                arrival,
+            );
 
             // When held, still decode (keeps the codec decoder state
             // valid for when we resume) but swallow the frame instead of
@@ -987,9 +1083,20 @@ pub(crate) fn start_pipeline(
         }
     });
 
+    let rtcp_tasks = rtp_socket.rtcp.as_ref().map(|socket| {
+        crate::rtcp::start(
+            Arc::clone(socket),
+            crate::rtcp::remote_rtcp_addr(remote_rtp),
+            Arc::clone(&rtcp),
+            srtp.clone(),
+            call,
+        )
+    });
+
     // Stats task: periodically snapshot the counters and emit MediaStats.
     let stats_task = {
         let metrics = Arc::clone(&metrics);
+        let rtcp = Arc::clone(&rtcp);
         let clock = send_spec.rtp_clock_rate;
         tokio::spawn(async move {
             let Some(sink) = stats_sink else { return };
@@ -1042,11 +1149,18 @@ pub(crate) fn start_pipeline(
                     (lost as f32 * 100.0) / expected as f32
                 };
 
+                // One lock: its guard would live to the end of a statement
+                // that took it twice.
+                let (rtt_ms, remote) = {
+                    let mut r = rtcp.lock();
+                    (r.rtt_ms(), r.remote())
+                };
                 let stats = crate::event::MediaStats {
                     codec: sink.codec,
                     jitter_ms,
                     packet_loss_pct,
-                    rtt_ms: None, // RTT needs RTCP — Phase 2 later milestone.
+                    rtt_ms,
+                    remote,
                     recv_kbps,
                     send_kbps,
                     receive: metrics.receive_counts(),
@@ -1068,6 +1182,9 @@ pub(crate) fn start_pipeline(
         send_task,
         recv_task,
         stats_task,
+        rtcp_tasks,
+        rtcp,
+        info,
         dtmf_tx,
         hold,
         muted,
@@ -1395,7 +1512,7 @@ mod tests {
 
         let pipe_a = start_pipeline(
             codec,
-            Arc::clone(&sock_a),
+            Arc::clone(&sock_a).into(),
             addr_b,
             Box::new(ToneSource::new_at(440.0, sample_rate)),
             Box::new(RmsSink {
@@ -1409,7 +1526,7 @@ mod tests {
 
         let pipe_b = start_pipeline(
             codec,
-            Arc::clone(&sock_b),
+            Arc::clone(&sock_b).into(),
             addr_a,
             Box::new(ToneSource::new_at(660.0, sample_rate)),
             Box::new(RmsSink {
@@ -1453,7 +1570,7 @@ mod tests {
         let (frames_b, rms_b) = (Arc::new(AtomicU64::new(0)), Arc::new(AtomicU64::new(0)));
         let pipe_a = start_pipeline(
             Codec::Pcmu,
-            Arc::clone(&sock_a),
+            Arc::clone(&sock_a).into(),
             addr_b,
             Box::new(ToneSource::new_at(440.0, 8000)),
             Box::new(RmsSink {
@@ -1467,7 +1584,7 @@ mod tests {
         pipe_a.muted.store(true, Ordering::Relaxed);
         let pipe_b = start_pipeline(
             Codec::Pcmu,
-            Arc::clone(&sock_b),
+            Arc::clone(&sock_b).into(),
             addr_a,
             Box::new(ToneSource::new_at(660.0, 8000)),
             Box::new(RmsSink {
@@ -1623,7 +1740,7 @@ mod tests {
         let spec = CodecSpec::for_codec(codec);
         let pipe = start_pipeline(
             codec,
-            sock,
+            sock.into(),
             discard.local_addr().unwrap(),
             Box::new(ToneSource::new_at(440.0, spec.sample_rate)),
             Box::new(RmsSink {
@@ -1725,7 +1842,7 @@ mod tests {
         let (events, mut stream) = mpsc::channel(16);
         let pipe = start_pipeline(
             Codec::Pcmu,
-            sock,
+            sock.into(),
             discard.local_addr().unwrap(),
             Box::new(ToneSource::new_at(440.0, 8000)),
             Box::new(RmsSink {

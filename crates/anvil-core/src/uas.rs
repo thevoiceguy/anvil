@@ -21,7 +21,6 @@ use sip_dialog::Dialog;
 use sip_transaction::{ServerTransactionHandle, TransportContext};
 use sip_uas::integrated::UasRequestHandler;
 use sip_uas::UserAgentServer;
-use tokio::net::UdpSocket;
 use tokio::sync::mpsc;
 
 use crate::audio::AudioHost;
@@ -229,7 +228,7 @@ impl UasRequestHandler for AnvilUasHandler {
             server_handle: handle.clone(),
             dialog,
             sdp_answer_sent: false,
-            rtp_socket: Arc::clone(&rtp_socket),
+            rtp_socket: rtp_socket.clone(),
         };
 
         self.calls.insert(
@@ -441,7 +440,7 @@ pub(crate) async fn send_answer_and_start_media(
             pending.server_handle.clone(),
             pending.answer_response.clone(),
             pending.dialog.clone(),
-            Arc::clone(&pending.rtp_socket),
+            pending.rtp_socket.clone(),
             pending.request.body().to_vec(),
             entry.srtp.as_ref().and_then(|k| k.context()),
         )
@@ -597,7 +596,7 @@ async fn start_media_inbound(
     call: CallId,
     codec: Codec,
     audio: &Arc<dyn AudioHost>,
-    rtp_socket: Arc<UdpSocket>,
+    rtp_socket: crate::call::MediaSockets,
     remote: std::net::SocketAddr,
     events: mpsc::Sender<Event>,
     srtp: Option<forge_rtp::srtp::SrtpContext>,

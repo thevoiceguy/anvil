@@ -113,3 +113,75 @@ async fn either_side_holds_and_resumes() {
     alice.shutdown().await.unwrap();
     bob.shutdown().await.unwrap();
 }
+
+/// RTCP both ways (FCP's `docs/CALL_DIAGNOSTICS.md` phase 1): each side's
+/// reports reach the other, which reads the far end's view of its stream
+/// and the round trip from them; plain and over SRTP.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn each_side_reads_the_others_reports_and_the_round_trip() {
+    use anvil_core::config::{MediaConfig, SrtpMode};
+    for (srtp, a, b) in [
+        (SrtpMode::Off, "127.0.0.8", "127.0.0.9"),
+        (SrtpMode::Required, "127.0.0.10", "127.0.0.11"),
+    ] {
+        let media = || MediaConfig {
+            srtp,
+            ..MediaConfig::default()
+        };
+        let (alice, mut alice_events) = start_with(
+            account(
+                "sip:alice@127.0.0.1",
+                "sip:127.0.0.1:9",
+                "alice",
+                "",
+                a,
+                3600,
+            ),
+            media(),
+        )
+        .await;
+        let (bob, mut bob_events) = start_with(
+            account("sip:bob@127.0.0.1", "sip:127.0.0.1:9", "bob", "", b, 3600),
+            media(),
+        )
+        .await;
+        let bob_uri = format!("sip:bob@{}", bob.sip_address());
+        let (out, incoming) =
+            answered_call(&alice, &mut alice_events, &bob, &mut bob_events, &bob_uri).await;
+
+        // A report a second in, then every five: two each way within eight.
+        let deadline = tokio::time::Instant::now() + std::time::Duration::from_secs(10);
+        for (who, anvil, call) in [("Alice", &alice, out), ("Bob", &bob, incoming)] {
+            loop {
+                let stats = anvil.call_stats(call).expect("the call has media");
+                assert!(stats.rtcp, "{who} has an RTCP socket");
+                if let (true, Some(remote), Some(rtt)) =
+                    (stats.rtcp_received >= 2, stats.remote, stats.rtt_ms)
+                {
+                    assert_eq!(stats.srtp, srtp != SrtpMode::Off, "{who}: {stats:?}");
+                    assert!(
+                        stats.packets_sent > 0 && stats.packets_received > 0,
+                        "{stats:?}"
+                    );
+                    assert_eq!(remote.cumulative_lost, 0, "{who} over loopback: {stats:?}");
+                    assert!(rtt < 200.0, "{who}: {stats:?}");
+                    break;
+                }
+                assert!(
+                    tokio::time::Instant::now() < deadline,
+                    "{who} never read the other's reports ({srtp:?}): {stats:?}"
+                );
+                tokio::time::sleep(std::time::Duration::from_millis(200)).await;
+            }
+        }
+
+        alice.hangup(out).await.expect("BYE");
+        hung_up_by_the_other_side(&mut bob_events, incoming).await;
+        assert!(
+            alice.call_stats(out).is_none(),
+            "no stats once the call is gone"
+        );
+        alice.shutdown().await.unwrap();
+        bob.shutdown().await.unwrap();
+    }
+}

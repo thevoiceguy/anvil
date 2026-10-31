@@ -606,6 +606,36 @@ With FCP v0.25.489 on (its `docs/ENTERPRISE_CALLING.md` §3.9, §3.11):
   the other, picked up by the other app with the caller kept, idle after);
   `test/lines_test.dart` for the screens.
 
+### D8 finding 43: RTCP and the call's stats (diagnostics phase 1)
+FCP's `docs/CALL_DIAGNOSTICS.md` phase 1:
+- A call binds RTP on an even port and RTCP on the one above it
+  (`call::MediaSockets`; without a free pair the call goes on without
+  RTCP). The far end's RTCP is its RTP port plus one until its first
+  report, whose source then takes ours (symmetric past a NAT).
+- `anvil-core/src/rtcp.rs`: a compound report a second after media starts
+  and every five seconds after — SR when we sent since the last, else RR,
+  with a reception report block on the far end's stream (forge-rtp's
+  `SourceStats`, made anew when its SSRC changes) and SDES with a random
+  CNAME (RFC 7022) — SRTCP-protected when the call is SRTP. The far end's
+  reports are read for what it receives of ours (`RemoteReport`: fraction
+  and cumulative lost, its jitter) and the round trip (`RttTracker`, from
+  its echo of our SR, averaged over 30 s); a block by our SSRC, else the
+  only one (a relay that renumbers).
+- FCP's media relay keeps the same pair and passes each phone's RTCP to the
+  other, so the reports are the far phone's and the round trip is end to
+  end.
+- `Anvil::call_stats(call)` → `CallStats`: codec, clock, ptime, SRTP,
+  where media flows, packets and bytes each way, expected and lost, jitter,
+  the far end's report, the round trip, reports sent and received, the
+  receive counts. `MediaStats` events carry `rtt_ms` (so the app's call
+  quality has its round trip) and `remote`.
+- Tested: `rtcp.rs`'s unit tests (SR then RR, the block, the far end's
+  loss and round trip, a renumbering relay), `call.rs`
+  `rtcp_is_bound_on_the_port_above_rtp`, peer
+  `each_side_reads_the_others_reports_and_the_round_trip` (plain and SRTP),
+  FCP `each_phone_reads_the_others_reports_through_fcp`.
+- Phase 2 is the panel in the app.
+
 ### W5: echo cancellation and noise suppression
 - The desktop's microphone is cleaned before it is sent: WebRTC's audio
   processing — AEC3, its noise suppressor and its high-pass filter — as

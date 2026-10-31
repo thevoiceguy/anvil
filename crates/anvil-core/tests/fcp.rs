@@ -461,3 +461,51 @@ async fn fcp_names_its_call_in_the_invite() {
     fcp.remove(&alice_user).await;
     fcp.remove(&bob_user).await;
 }
+
+/// RTCP through FCP's media relay (FCP's `docs/CALL_DIAGNOSTICS.md` phase
+/// 1): the relay passes each phone's reports to the other, so each reads
+/// the far phone's view of its stream and the round trip end to end.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn each_phone_reads_the_others_reports_through_fcp() {
+    let fcp = fcp_or_skip!();
+    let (alice_user, bob_user) = (fcp.user("alice").await, fcp.user("bob").await);
+    let (alice, mut alice_events) = fcp.anvil(&alice_user, "127.0.0.22", 3600).await;
+    let (bob, mut bob_events) = fcp.anvil(&bob_user, "127.0.0.23", 3600).await;
+    register(&alice, &mut alice_events).await;
+    register(&bob, &mut bob_events).await;
+    let (out, incoming) = answered_call(
+        &alice,
+        &mut alice_events,
+        &bob,
+        &mut bob_events,
+        &fcp.uri(&bob_user),
+    )
+    .await;
+
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(15);
+    for (who, anvil, call) in [("Alice", &alice, out), ("Bob", &bob, incoming)] {
+        loop {
+            let stats = anvil.call_stats(call).expect("the call has media");
+            if let (true, Some(_), Some(rtt)) =
+                (stats.rtcp_received >= 2, stats.remote, stats.rtt_ms)
+            {
+                assert!(rtt < 500.0, "{who} through the relay: {stats:?}");
+                break;
+            }
+            assert!(
+                tokio::time::Instant::now() < deadline,
+                "{who} never read the other phone's reports through FCP: {stats:?}"
+            );
+            tokio::time::sleep(Duration::from_millis(250)).await;
+        }
+    }
+
+    alice.hangup(out).await.expect("BYE");
+    hung_up_by_the_other_side(&mut bob_events, incoming).await;
+    alice.unregister().await.expect("unregisters");
+    bob.unregister().await.expect("unregisters");
+    alice.shutdown().await.unwrap();
+    bob.shutdown().await.unwrap();
+    fcp.remove(&alice_user).await;
+    fcp.remove(&bob_user).await;
+}

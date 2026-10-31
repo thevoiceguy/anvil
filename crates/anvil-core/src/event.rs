@@ -54,6 +54,53 @@ pub struct MediaStats {
     pub send_kbps: f32,
     /// What arrived on the call's RTP socket so far, and what became of it.
     pub receive: ReceiveCounts,
+    /// What the far end last reported receiving of ours (RTCP).
+    pub remote: Option<crate::RemoteReport>,
+}
+
+/// A call's media as it stands ([`crate::Anvil::call_stats`]): what was
+/// sent and received, what the far end reports, the round trip.
+#[derive(Debug, Clone, PartialEq)]
+pub struct CallStats {
+    pub codec: Codec,
+    /// The codec's RTP clock, in Hz.
+    pub clock_rate: u32,
+    /// Audio per packet, in milliseconds.
+    pub ptime_ms: u32,
+    pub srtp: bool,
+    /// Where media flows between: our RTP socket and the far end's.
+    pub local_rtp: Option<std::net::SocketAddr>,
+    pub remote_rtp: std::net::SocketAddr,
+    /// The call has RTCP (a socket on the port above RTP).
+    pub rtcp: bool,
+    pub packets_sent: u64,
+    pub bytes_sent: u64,
+    pub packets_received: u64,
+    pub bytes_received: u64,
+    /// The far end's packets its sequence numbers say were sent, and those
+    /// that never arrived.
+    pub packets_expected: u64,
+    pub packets_lost: u64,
+    /// Our jitter estimate on the far end's stream (RFC 3550), in ms.
+    pub jitter_ms: f32,
+    /// What the far end last reported receiving of ours.
+    pub remote: Option<crate::RemoteReport>,
+    /// The round trip from RTCP, averaged over the last half minute.
+    pub rtt_ms: Option<f32>,
+    pub rtcp_sent: u64,
+    pub rtcp_received: u64,
+    pub receive: ReceiveCounts,
+}
+
+impl CallStats {
+    /// The far end's packets lost over the call, in percent.
+    pub fn loss_pct(&self) -> f32 {
+        if self.packets_expected == 0 {
+            0.0
+        } else {
+            self.packets_lost as f32 * 100.0 / self.packets_expected as f32
+        }
+    }
 }
 
 /// A call's receive side counted from its start: every datagram on the RTP
