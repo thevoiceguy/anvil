@@ -1019,4 +1019,14 @@ class StringsEn extends Strings {
 
   @override
   String get statsWaiting => 'Measuring…';
+
+  @override
+  String recentAudio(String score) {
+    return 'Audio $score';
+  }
+
+  @override
+  String recentPoorAudio(String score) {
+    return 'Poor audio $score';
+  }
 }

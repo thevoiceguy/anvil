@@ -189,4 +189,50 @@ void main() {
     await tester.pumpAndSettle();
     expect(stat(tester, 'waiting'), 'Measuring…');
   });
+
+  testWidgets('recents show how each reported call went', (tester) async {
+    tester.view.physicalSize = const Size(1000, 1000);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.reset);
+    final phone = FakePhone()
+      ..saved = const SignedInAccountFake()
+      ..seed = (s) => s.copyWith(
+        recents: [
+          RecentCall(
+            id: 'good',
+            direction: Direction.outgoing,
+            remote: 'sip:1002@x',
+            startedAt: DateTime(2026, 10, 31, 9),
+            durationSecs: 60,
+            mosHundredths: 431,
+          ),
+          RecentCall(
+            id: 'poor',
+            direction: Direction.incoming,
+            remote: 'sip:1003@x',
+            startedAt: DateTime(2026, 10, 31, 10),
+            durationSecs: 60,
+            mosHundredths: 262,
+            poor: true,
+          ),
+          RecentCall(
+            id: 'unknown',
+            direction: Direction.incoming,
+            remote: 'sip:1004@x',
+            startedAt: DateTime(2026, 10, 31, 11),
+          ),
+        ],
+      );
+    await tester.pumpWidget(AnvilApp(phone: phone));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Recents').last);
+    await tester.pumpAndSettle();
+    String details(String id) => tester
+        .widget<ListTile>(find.byKey(Key('recent-$id')))
+        .subtitle
+        .toString();
+    expect(find.textContaining(RegExp(r'· Audio 4\.3$')), findsOneWidget);
+    expect(find.textContaining(RegExp(r'· Poor audio 2\.6$')), findsOneWidget);
+    expect(details('unknown'), isNot(contains('udio')));
+  });
 }

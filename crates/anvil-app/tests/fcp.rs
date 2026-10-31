@@ -1426,3 +1426,123 @@ async fn a_shared_line_shows_its_appearances_and_any_app_picks_up_a_held_call() 
     })
     .await;
 }
+
+/// A call's quality reaches FCP when it ends (FCP's
+/// `docs/CALL_DIAGNOSTICS.md` phase 3): both apps on a call through FCP
+/// send their last second's figures by the server's id for the call, and
+/// the call's record shows a report from each.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn each_app_reports_how_a_call_went_when_it_ends() {
+    let (Ok(admin), Ok(token)) = (
+        std::env::var("ANVIL_FCP_ADMIN"),
+        std::env::var("ANVIL_FCP_TOKEN"),
+    ) else {
+        eprintln!("ANVIL_FCP_ADMIN and ANVIL_FCP_TOKEN not set; skipping");
+        return;
+    };
+    let tenant = anvil_tenant(&admin, &token).await;
+    let quality_of = |call: String| {
+        let (admin, token, tenant) = (admin.clone(), token.clone(), tenant.clone());
+        async move {
+            reqwest::Client::new()
+                .get(format!("{admin}/api/v1/cdrs/{call}/quality"))
+                .bearer_auth(&token)
+                .header("X-FCP-Tenant-Id", &tenant)
+                .send()
+                .await
+                .unwrap()
+        }
+    };
+    // A call nobody made: an empty page from an FCP that keeps quality.
+    let probe = quality_of("call-00000000-0000-4000-8000-000000000000".to_string()).await;
+    if !probe.status().is_success() {
+        eprintln!("this FCP keeps no call quality (before v0.25.490); skipping");
+        return;
+    }
+    let (alice_fcp, _) = signed_in(&admin, &token, "q-alice").await;
+    let (bob_fcp, bob) = signed_in(&admin, &token, "q-bob").await;
+    let alice = phone(alice_fcp, "127.0.0.130").await;
+    let bob_phone = phone(bob_fcp, "127.0.0.131").await;
+    for (who, p) in [("Alice", &alice), ("Bob", &bob_phone)] {
+        until(p, &format!("{who} registers"), |s| {
+            s.registration == Registration::Registered
+        })
+        .await;
+    }
+
+    let call = alice
+        .execute(Command::Call {
+            target: bob,
+            line: None,
+        })
+        .await
+        .unwrap()
+        .call
+        .unwrap();
+    until(&bob_phone, "Bob rings", |s| {
+        s.calls.iter().any(|c| c.state == CallState::Ringing)
+    })
+    .await;
+    assert!(
+        bob_phone
+            .execute(Command::Answer { call: None })
+            .await
+            .unwrap()
+            .ok
+    );
+    // Measured: a second's stats with a score, on both sides.
+    for (who, p) in [("Alice", &alice), ("Bob", &bob_phone)] {
+        until(p, &format!("{who}'s call is measured"), |s| {
+            s.calls.iter().any(|c| {
+                c.server_call.is_some() && c.quality.as_ref().is_some_and(|q| q.mos_hundredths > 0)
+            })
+        })
+        .await;
+    }
+    let server_call = alice
+        .state()
+        .calls
+        .iter()
+        .find(|c| c.id == call)
+        .and_then(|c| c.server_call.clone())
+        .unwrap();
+    assert!(
+        alice
+            .execute(Command::Hangup { call: None })
+            .await
+            .unwrap()
+            .ok
+    );
+    until(&bob_phone, "Bob's call ends", |s| s.calls.is_empty()).await;
+
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(10);
+    let reports = loop {
+        let res = quality_of(server_call.clone()).await;
+        assert!(res.status().is_success(), "{res:?}");
+        let body: serde_json::Value = res.json().await.unwrap();
+        let reports = body["data"].as_array().cloned().unwrap_or_default();
+        if reports.len() == 2 {
+            break reports;
+        }
+        assert!(
+            tokio::time::Instant::now() < deadline,
+            "both apps never reported {server_call}: {body}"
+        );
+        tokio::time::sleep(Duration::from_millis(250)).await;
+    };
+    let mut directions: Vec<&str> = reports
+        .iter()
+        .map(|r| r["direction"].as_str().unwrap())
+        .collect();
+    directions.sort();
+    assert_eq!(directions, ["incoming", "outgoing"], "{reports:?}");
+    for r in &reports {
+        let mos = r["mos"].as_f64().unwrap();
+        assert!((1.0..=4.5).contains(&mos), "{r}");
+        assert_eq!(r["poor"], false, "a clean call over loopback: {r}");
+        assert!(r["packets_sent"].as_u64().unwrap() > 0, "{r}");
+        assert!(r["device_id"].is_string(), "{r}");
+    }
+    alice.shutdown().await;
+    bob_phone.shutdown().await;
+}

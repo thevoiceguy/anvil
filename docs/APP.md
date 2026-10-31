@@ -670,6 +670,26 @@ FCP's `docs/CALL_DIAGNOSTICS.md` phase 2:
   goldens.
 - Phase 3 sends each call's final figures to FCP.
 
+### D8 finding 43: a call's quality sent to FCP (diagnostics phase 3)
+FCP's `docs/CALL_DIAGNOSTICS.md` phase 3 (FCP v0.25.490):
+- When a call ends, the app sends its last second's figures to
+  `POST /me/calls/{call_id}/quality` by the server's id for the call
+  (`X-FCP-Call-Id`, ringing in or in the answer to a call placed):
+  direction, codec, SRTP, talk time, packets sent, received, expected and
+  lost, jitter, the round trip, the far end's report and both scores
+  (`data::quality_report`, `FcpClient::report_call_quality`). Every
+  measured call is sent, whether or not its stats were opened; a call
+  never measured or never named by the server is not. A failure is logged
+  at debug and dropped: the report is advisory.
+- FCP keeps one report per phone per call, shows it on the call's record
+  and announces a poor one (`call.quality_poor`).
+- `/me/calls` carries each call's `quality`; a recent shows "Audio 4.3", or
+  "Poor audio 2.6" under 3.1 (`Recent.mos_hundredths`, `poor`).
+- Tested: `data.rs`'s unit test (what is reported, and when not), FCP
+  `each_app_reports_how_a_call_went_when_it_ends` (two apps through FCP
+  0.25.490, a report from each on the call's record; skipped on an older
+  FCP), `test/call_stats_test.dart` for the recents.
+
 ### W5: echo cancellation and noise suppression
 - The desktop's microphone is cleaned before it is sent: WebRTC's audio
   processing — AEC3, its noise suppressor and its high-pass filter — as

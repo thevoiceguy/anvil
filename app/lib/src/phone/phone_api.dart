@@ -418,6 +418,8 @@ class RecentCall {
     this.missed = false,
     required this.startedAt,
     this.durationSecs,
+    this.mosHundredths,
+    this.poor = false,
   });
 
   final String id;
@@ -429,6 +431,11 @@ class RecentCall {
   final bool missed;
   final DateTime? startedAt;
   final int? durationSecs;
+
+  /// How it went, when one of the user's phones reported it: the lower
+  /// score (MOS) in hundredths, and whether it was poor (under 3.1).
+  final int? mosHundredths;
+  final bool poor;
 
   String get who => displayName ?? shortAddress(remote);
 }

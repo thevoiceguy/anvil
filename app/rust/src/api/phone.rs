@@ -662,6 +662,10 @@ pub struct Recent {
     /// RFC 3339.
     pub started_at: String,
     pub duration_secs: Option<u64>,
+    /// How it went, when one of the user's phones reported it: the lower
+    /// score (MOS) in hundredths, and whether it was poor (under 3.1).
+    pub mos_hundredths: Option<u16>,
+    pub poor: bool,
 }
 
 /// Someone in the tenant's directory.
@@ -1030,6 +1034,8 @@ pub fn phone_state() -> anyhow::Result<PhoneState> {
                 missed: r.missed,
                 started_at: r.started_at,
                 duration_secs: r.duration_secs,
+                mos_hundredths: r.mos_hundredths,
+                poor: r.poor,
             })
             .collect(),
         people: s

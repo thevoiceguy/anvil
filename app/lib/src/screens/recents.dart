@@ -87,6 +87,10 @@ class RecentsPage extends StatelessWidget {
                   when(context, r.startedAt),
                   if (r.durationSecs != null && r.durationSecs! > 0)
                     duration(r.durationSecs!),
+                  if (r.mosHundredths case final mos?)
+                    (r.poor ? s.recentPoorAudio : s.recentAudio)(
+                      (mos / 100).toStringAsFixed(1),
+                    ),
                 ].where((d) => d.isNotEmpty).join(' · ');
                 return ListTile(
                   key: Key('recent-${r.id}'),

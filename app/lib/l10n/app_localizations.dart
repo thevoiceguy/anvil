@@ -1927,6 +1927,18 @@ abstract class Strings {
   /// In en, this message translates to:
   /// **'Measuring…'**
   String get statsWaiting;
+
+  /// No description provided for @recentAudio.
+  ///
+  /// In en, this message translates to:
+  /// **'Audio {score}'**
+  String recentAudio(String score);
+
+  /// No description provided for @recentPoorAudio.
+  ///
+  /// In en, this message translates to:
+  /// **'Poor audio {score}'**
+  String recentPoorAudio(String score);
 }
 
 class _StringsDelegate extends LocalizationsDelegate<Strings> {

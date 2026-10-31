@@ -221,6 +221,8 @@ class RustPhone implements PhoneApi {
               missed: r.missed,
               startedAt: DateTime.tryParse(r.startedAt)?.toLocal(),
               durationSecs: r.durationSecs?.toInt(),
+              mosHundredths: r.mosHundredths,
+              poor: r.poor,
             ),
           )
           .toList(),

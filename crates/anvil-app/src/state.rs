@@ -538,6 +538,12 @@ pub struct Recent {
     /// RFC 3339.
     pub started_at: String,
     pub duration_secs: Option<u64>,
+    /// How it went, when one of the user's phones reported it: the lower
+    /// score in hundredths, and whether it was poor (under 3.1).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub mos_hundredths: Option<u16>,
+    #[serde(default)]
+    pub poor: bool,
 }
 
 /// Someone in the tenant's directory: a user, or an extension that is not

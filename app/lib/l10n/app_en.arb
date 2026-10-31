@@ -597,5 +597,21 @@
   },
   "statsDropped": "Not played",
   "statsUnknown": "Not yet measured",
-  "statsWaiting": "Measuring…"
+  "statsWaiting": "Measuring…",
+  "recentAudio": "Audio {score}",
+  "@recentAudio": {
+    "placeholders": {
+      "score": {
+        "type": "String"
+      }
+    }
+  },
+  "recentPoorAudio": "Poor audio {score}",
+  "@recentPoorAudio": {
+    "placeholders": {
+      "score": {
+        "type": "String"
+      }
+    }
+  }
 }
