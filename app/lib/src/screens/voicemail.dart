@@ -57,8 +57,22 @@ class VoicemailPage extends StatelessWidget {
               child: Center(child: Text(s.voicemailEmpty)),
             ),
           for (final m in messages)
+            // Unheard stands out (D8 finding 62): a tinted card with an edge
+            // in the brand's colour and "New"; a heard one is quieter.
             Card(
               key: Key('message-${m.id}'),
+              color: m.isNew
+                  ? theme.colorScheme.primaryContainer.withValues(alpha: 0.45)
+                  : null,
+              shape: m.isNew
+                  ? RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(12),
+                      side: BorderSide(
+                        color: theme.colorScheme.primary,
+                        width: 1.5,
+                      ),
+                    )
+                  : null,
               child: Padding(
                 padding: const EdgeInsets.fromLTRB(16, 12, 8, 4),
                 child: Column(
@@ -81,8 +95,44 @@ class VoicemailPage extends StatelessWidget {
                             snap.personFor(m.caller)?.name ?? m.who,
                             style: theme.textTheme.titleMedium?.copyWith(
                               fontWeight: m.isNew ? FontWeight.w700 : null,
+                              color: m.isNew
+                                  ? null
+                                  : theme.colorScheme.onSurfaceVariant,
                             ),
                           ),
+                        ),
+                        Padding(
+                          padding: const EdgeInsets.only(right: 8),
+                          child: m.isNew
+                              ? Text(
+                                  s.voicemailNew,
+                                  key: Key('newLabel-${m.id}'),
+                                  style: theme.textTheme.labelMedium?.copyWith(
+                                    color: theme.colorScheme.primary,
+                                    fontWeight: FontWeight.w700,
+                                  ),
+                                )
+                              : Row(
+                                  key: Key('heardLabel-${m.id}'),
+                                  mainAxisSize: MainAxisSize.min,
+                                  children: [
+                                    Icon(
+                                      Icons.done_all,
+                                      size: 14,
+                                      color: theme.colorScheme.onSurfaceVariant,
+                                    ),
+                                    const SizedBox(width: 2),
+                                    Text(
+                                      s.voicemailHeard,
+                                      style: theme.textTheme.labelMedium
+                                          ?.copyWith(
+                                            color: theme
+                                                .colorScheme
+                                                .onSurfaceVariant,
+                                          ),
+                                    ),
+                                  ],
+                                ),
                         ),
                         if (m.urgent)
                           Padding(

@@ -216,6 +216,8 @@ class _HomeScreenState extends State<HomeScreen> {
                   from: model.snapshot.hasLines && !linesBeside
                       ? LinePicker(model: model)
                       : null,
+                  people: model.snapshot.people,
+                  contacts: model.snapshot.contacts,
                 ),
         Section.recents => RecentsPage(model: model, onDial: _dial),
         Section.people => PeoplePage(model: model, onDial: _dial),

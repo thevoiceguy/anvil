@@ -908,6 +908,79 @@ class CallBar extends StatelessWidget {
   }
 }
 
+/// Someone the keypad offers while a name or number is typed (D8 finding
+/// 45): a person in the directory or one of the user's contacts.
+class DialSuggestion {
+  const DialSuggestion({
+    required this.name,
+    required this.dial,
+    this.detail,
+    this.contact = false,
+  });
+
+  final String name;
+
+  /// What a tap dials.
+  final String dial;
+
+  /// The extension, or the number's label and number.
+  final String? detail;
+  final bool contact;
+}
+
+/// Up to `limit` people and contacts matching `query`: names by any word
+/// they start with, numbers and extensions by the digits typed. Nothing
+/// for an empty query.
+List<DialSuggestion> dialSuggestions(
+  String query,
+  List<Person> people,
+  List<Contact> contacts, {
+  int limit = 5,
+}) {
+  final q = query.trim().toLowerCase();
+  if (q.isEmpty) return const [];
+  final digits = q.replaceAll(RegExp(r'[^0-9]'), '');
+  final byName = q.replaceAll(RegExp(r'[^a-z]'), '').isNotEmpty;
+  bool nameMatches(String name) {
+    final n = name.toLowerCase();
+    return n.startsWith(q) ||
+        n.split(RegExp(r'\s+')).any((w) => w.startsWith(q));
+  }
+
+  bool numberMatches(String number) {
+    final d = number.replaceAll(RegExp(r'[^0-9]'), '');
+    return digits.isNotEmpty && !byName && d.contains(digits);
+  }
+
+  final out = <DialSuggestion>[];
+  final seen = <String>{};
+  void add(DialSuggestion s) {
+    if (out.length < limit && seen.add(s.dial)) out.add(s);
+  }
+
+  for (final p in people) {
+    if (nameMatches(p.name) || numberMatches(p.extension ?? '')) {
+      add(DialSuggestion(name: p.name, dial: p.dial, detail: p.extension));
+    }
+  }
+  for (final c in contacts) {
+    final named = nameMatches(c.name);
+    for (final n in c.numbers) {
+      if (named || numberMatches(n.number)) {
+        add(
+          DialSuggestion(
+            name: c.name,
+            dial: n.number,
+            detail: [n.label, n.number].where((t) => t.isNotEmpty).join(' '),
+            contact: true,
+          ),
+        );
+      }
+    }
+  }
+  return out;
+}
+
 class Keypad extends StatefulWidget {
   const Keypad({
     super.key,
@@ -915,7 +988,13 @@ class Keypad extends StatefulWidget {
     this.onBack,
     this.initial,
     this.from,
+    this.people = const [],
+    this.contacts = const [],
   });
+
+  /// Whom the keypad offers as a name or number is typed.
+  final List<Person> people;
+  final List<Contact> contacts;
 
   /// Place a call to what was typed.
   final ValueChanged<String> onCall;
@@ -934,7 +1013,13 @@ class Keypad extends StatefulWidget {
 }
 
 class _KeypadState extends State<Keypad> {
-  late final _target = TextEditingController(text: widget.initial);
+  late final _target = TextEditingController(text: widget.initial)
+    ..addListener(_typed);
+  String _query = '';
+
+  void _typed() {
+    if (_target.text != _query) setState(() => _query = _target.text);
+  }
 
   @override
   void dispose() {
@@ -972,6 +1057,25 @@ class _KeypadState extends State<Keypad> {
                 ),
                 onSubmitted: (_) => _call(),
               ),
+              for (final m in dialSuggestions(
+                _query,
+                widget.people,
+                widget.contacts,
+              ))
+                ListTile(
+                  key: Key('suggestion-${m.dial}'),
+                  dense: true,
+                  leading: Icon(
+                    m.contact ? Icons.contact_phone_outlined : Icons.person,
+                  ),
+                  title: Text(m.name),
+                  subtitle: m.detail == null ? null : Text(m.detail!),
+                  trailing: const Icon(Icons.call),
+                  onTap: () {
+                    widget.onCall(m.dial);
+                    _target.clear();
+                  },
+                ),
               const SizedBox(height: 12),
               DigitPad(onDigit: (k) => setState(() => _target.text += k)),
               const SizedBox(height: 12),

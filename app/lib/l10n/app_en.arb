@@ -641,5 +641,7 @@
       }
     }
   },
-  "deleteCaptures": "Delete"
+  "deleteCaptures": "Delete",
+  "voicemailNew": "New",
+  "voicemailHeard": "Heard"
 }
