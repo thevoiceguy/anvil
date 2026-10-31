@@ -564,6 +564,26 @@ pub struct Call {
     pub line: Option<String>,
     /// Ringing on a line that does not ring this app: shown, not sounded.
     pub silent: bool,
+    /// The call is being captured.
+    pub capturing: bool,
+}
+
+/// Capturing calls (FCP's `docs/CALL_DIAGNOSTICS.md` §3).
+pub struct CaptureInfo {
+    /// The user's organisation allows this app to capture: the setting
+    /// shows only then.
+    pub allowed: bool,
+    /// Until when, RFC 3339.
+    pub until: Option<String>,
+    /// The largest capture, in MB.
+    pub max_mb: u32,
+    /// `off`, `next_call` or `every_call`.
+    pub mode: String,
+    /// The captures kept on this device, and their size.
+    pub saved: u32,
+    pub saved_bytes: u64,
+    /// Where they are kept.
+    pub folder: Option<String>,
 }
 
 /// One of the account's lines (FCP's `docs/DEVICE_LINES.md`).
@@ -865,6 +885,8 @@ pub struct PhoneState {
     pub audio_test: Option<String>,
     /// While recording: how loud the microphone is, 0 to 100.
     pub audio_test_level: u8,
+    /// Capturing calls.
+    pub capture: CaptureInfo,
 }
 
 /// A ringtone to choose: `anvil`, `classic`, `brand:` and its name, or
@@ -904,7 +926,7 @@ fn devices(list: Vec<anvil_app::AudioDevice>) -> Vec<AudioDevice> {
 pub struct PhoneChange {
     /// `registration`, `call`, `call_ended`, `message_waiting`, `dnd`,
     /// `brand`, `transfer_progress`, `lines`, `calling`, `recents`, `people`,
-    /// `person`, `voicemail`, `audio`, `playing`, `push`, `may_record`,
+    /// `person`, `voicemail`, `audio`, `playing`, `push`, `may_record`, `capture`,
     /// `contacts`.
     pub kind: String,
     /// The call it is about, if any.
@@ -1006,6 +1028,7 @@ pub fn phone_state() -> anyhow::Result<PhoneState> {
                 recording: c.recording,
                 line: c.line,
                 silent: c.silent,
+                capturing: c.capturing,
             })
             .collect(),
         voicemail_new: s.message_waiting.map(|m| m.new).unwrap_or(0),
@@ -1089,6 +1112,15 @@ pub fn phone_state() -> anyhow::Result<PhoneState> {
         speaker_volume: s.audio.volume.map(|v| v.speaker),
         playing: s.playing,
         may_record: s.may_record,
+        capture: CaptureInfo {
+            allowed: s.capture.allowed,
+            until: s.capture.until.clone(),
+            max_mb: s.capture.max_mb,
+            mode: capture_mode_name(s.capture.mode).to_string(),
+            saved: s.capture.saved,
+            saved_bytes: s.capture.saved_bytes,
+            folder: s.capture.folder.clone(),
+        },
         directory_listed: s.directory.map(|d| d.listed),
         may_change_directory_listing: s.directory.is_some_and(|d| d.may_change),
         presence: s.presence.map(|p| MyPresence {
@@ -1205,6 +1237,7 @@ pub fn phone_changes(sink: StreamSink<PhoneChange>) -> anyhow::Result<()> {
                 C::Playing { .. } => kind_only("playing"),
                 C::Push { .. } => kind_only("push"),
                 C::MayRecord { .. } => kind_only("may_record"),
+                C::Capture { .. } => kind_only("capture"),
                 C::Contacts { .. } => kind_only("contacts"),
                 C::Directory { .. } => kind_only("directory"),
                 C::Presence { .. } => kind_only("presence"),
@@ -1352,6 +1385,31 @@ pub async fn park(call: Option<u64>) -> anyhow::Result<()> {
 /// started. FCP plays the recording announcement to both parties first.
 pub async fn record(call: Option<u64>, on: bool) -> anyhow::Result<()> {
     execute(Command::Record { call, on }).await.map(|_| ())
+}
+
+/// Capture the next call (`next_call`), every call (`every_call`), or none
+/// (`off`); refused unless the organisation allows it.
+pub async fn set_capture(mode: String) -> anyhow::Result<()> {
+    let mode = match mode.as_str() {
+        "off" => anvil_app::CaptureMode::Off,
+        "next_call" => anvil_app::CaptureMode::NextCall,
+        "every_call" => anvil_app::CaptureMode::EveryCall,
+        other => anyhow::bail!("no capture mode {other}"),
+    };
+    execute(Command::SetCapture { mode }).await.map(|_| ())
+}
+
+/// Remove the captures kept on this device.
+pub async fn delete_captures() -> anyhow::Result<()> {
+    execute(Command::DeleteCaptures).await.map(|_| ())
+}
+
+fn capture_mode_name(mode: anvil_app::CaptureMode) -> &'static str {
+    match mode {
+        anvil_app::CaptureMode::Off => "off",
+        anvil_app::CaptureMode::NextCall => "next_call",
+        anvil_app::CaptureMode::EveryCall => "every_call",
+    }
 }
 
 /// Keep a contact: a new one (empty id) or a change to one, on this device

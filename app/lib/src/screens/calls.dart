@@ -233,6 +233,26 @@ class _InCallPanelState extends State<InCallPanel> {
                     ],
                   ),
                 ),
+              if (call.capturing)
+                Padding(
+                  padding: const EdgeInsets.only(top: 4),
+                  child: Row(
+                    key: const Key('capturingNow'),
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Icon(
+                        Icons.radar,
+                        size: 14,
+                        color: theme.colorScheme.tertiary,
+                      ),
+                      const SizedBox(width: 4),
+                      Text(
+                        s.capturingNow,
+                        style: TextStyle(color: theme.colorScheme.tertiary),
+                      ),
+                    ],
+                  ),
+                ),
               const SizedBox(height: 8),
               if (connected) _MediaLine(model: model, call: call),
               const SizedBox(height: 24),

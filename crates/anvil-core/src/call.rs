@@ -88,6 +88,28 @@ pub(crate) struct MediaSockets {
     /// `None` when the port above RTP's could not be had: the call goes
     /// on without RTCP.
     pub rtcp: Option<Arc<UdpSocket>>,
+    /// The call's capture, when one is taken: its RTP and RTCP are written
+    /// to it. Shared by every clone of the call's sockets.
+    capture: crate::capture::CaptureSlot,
+}
+
+impl MediaSockets {
+    fn new(rtp: Arc<UdpSocket>, rtcp: Option<Arc<UdpSocket>>) -> Self {
+        Self {
+            rtp,
+            rtcp,
+            capture: Default::default(),
+        }
+    }
+
+    pub(crate) fn set_capture(&self, capture: Option<Arc<crate::capture::Capture>>) {
+        *self.capture.lock() = capture;
+    }
+
+    /// The slot the call's media tasks read its capture from.
+    pub(crate) fn capture_slot(&self) -> crate::capture::CaptureSlot {
+        Arc::clone(&self.capture)
+    }
 }
 
 impl std::ops::Deref for MediaSockets {
@@ -99,7 +121,7 @@ impl std::ops::Deref for MediaSockets {
 
 impl From<Arc<UdpSocket>> for MediaSockets {
     fn from(rtp: Arc<UdpSocket>) -> Self {
-        Self { rtp, rtcp: None }
+        Self::new(rtp, None)
     }
 }
 
@@ -124,10 +146,7 @@ pub(crate) async fn bind_rtp_socket(media_ip: IpAddr) -> std::io::Result<MediaSo
         let port = rtp.local_addr()?.port();
         if port % 2 == 0 {
             if let Ok(rtcp) = UdpSocket::bind(SocketAddr::new(ip, port + 1)).await {
-                return Ok(MediaSockets {
-                    rtp: Arc::new(rtp),
-                    rtcp: Some(Arc::new(rtcp)),
-                });
+                return Ok(MediaSockets::new(Arc::new(rtp), Some(Arc::new(rtcp))));
             }
         }
         fallback.get_or_insert(rtp);

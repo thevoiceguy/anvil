@@ -1029,4 +1029,49 @@ class StringsEn extends Strings {
   String recentPoorAudio(String score) {
     return 'Poor audio $score';
   }
+
+  @override
+  String get capturingNow => 'Capturing';
+
+  @override
+  String get settingsDiagnostics => 'Diagnostics';
+
+  @override
+  String get captureCalls => 'Capture calls';
+
+  @override
+  String get captureCallsSubtitle =>
+      'Each captured call is saved on this device and uploaded to your organisation for troubleshooting. It holds the call\'s signalling and audio.';
+
+  @override
+  String captureAllowedUntil(String date) {
+    return 'Your organisation allows this until $date.';
+  }
+
+  @override
+  String get captureOff => 'Off';
+
+  @override
+  String get captureNextCall => 'Next call';
+
+  @override
+  String get captureEveryCall => 'Every call';
+
+  @override
+  String get savedCaptures => 'Captures on this device';
+
+  @override
+  String savedCapturesCount(int count, String size) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '$count captures, $size',
+      one: '1 capture, $size',
+      zero: 'None',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String get deleteCaptures => 'Delete';
 }

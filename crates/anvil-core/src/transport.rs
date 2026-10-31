@@ -93,6 +93,7 @@ pub fn install_default_crypto_provider() {
 /// pump only has to read one channel.
 pub(crate) async fn start_transports(
     bind_addr: &str,
+    captures: Arc<crate::capture::Captures>,
     #[cfg(feature = "tls")] tls_config: Option<TlsConfigArc>,
     #[cfg(not(feature = "tls"))] _tls_config: Option<()>,
 ) -> Result<(
@@ -148,6 +149,7 @@ pub(crate) async fn start_transports(
 
     let dispatcher: Arc<dyn TransportDispatcher> = Arc::new(AnvilTransportDispatcher {
         udp_socket: Arc::clone(&udp_socket),
+        captures,
         policy: Arc::new(DefaultTransportPolicy::default()),
         tcp_pool: Arc::clone(&tcp_pool),
         #[cfg(feature = "tls")]
@@ -171,6 +173,10 @@ pub(crate) async fn start_transports(
 
 struct AnvilTransportDispatcher {
     udp_socket: Arc<UdpSocket>,
+    /// Captures being taken: each message is written as sent, before TLS.
+    /// (A new TCP connection the transaction manager opens itself does not
+    /// come this way: siphon-rs #158.)
+    captures: Arc<crate::capture::Captures>,
     policy: Arc<dyn TransportPolicy>,
     tcp_pool: Arc<ConnectionPool>,
     #[cfg(feature = "tls")]
@@ -190,6 +196,12 @@ impl TransportDispatcher for AnvilTransportDispatcher {
                 ctx.transport(),
                 TransportKind::Tls | TransportKind::Wss | TransportKind::TlsSctp
             ),
+        );
+        self.captures.sip(
+            crate::capture::Direction::Outbound,
+            name(selected),
+            ctx.peer(),
+            &payload,
         );
 
         // On the connection the request came in on, if it did.
@@ -252,6 +264,19 @@ impl TransportDispatcher for AnvilTransportDispatcher {
                 "TLS dispatch requested but anvil-core was built without the `tls` feature"
             )),
         }
+    }
+}
+
+/// A transport's name, for a capture's comment.
+pub(crate) fn name(kind: sip_transport::TransportKind) -> &'static str {
+    match kind {
+        sip_transport::TransportKind::Udp => "udp",
+        sip_transport::TransportKind::Tcp => "tcp",
+        sip_transport::TransportKind::Tls => "tls",
+        sip_transport::TransportKind::Ws => "ws",
+        sip_transport::TransportKind::Wss => "wss",
+        sip_transport::TransportKind::Sctp => "sctp",
+        sip_transport::TransportKind::TlsSctp => "tls-sctp",
     }
 }
 

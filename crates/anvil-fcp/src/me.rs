@@ -570,6 +570,24 @@ impl FcpClient {
         Ok(())
     }
 
+    /// Upload a capture this app took (pcapng) from its own session, naming
+    /// the call by the server's id when it is known. FCP takes it only
+    /// while the app is allowed to capture; 403 then, 413 over the
+    /// tenant's limit.
+    pub async fn upload_capture(
+        &self,
+        device_id: &str,
+        server_call: Option<&str>,
+        pcapng: Vec<u8>,
+    ) -> Result<(), FcpError> {
+        let path = with_query(
+            &format!("/me/devices/{device_id}/captures"),
+            &[("call_id", server_call.map(String::from))],
+        );
+        self.api_bytes(reqwest::Method::POST, &path, pcapng).await?;
+        Ok(())
+    }
+
     /// Stop a recording the user started; any other recording of the call
     /// goes on (409).
     pub async fn stop_recording(&self, server_call: &str) -> Result<(), FcpError> {

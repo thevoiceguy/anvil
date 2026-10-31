@@ -162,6 +162,7 @@ class PhoneCall {
     this.recording = false,
     this.line,
     this.silent = false,
+    this.capturing = false,
   });
 
   final int id;
@@ -187,6 +188,9 @@ class PhoneCall {
 
   /// Ringing on a line that does not ring this app: shown, not sounded.
   final bool silent;
+
+  /// The call is being captured.
+  final bool capturing;
 
   /// Who the call is with, as a person reads it.
   String get who => displayName ?? shortAddress(remote);
@@ -220,7 +224,53 @@ class PhoneCall {
     recording: recording ?? this.recording,
     line: line,
     silent: silent,
+    capturing: capturing,
   );
+}
+
+/// Which calls the user captures.
+enum CaptureMode {
+  off,
+  nextCall,
+  everyCall;
+
+  static CaptureMode parse(String mode) => switch (mode) {
+    'next_call' => nextCall,
+    'every_call' => everyCall,
+    _ => off,
+  };
+
+  String get wire => switch (this) {
+    off => 'off',
+    nextCall => 'next_call',
+    everyCall => 'every_call',
+  };
+}
+
+/// Capturing calls (FCP's `docs/CALL_DIAGNOSTICS.md` §3): only while the
+/// user's organisation allows this app.
+class CaptureInfo {
+  const CaptureInfo({
+    this.allowed = false,
+    this.until,
+    this.maxMb = 50,
+    this.mode = CaptureMode.off,
+    this.saved = 0,
+    this.savedBytes = 0,
+    this.folder,
+  });
+
+  /// The organisation allows this app to capture: the setting shows only
+  /// then.
+  final bool allowed;
+  final DateTime? until;
+  final int maxMb;
+  final CaptureMode mode;
+
+  /// The captures kept on this device, and their size.
+  final int saved;
+  final int savedBytes;
+  final String? folder;
 }
 
 /// One of the account's lines, as on a desk phone (FCP's
@@ -718,6 +768,7 @@ class PhoneSnapshot {
     this.presence,
     this.audioTest,
     this.audioTestLevel = 0,
+    this.capture = const CaptureInfo(),
   });
 
   final String aor;
@@ -798,6 +849,9 @@ class PhoneSnapshot {
 
   /// While the microphone is recorded: how loud it is, 0 to 100.
   final int audioTestLevel;
+
+  /// Capturing calls.
+  final CaptureInfo capture;
 
   /// Signed in to FCP, so a contact can be kept on the account.
   bool get hasAccount => calling != null;
@@ -888,6 +942,7 @@ class PhoneSnapshot {
     AudioTest? audioTest,
     bool clearAudioTest = false,
     int? audioTestLevel,
+    CaptureInfo? capture,
   }) => PhoneSnapshot(
     aor: aor,
     registration: registration ?? this.registration,
@@ -924,6 +979,7 @@ class PhoneSnapshot {
     presence: presence ?? this.presence,
     audioTest: clearAudioTest ? null : audioTest ?? this.audioTest,
     audioTestLevel: audioTestLevel ?? this.audioTestLevel,
+    capture: capture ?? this.capture,
   );
 
   static const empty = PhoneSnapshot(
@@ -1139,6 +1195,13 @@ abstract class PhoneApi {
   /// Be listed in the tenant's directory, or not (when the tenant lets the
   /// user choose).
   Future<void> setDirectoryListed(bool on);
+
+  /// Capture the next call, every call, or none; refused unless the
+  /// organisation allows it.
+  Future<void> setCapture(CaptureMode mode);
+
+  /// Remove the captures kept on this device.
+  Future<void> deleteCaptures();
 
   /// Pick a status: a built-in one (`available`, `away`, `busy`, `dnd`) or
   /// one of the user's own by id, with a note and a time it clears at. A

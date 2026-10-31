@@ -209,3 +209,161 @@ async fn each_side_reads_the_others_reports_and_the_round_trip() {
         bob.shutdown().await.unwrap();
     }
 }
+
+/// A call captured (FCP's `docs/CALL_DIAGNOSTICS.md` §3): the capture holds
+/// the SIP of the call from its INVITE to its BYE, plain, and its RTP and
+/// RTCP both ways outside SRTP. `ANVIL_KEEP_CAPTURE=<dir>` keeps the file
+/// there, for Wireshark.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_call_is_captured_with_its_sip_and_its_media_outside_srtp() {
+    use anvil_core::config::{MediaConfig, SrtpMode};
+    // PCMU: a packet's length (12 + 160) says it carries no SRTP tag.
+    let media = || MediaConfig {
+        srtp: SrtpMode::Required,
+        codecs: vec![anvil_core::config::Codec::Pcmu],
+        ..MediaConfig::default()
+    };
+    let (alice, mut alice_events) = start_with(
+        account(
+            "sip:alice@127.0.0.1",
+            "sip:127.0.0.1:9",
+            "alice",
+            "",
+            "127.0.0.12",
+            3600,
+        ),
+        media(),
+    )
+    .await;
+    let (bob, mut bob_events) = start_with(
+        account(
+            "sip:bob@127.0.0.1",
+            "sip:127.0.0.1:9",
+            "bob",
+            "",
+            "127.0.0.13",
+            3600,
+        ),
+        media(),
+    )
+    .await;
+    let dir = std::env::var_os("ANVIL_KEEP_CAPTURE")
+        .map(std::path::PathBuf::from)
+        .unwrap_or_else(|| {
+            std::env::temp_dir().join(format!("anvil-peer-capture-{}", std::process::id()))
+        });
+    alice.set_capture(Some(anvil_core::CaptureSettings {
+        dir: dir.clone(),
+        max_bytes: 8 << 20,
+        every_call: false,
+        application: "Anvil test".into(),
+    }));
+
+    let bob_uri = format!("sip:bob@{}", bob.sip_address());
+    let (out, incoming) =
+        answered_call(&alice, &mut alice_events, &bob, &mut bob_events, &bob_uri).await;
+    assert!(alice.is_capturing(out));
+    assert!(!bob.is_capturing(incoming));
+    assert_eq!(alice.capture_settings(), None, "the next call only");
+    // Media both ways, and the first RTCP reports.
+    tokio::time::sleep(std::time::Duration::from_millis(2500)).await;
+    alice.send_dtmf(out, '5').await.expect("a digit");
+    tokio::time::sleep(std::time::Duration::from_millis(300)).await;
+    alice.hangup(out).await.expect("BYE");
+    hung_up_by_the_other_side(&mut bob_events, incoming).await;
+    // The BYE's 200 OK, read after the call ended.
+    tokio::time::sleep(std::time::Duration::from_millis(200)).await;
+    let done = alice.finish_capture(out).expect("the capture");
+    assert!(!done.full);
+    assert!(alice.finish_capture(out).is_none(), "finished once");
+    let file = std::fs::read(&done.path).unwrap();
+    assert_eq!(file.len() as u64, done.bytes);
+
+    // Each packet: its IPv4 + UDP frame and whether it was inbound.
+    let mut packets: Vec<(bool, Vec<u8>)> = Vec::new();
+    let mut at = 0;
+    while at < file.len() {
+        let kind = u32::from_le_bytes(file[at..at + 4].try_into().unwrap());
+        let len = u32::from_le_bytes(file[at + 4..at + 8].try_into().unwrap()) as usize;
+        if kind == 6 {
+            let body = &file[at + 8..at + len - 4];
+            let caplen = u32::from_le_bytes(body[12..16].try_into().unwrap()) as usize;
+            let frame = body[20..20 + caplen].to_vec();
+            // epb_flags is the first option: code 2, length 4, the flags.
+            let opts = &body[20 + caplen + (4 - caplen % 4) % 4..];
+            assert_eq!(u16::from_le_bytes([opts[0], opts[1]]), 2);
+            let flags = u32::from_le_bytes(opts[4..8].try_into().unwrap());
+            packets.push((flags == 1, frame));
+        }
+        at += len;
+    }
+    let sip: Vec<String> = packets
+        .iter()
+        .filter(|(_, f)| {
+            let p = &f[28.min(f.len())..];
+            let method = p.iter().take_while(|b| b.is_ascii_uppercase()).count();
+            p.starts_with(b"SIP/2.0") || (method >= 3 && p.get(method) == Some(&b' '))
+        })
+        .map(|(inbound, f)| {
+            let text = String::from_utf8_lossy(&f[28..]);
+            format!(
+                "{} {}",
+                if *inbound { "<" } else { ">" },
+                text.lines().next().unwrap_or("")
+            )
+        })
+        .collect();
+    let has = |line: &str| sip.iter().any(|s| s.starts_with(line));
+    assert!(has("> INVITE sip:bob@"), "{sip:#?}");
+    assert!(has("< SIP/2.0 200 OK"), "{sip:#?}");
+    assert!(has("> ACK"), "{sip:#?}");
+    assert!(has("> BYE"), "{sip:#?}");
+    assert!(
+        sip.iter()
+            .filter(|s| s.starts_with("< SIP/2.0 200"))
+            .count()
+            >= 2,
+        "{sip:#?}"
+    );
+    let offer = packets
+        .iter()
+        .find(|(_, f)| f.len() > 28 && f[28..].starts_with(b"INVITE"))
+        .map(|(_, f)| String::from_utf8_lossy(&f[28..]).into_owned())
+        .unwrap();
+    assert!(
+        offer.contains("a=crypto:"),
+        "the keys are in the capture: {offer}"
+    );
+
+    // RTP: version 2, PCMU's 20 ms (12 + 160 octets) — no SRTP tag on it,
+    // so outside SRTP — many each way; DTMF (PT 101) out; RTCP both ways.
+    let rtp = |inbound: bool, pt: u8| {
+        packets
+            .iter()
+            .filter(|(i, f)| *i == inbound && f.len() > 29 && f[28] >> 6 == 2 && f[29] & 0x7f == pt)
+            .map(|(_, f)| f.len() - 28)
+            .collect::<Vec<_>>()
+    };
+    for inbound in [false, true] {
+        let audio = rtp(inbound, 0);
+        assert!(audio.len() > 50, "inbound {inbound}: {}", audio.len());
+        assert!(
+            audio.iter().all(|&l| l == 172),
+            "inbound {inbound}: {audio:?}"
+        );
+        let rtcp = packets
+            .iter()
+            .filter(|(i, f)| {
+                *i == inbound && f.len() > 29 && f[28] >> 6 == 2 && matches!(f[29], 200 | 201)
+            })
+            .count();
+        assert!(rtcp >= 1, "RTCP inbound {inbound}");
+    }
+    assert!(!rtp(false, 101).is_empty(), "the digit sent");
+
+    if std::env::var_os("ANVIL_KEEP_CAPTURE").is_none() {
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+    alice.shutdown().await.unwrap();
+    bob.shutdown().await.unwrap();
+}

@@ -7,7 +7,7 @@ import '../frb_generated.dart';
 
 import 'package:flutter_rust_bridge/flutter_rust_bridge_for_generated.dart';
 
-// These functions are ignored because they are not marked as `pub`: `act`, `devices`, `direction`, `execute`, `kind_only`, `managed`, `on_runtime_pub`, `on_runtime`, `phone`, `place_of`, `registration`, `remember`, `runtime`, `set_push`, `this_install`, `wake`
+// These functions are ignored because they are not marked as `pub`: `act`, `capture_mode_name`, `devices`, `direction`, `execute`, `kind_only`, `managed`, `on_runtime_pub`, `on_runtime`, `phone`, `place_of`, `registration`, `remember`, `runtime`, `set_push`, `this_install`, `wake`
 
 /// This install's managed settings; an ordinary install's are all open.
 ManagedSettings managedSettings() =>
@@ -173,6 +173,15 @@ Future<void> park({BigInt? call}) =>
 /// started. FCP plays the recording announcement to both parties first.
 Future<void> record({BigInt? call, required bool on_}) =>
     RustLib.instance.api.crateApiPhoneRecord(call: call, on_: on_);
+
+/// Capture the next call (`next_call`), every call (`every_call`), or none
+/// (`off`); refused unless the organisation allows it.
+Future<void> setCapture({required String mode}) =>
+    RustLib.instance.api.crateApiPhoneSetCapture(mode: mode);
+
+/// Remove the captures kept on this device.
+Future<void> deleteCaptures() =>
+    RustLib.instance.api.crateApiPhoneDeleteCaptures();
 
 /// Keep a contact: a new one (empty id) or a change to one, on this device
 /// or on the account (`on_account`; a device's contact saved so moves).
@@ -451,6 +460,9 @@ class Call {
   /// Ringing on a line that does not ring this app: shown, not sounded.
   final bool silent;
 
+  /// The call is being captured.
+  final bool capturing;
+
   const Call({
     required this.id,
     required this.direction,
@@ -466,6 +478,7 @@ class Call {
     required this.recording,
     this.line,
     required this.silent,
+    required this.capturing,
   });
 
   @override
@@ -483,7 +496,8 @@ class Call {
       connectedAt.hashCode ^
       recording.hashCode ^
       line.hashCode ^
-      silent.hashCode;
+      silent.hashCode ^
+      capturing.hashCode;
 
   @override
   bool operator ==(Object other) =>
@@ -503,7 +517,8 @@ class Call {
           connectedAt == other.connectedAt &&
           recording == other.recording &&
           line == other.line &&
-          silent == other.silent;
+          silent == other.silent &&
+          capturing == other.capturing;
 }
 
 /// Where a call is.
@@ -592,6 +607,62 @@ class CallingSettings {
           forwardNoAnswer == other.forwardNoAnswer &&
           forwardUnreachable == other.forwardUnreachable &&
           noAnswerSecs == other.noAnswerSecs;
+}
+
+/// Capturing calls (FCP's `docs/CALL_DIAGNOSTICS.md` §3).
+class CaptureInfo {
+  /// The user's organisation allows this app to capture: the setting
+  /// shows only then.
+  final bool allowed;
+
+  /// Until when, RFC 3339.
+  final String? until;
+
+  /// The largest capture, in MB.
+  final int maxMb;
+
+  /// `off`, `next_call` or `every_call`.
+  final String mode;
+
+  /// The captures kept on this device, and their size.
+  final int saved;
+  final BigInt savedBytes;
+
+  /// Where they are kept.
+  final String? folder;
+
+  const CaptureInfo({
+    required this.allowed,
+    this.until,
+    required this.maxMb,
+    required this.mode,
+    required this.saved,
+    required this.savedBytes,
+    this.folder,
+  });
+
+  @override
+  int get hashCode =>
+      allowed.hashCode ^
+      until.hashCode ^
+      maxMb.hashCode ^
+      mode.hashCode ^
+      saved.hashCode ^
+      savedBytes.hashCode ^
+      folder.hashCode;
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is CaptureInfo &&
+          runtimeType == other.runtimeType &&
+          allowed == other.allowed &&
+          until == other.until &&
+          maxMb == other.maxMb &&
+          mode == other.mode &&
+          saved == other.saved &&
+          savedBytes == other.savedBytes &&
+          folder == other.folder;
 }
 
 /// A contact the user keeps, on this device or on their FCP account.
@@ -1012,7 +1083,7 @@ class Person {
 class PhoneChange {
   /// `registration`, `call`, `call_ended`, `message_waiting`, `dnd`,
   /// `brand`, `transfer_progress`, `lines`, `calling`, `recents`, `people`,
-  /// `person`, `voicemail`, `audio`, `playing`, `push`, `may_record`,
+  /// `person`, `voicemail`, `audio`, `playing`, `push`, `may_record`, `capture`,
   /// `contacts`.
   final String kind;
 
@@ -1117,6 +1188,9 @@ class PhoneState {
   /// While recording: how loud the microphone is, 0 to 100.
   final int audioTestLevel;
 
+  /// Capturing calls.
+  final CaptureInfo capture;
+
   const PhoneState({
     required this.aor,
     required this.registration,
@@ -1152,6 +1226,7 @@ class PhoneState {
     this.presence,
     this.audioTest,
     required this.audioTestLevel,
+    required this.capture,
   });
 
   @override
@@ -1189,7 +1264,8 @@ class PhoneState {
       mayChangeDirectoryListing.hashCode ^
       presence.hashCode ^
       audioTest.hashCode ^
-      audioTestLevel.hashCode;
+      audioTestLevel.hashCode ^
+      capture.hashCode;
 
   @override
   bool operator ==(Object other) =>
@@ -1229,7 +1305,8 @@ class PhoneState {
           mayChangeDirectoryListing == other.mayChangeDirectoryListing &&
           presence == other.presence &&
           audioTest == other.audioTest &&
-          audioTestLevel == other.audioTestLevel;
+          audioTestLevel == other.audioTestLevel &&
+          capture == other.capture;
 }
 
 /// A connected call's media, as last measured.

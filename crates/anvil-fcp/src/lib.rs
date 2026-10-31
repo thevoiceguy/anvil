@@ -33,8 +33,8 @@ mod signin;
 
 pub use brand::{brand_config, FcpBrandProvider};
 pub use client::{
-    CallingSettings, CallingUpdate, FcpClient, SoftphoneAccount, SoftphoneConfig, SoftphoneLine,
-    SoftphoneMedia,
+    CallingSettings, CallingUpdate, FcpClient, SoftphoneAccount, SoftphoneCapture, SoftphoneConfig,
+    SoftphoneLine, SoftphoneMedia,
 };
 pub use discovery::{
     discover, discovery_login, sign_in_methods, Server, SignInMethods, SsoProvider,
