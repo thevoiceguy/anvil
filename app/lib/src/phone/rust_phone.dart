@@ -271,6 +271,17 @@ class RustPhone implements PhoneApi {
       speakerVolume: s.speakerVolume,
       playing: s.playing,
       mayRecord: s.mayRecord,
+      capture: CaptureInfo(
+        allowed: s.capture.allowed,
+        until: s.capture.until == null
+            ? null
+            : DateTime.tryParse(s.capture.until!),
+        maxMb: s.capture.maxMb,
+        mode: CaptureMode.parse(s.capture.mode),
+        saved: s.capture.saved,
+        savedBytes: s.capture.savedBytes.toInt(),
+        folder: s.capture.folder,
+      ),
       directoryListed: s.directoryListed,
       mayChangeDirectoryListing: s.mayChangeDirectoryListing,
       presence: switch (s.presence) {
@@ -367,6 +378,7 @@ class RustPhone implements PhoneApi {
       recording: c.recording,
       line: c.line,
       silent: c.silent,
+      capturing: c.capturing,
     );
   }
 
@@ -464,6 +476,12 @@ class RustPhone implements PhoneApi {
 
   @override
   Future<void> setDirectoryListed(bool on) => rust.setDirectoryListed(on_: on);
+
+  @override
+  Future<void> setCapture(CaptureMode mode) => rust.setCapture(mode: mode.wire);
+
+  @override
+  Future<void> deleteCaptures() => rust.deleteCaptures();
 
   @override
   Future<void> setPresence(String status, {String? note, DateTime? until}) =>

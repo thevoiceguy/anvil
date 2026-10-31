@@ -10,6 +10,7 @@
 // Unsafe only where Windows' API needs it, in its own modules.
 #![deny(unsafe_code)]
 
+mod capture;
 mod clip;
 mod command;
 mod contact_file;
@@ -38,6 +39,7 @@ use parking_lot::Mutex;
 use tokio::sync::{broadcast, RwLock};
 
 pub use anvil_fcp::{CallingSettings, CallingUpdate};
+pub use capture::{CaptureMode, CaptureState};
 pub use clip::{decode_wav, Clip};
 pub use command::{AudioKind, Command, Imported, Response};
 pub use state::{
@@ -123,6 +125,9 @@ struct Inner {
     audio_test: Mutex<Option<tokio::task::AbortHandle>>,
     /// The profile's brand, shown while FCP has none.
     fallback_brand: Option<anvil_core::brand::BrandProfile>,
+    /// The app's device on FCP, as `/me/softphone` names it: what a
+    /// capture is uploaded under.
+    device_id: Mutex<Option<String>>,
 }
 
 impl Phone {
@@ -169,6 +174,27 @@ impl Phone {
                 tracing::warn!(%e, "the audio devices chosen are not here; using the defaults");
             }
         }
+        // Captures past their week, or over the folder's limit, go.
+        let capture_folder = capture::folder(cfg.settings_path.as_deref());
+        let capture_state = match &capture_folder {
+            Some(dir) => {
+                capture::prune(
+                    dir,
+                    capture::keep_bytes(0),
+                    None,
+                    std::time::SystemTime::now(),
+                );
+                let (saved, saved_bytes) = capture::summary(dir);
+                CaptureState {
+                    mode: local.capture_calls,
+                    saved,
+                    saved_bytes,
+                    folder: Some(dir.display().to_string()),
+                    ..CaptureState::default()
+                }
+            }
+            None => CaptureState::default(),
+        };
         let (changes, _) = broadcast::channel(256);
         let file_ringtones = ringtone_dir(cfg.settings_path.as_deref())
             .map(|d| ring::from_dir(&d))
@@ -180,6 +206,7 @@ impl Phone {
             domain,
             state: Mutex::new(State {
                 contacts: local.contacts.clone(),
+                capture: capture_state,
                 ..State::new(aor)
             }),
             changes,
@@ -197,6 +224,7 @@ impl Phone {
             file_ringtones: Mutex::new(file_ringtones),
             audio_test: Mutex::new(None),
             fallback_brand: cfg.fallback_brand,
+            device_id: Mutex::new(None),
         });
         if let Some(fallback) = &inner.fallback_brand {
             inner.set_brand(fallback);
@@ -537,6 +565,26 @@ impl Phone {
             }
             Command::StopTest => {
                 self.inner.stop_audio_test();
+                Ok(Response::ok())
+            }
+            Command::SetCapture { mode } => {
+                let allowed = self.inner.state.lock().capture.allowed;
+                if !allowed && mode != CaptureMode::Off {
+                    return Err(PhoneError::Refused(
+                        "your organisation does not allow this app to capture calls".into(),
+                    ));
+                }
+                self.inner.update_capture(|c| c.mode = mode);
+                Ok(Response::ok())
+            }
+            Command::DeleteCaptures => {
+                let dir = capture::folder(self.inner.settings_path.as_deref())
+                    .ok_or_else(|| PhoneError::Refused("this phone keeps no captures".into()))?;
+                // One still being written is left on Windows (it is open)
+                // and unlinked elsewhere; either way its upload finds it
+                // gone or not.
+                capture::delete_all(&dir);
+                self.inner.update_capture(|_| {});
                 Ok(Response::ok())
             }
             Command::Record { call, on } => {
@@ -1642,6 +1690,62 @@ impl Inner {
         }
     }
 
+    /// What FCP says of capturing: the app's device, and whether it may.
+    fn set_capture_allowed(&self, device_id: &str, allowed: &anvil_fcp::SoftphoneCapture) {
+        *self.device_id.lock() = Some(device_id.to_string());
+        self.update_capture(|c| {
+            c.allowed = allowed.allowed;
+            c.until = allowed.until.clone().filter(|_| allowed.allowed);
+            c.max_mb = allowed.max_mb;
+        });
+    }
+
+    /// Change what the app shows of captures, and tell Anvil which calls to
+    /// capture now: only while FCP allows it and the user chose to.
+    fn update_capture(&self, change: impl FnOnce(&mut CaptureState)) {
+        let (before, now) = {
+            let mut state = self.state.lock();
+            let before = state.capture.clone();
+            change(&mut state.capture);
+            if let Some(dir) = capture::folder(self.settings_path.as_deref()) {
+                (state.capture.saved, state.capture.saved_bytes) = capture::summary(&dir);
+            }
+            (before, state.capture.clone())
+        };
+        if self.local.lock().capture_calls != now.mode {
+            self.local.lock().capture_calls = now.mode;
+            self.save_settings();
+        }
+        let settings = match (
+            now.allowed,
+            now.mode,
+            capture::folder(self.settings_path.as_deref()),
+        ) {
+            (true, CaptureMode::NextCall | CaptureMode::EveryCall, Some(dir)) => {
+                Some(anvil_core::CaptureSettings {
+                    dir,
+                    max_bytes: u64::from(now.max_mb.max(1)) * 1024 * 1024,
+                    every_call: now.mode == CaptureMode::EveryCall,
+                    application: format!("Anvil {}", env!("CARGO_PKG_VERSION")),
+                })
+            }
+            _ => None,
+        };
+        match self.anvil.try_read() {
+            Ok(anvil) => {
+                if let Some(anvil) = anvil.as_ref() {
+                    if anvil.capture_settings() != settings {
+                        anvil.set_capture(settings);
+                    }
+                }
+            }
+            Err(_) => tracing::debug!("captures not set: the phone is stopping"),
+        }
+        if before != now {
+            let _ = self.changes.send(Change::Capture { capture: now });
+        }
+    }
+
     fn set_may_record(&self, on: bool) {
         let changed = std::mem::replace(&mut self.state.lock().may_record, on) != on;
         if changed {
@@ -1813,12 +1917,48 @@ fn update_call(
             None => {
                 let mut view = new();
                 change(&mut view);
+                // Anvil started a capture as the call began, when captures
+                // were on; one for the next call only is spent.
+                view.capturing = inner
+                    .anvil
+                    .try_read()
+                    .ok()
+                    .and_then(|a| a.as_ref().map(|a| a.is_capturing(CallId(id))))
+                    .unwrap_or(false);
                 state.calls.push(view.clone());
                 view
             }
         }
     };
+    if view.capturing && inner.state.lock().capture.mode == CaptureMode::NextCall {
+        inner.update_capture(|c| c.mode = CaptureMode::Off);
+    }
     let _ = inner.changes.send(Change::Call { call: view });
+}
+
+/// A call's capture closed: the folder pruned (never this one) and the
+/// capture uploaded, when signed in to FCP.
+fn finished_capture(
+    inner: &Arc<Inner>,
+    done: anvil_core::FinishedCapture,
+    call: Option<&CallView>,
+) {
+    tracing::info!(path = %done.path.display(), bytes = done.bytes, full = done.full, "capture finished");
+    if let Some(dir) = done.path.parent() {
+        let max_mb = inner.state.lock().capture.max_mb;
+        capture::prune(
+            dir,
+            capture::keep_bytes(max_mb),
+            Some(&done.path),
+            std::time::SystemTime::now(),
+        );
+    }
+    inner.update_capture(|_| {});
+    let device = inner.device_id.lock().clone();
+    if let (Some(fcp), Some(device)) = (inner.fcp.clone(), device) {
+        let server_call = call.and_then(|c| c.server_call.clone());
+        tokio::spawn(capture::upload(fcp, device, server_call, done.path));
+    }
 }
 
 /// Follow Anvil's events into the state, one change each.
@@ -1921,6 +2061,17 @@ async fn follow(inner: std::sync::Weak<Inner>, mut events: EventStream) {
                             tracing::debug!(%e, call = %server_call, "call quality not reported");
                         }
                     });
+                }
+                // The call's capture: closed, the folder kept within its
+                // limits, uploaded under the server's id for the call.
+                let finished = inner
+                    .anvil
+                    .read()
+                    .await
+                    .as_ref()
+                    .and_then(|a| a.finish_capture(call));
+                if let Some(done) = finished {
+                    finished_capture(&inner, done, ended.as_ref());
                 }
                 let _ = inner.changes.send(Change::CallEnded {
                     id: call.0,

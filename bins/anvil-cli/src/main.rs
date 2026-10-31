@@ -617,6 +617,17 @@ fn print_change(change: &anvil_app::Change) {
                 }
             ),
         },
+        C::Capture { capture } => println!(
+            "[capture] {}; {:?}; {} kept here ({} bytes)",
+            if capture.allowed {
+                "allowed"
+            } else {
+                "not allowed"
+            },
+            capture.mode,
+            capture.saved,
+            capture.saved_bytes
+        ),
         C::MayRecord { on } => println!(
             "[record] {}",
             if *on {

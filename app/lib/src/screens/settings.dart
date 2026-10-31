@@ -131,6 +131,65 @@ class SettingsPage extends StatelessWidget {
               onTap: () => _editForward(context, when, calling),
             ),
         ],
+        // Captures only while the organisation allows this app (FCP's
+        // CALL_DIAGNOSTICS §3); those already kept can always be deleted.
+        if (snap.capture.allowed || snap.capture.saved > 0) ...[
+          header(s.settingsDiagnostics),
+          if (snap.capture.allowed)
+            ListTile(
+              key: const Key('captureCalls'),
+              leading: const Icon(Icons.radar),
+              title: Text(s.captureCalls),
+              subtitle: Text(
+                [
+                  s.captureCallsSubtitle,
+                  if (snap.capture.until case final until?)
+                    s.captureAllowedUntil(
+                      MaterialLocalizations.of(context)
+                          .formatMediumDate(until.toLocal()),
+                    ),
+                ].join(' '),
+              ),
+              isThreeLine: true,
+              trailing: DropdownButton<CaptureMode>(
+                key: const Key('captureMode'),
+                value: snap.capture.mode,
+                items: [
+                  for (final (mode, label) in [
+                    (CaptureMode.off, s.captureOff),
+                    (CaptureMode.nextCall, s.captureNextCall),
+                    (CaptureMode.everyCall, s.captureEveryCall),
+                  ])
+                    DropdownMenuItem(
+                      key: Key('captureMode-${mode.wire}'),
+                      value: mode,
+                      child: Text(label),
+                    ),
+                ],
+                onChanged: (mode) => model.run(
+                  () => model.api.setCapture(mode ?? CaptureMode.off),
+                ),
+              ),
+            ),
+          ListTile(
+            key: const Key('savedCaptures'),
+            leading: const Icon(Icons.folder_outlined),
+            title: Text(s.savedCaptures),
+            subtitle: Text(
+              s.savedCapturesCount(
+                snap.capture.saved,
+                _size(snap.capture.savedBytes),
+              ),
+            ),
+            trailing: TextButton(
+              key: const Key('deleteCaptures'),
+              onPressed: snap.capture.saved == 0
+                  ? null
+                  : () => model.run(() => model.api.deleteCaptures()),
+              child: Text(s.deleteCaptures),
+            ),
+          ),
+        ],
         // A phone chooses where a call's audio goes in the call itself.
         if (MobileScope.maybeOf(context) == null) ...[
           header(s.settingsAudio),
@@ -541,3 +600,8 @@ class _LogFile extends StatelessWidget {
     );
   }
 }
+
+/// A size as people read it: KB under a megabyte, else MB to one place.
+String _size(int bytes) => bytes < 1024 * 1024
+    ? '${(bytes / 1024).ceil()} KB'
+    : '${(bytes / 1024 / 1024).toStringAsFixed(1)} MB';

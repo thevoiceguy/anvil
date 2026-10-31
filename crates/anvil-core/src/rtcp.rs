@@ -204,9 +204,11 @@ pub(crate) fn start(
     state: Arc<Mutex<RtcpState>>,
     srtp: Srtp,
     call: Option<u64>,
+    capture: crate::capture::CaptureSlot,
 ) -> (JoinHandle<()>, JoinHandle<()>) {
     let send = {
         let (socket, state, srtp) = (Arc::clone(&socket), Arc::clone(&state), srtp.clone());
+        let capture = Arc::clone(&capture);
         tokio::spawn(async move {
             tokio::time::sleep(FIRST_REPORT).await;
             let mut ticker = tokio::time::interval(REPORT_INTERVAL);
@@ -217,6 +219,7 @@ pub(crate) fn start(
                     let mut s = state.lock();
                     (s.report(Instant::now()), s.latched.unwrap_or(remote))
                 };
+                let plain = packet.clone();
                 let packet = match &srtp {
                     None => packet,
                     Some(ctx) => match ctx.lock().protect_rtcp(&packet) {
@@ -227,8 +230,16 @@ pub(crate) fn start(
                         }
                     },
                 };
-                if let Err(e) = socket.send_to(&packet, to).await {
-                    tracing::debug!(?call, %e, %to, "rtcp send failed");
+                match socket.send_to(&packet, to).await {
+                    Ok(_) => crate::capture::tap(
+                        &capture,
+                        crate::capture::Direction::Outbound,
+                        &socket,
+                        to,
+                        &plain,
+                        None,
+                    ),
+                    Err(e) => tracing::debug!(?call, %e, %to, "rtcp send failed"),
                 }
             }
         })
@@ -251,11 +262,27 @@ pub(crate) fn start(
                 Some(ctx) => match ctx.lock().unprotect_rtcp(&buf[..len]) {
                     Ok(plain) => plain,
                     Err(e) => {
+                        crate::capture::tap(
+                            &capture,
+                            crate::capture::Direction::Inbound,
+                            &socket,
+                            from,
+                            &buf[..len],
+                            Some("failed SRTCP authentication: as it arrived"),
+                        );
                         tracing::debug!(?call, %e, %from, "srtcp unprotect failed; dropping");
                         continue;
                     }
                 },
             };
+            crate::capture::tap(
+                &capture,
+                crate::capture::Direction::Inbound,
+                &socket,
+                from,
+                &plain,
+                None,
+            );
             if first {
                 tracing::info!(?call, %from, "rtcp: first report received");
                 first = false;

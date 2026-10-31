@@ -61,6 +61,37 @@ pub struct SoftphoneConfig {
     /// ([`FcpClient::set_line_label`]).
     #[serde(default)]
     pub may_rename_lines: bool,
+    /// Whether the app may capture calls (FCP v0.25.491,
+    /// `docs/CALL_DIAGNOSTICS.md` §3); an older FCP says nothing, and the
+    /// app may not.
+    #[serde(default)]
+    pub capture: SoftphoneCapture,
+}
+
+/// Whether the app may capture calls, until when, and how large a capture
+/// may be.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SoftphoneCapture {
+    pub allowed: bool,
+    /// RFC 3339, while allowed.
+    #[serde(default)]
+    pub until: Option<String>,
+    #[serde(default = "capture_max_mb")]
+    pub max_mb: u32,
+}
+
+fn capture_max_mb() -> u32 {
+    50
+}
+
+impl Default for SoftphoneCapture {
+    fn default() -> Self {
+        Self {
+            allowed: false,
+            until: None,
+            max_mb: capture_max_mb(),
+        }
+    }
 }
 
 /// A line on the app: an account it registers with its own credentials and

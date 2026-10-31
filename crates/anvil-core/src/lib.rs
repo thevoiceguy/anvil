@@ -13,6 +13,8 @@
 pub mod audio;
 pub mod brand;
 pub(crate) mod call;
+pub mod capture;
+pub use capture::{CaptureSettings, FinishedCapture};
 pub mod config;
 pub mod error;
 pub mod event;
@@ -101,6 +103,9 @@ pub struct Anvil {
     /// address: each registered with the account's credentials and kept
     /// apart, with its own message-summary subscription.
     lines: DashMap<String, LineTasks>,
+    /// Captures of calls being taken, and whether the next is
+    /// (FCP's `docs/CALL_DIAGNOSTICS.md` §3).
+    captures: Arc<capture::Captures>,
     /// Handles to the packet-pump task and any other long-running tasks.
     /// Dropped on shutdown.
     tasks: Vec<JoinHandle<()>>,
@@ -126,8 +131,10 @@ impl Anvil {
                 None
             };
 
+        let captures = Arc::new(capture::Captures::default());
         let (dispatcher, _udp_socket, tcp_pool, mut inbound_rx) = transport::start_transports(
             local_addr,
+            Arc::clone(&captures),
             #[cfg(feature = "tls")]
             tls_config,
             #[cfg(not(feature = "tls"))]
@@ -199,6 +206,7 @@ impl Anvil {
         // Where peers reach us: the media IP with the SIP port, in REGISTER's
         // Contact and in our answers. The bound address may be 0.0.0.0.
         let advertised = std::net::SocketAddr::new(media_ip, bound_addr.port());
+        *captures.local_sip.lock() = Some(advertised);
 
         // Builder takes AsRef<str>; SipUri doesn't impl it, so pass the AOR string.
         let mut uac_builder = IntegratedUAC::builder()
@@ -308,14 +316,26 @@ impl Anvil {
             srtp: cfg.media.srtp,
             local_sip_addr: advertised,
             watched: Arc::clone(&watched),
+            captures: Arc::clone(&captures),
+            account: cfg.account.aor.clone(),
         });
 
         let pump = {
             let transaction_mgr = Arc::clone(&transaction_mgr);
             let uas_handler = Arc::clone(&uas_handler);
+            let captures = Arc::clone(&captures);
             tokio::spawn(async move {
                 while let Some(packet) = inbound_rx.recv().await {
                     let payload = packet.payload();
+                    // As read: after TLS, so the capture has it plain.
+                    if payload.len() > 4 {
+                        captures.sip(
+                            capture::Direction::Inbound,
+                            transport::name(packet.transport()),
+                            packet.peer(),
+                            payload,
+                        );
+                    }
                     if let Some(response) = sip_parse::parse_response(payload) {
                         transaction_mgr.receive_response(response).await;
                     } else if let Some(request) = sip_parse::parse_request(payload) {
@@ -356,6 +376,7 @@ impl Anvil {
                 watched,
                 watches: DashMap::new(),
                 lines: DashMap::new(),
+                captures,
                 tasks: {
                     tasks.push(pump);
                     tasks
@@ -768,6 +789,7 @@ impl Anvil {
 
         let handle = Arc::new(handle);
         let call_id = call::next_call_id();
+        rtp_socket.set_capture(self.captures.begin(call_id.0, self.aor.as_str()));
 
         self.calls.insert(
             call_id,
@@ -1235,7 +1257,34 @@ impl Anvil {
 
     /// Gracefully stop the runtime: un-register when registered, then
     /// abort the background tasks.
+    /// Capture calls (FCP's `docs/CALL_DIAGNOSTICS.md` §3): the next call,
+    /// or every call until turned off; `None` turns captures off. A
+    /// capture already being taken goes on to its call's end.
+    pub fn set_capture(&self, settings: Option<CaptureSettings>) {
+        self.captures.set(settings);
+    }
+
+    /// What captures are taken, while they are on.
+    pub fn capture_settings(&self) -> Option<CaptureSettings> {
+        self.captures.settings()
+    }
+
+    /// Whether `call` is being captured.
+    pub fn is_capturing(&self, call: CallId) -> bool {
+        self.captures.is_capturing(call.0)
+    }
+
+    /// End `call`'s capture, when it has one: the file closed. Call it when
+    /// the call has ended ([`Event::CallEnded`]).
+    pub fn finish_capture(&self, call: CallId) -> Option<FinishedCapture> {
+        if let Some(entry) = self.calls.get(&call) {
+            entry.rtp_socket.set_capture(None);
+        }
+        self.captures.finish(call.0)
+    }
+
     pub async fn shutdown(self) -> Result<(), AnvilError> {
+        self.captures.finish_all();
         // Registered: the binding is taken back (Expires: 0), so calls stop
         // forking to a phone that is gone. One left behind stayed on FCP's
         // Devices page and rang until it lapsed (FCP's D8). A registrar

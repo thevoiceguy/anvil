@@ -1546,3 +1546,198 @@ async fn each_app_reports_how_a_call_went_when_it_ends() {
     alice.shutdown().await;
     bob_phone.shutdown().await;
 }
+
+/// A call captured and uploaded (FCP's `docs/CALL_DIAGNOSTICS.md` phase 5):
+/// the tenant turns captures on and an administrator allows the user, the
+/// app says so, the user captures the next call, and FCP holds the capture
+/// under the server's id for the call; the local copy is kept until the
+/// user deletes it.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn an_allowed_app_captures_the_next_call_and_uploads_it() {
+    let (Ok(admin), Ok(token)) = (
+        std::env::var("ANVIL_FCP_ADMIN"),
+        std::env::var("ANVIL_FCP_TOKEN"),
+    ) else {
+        eprintln!("ANVIL_FCP_ADMIN and ANVIL_FCP_TOKEN not set; skipping");
+        return;
+    };
+    let tenant = anvil_tenant(&admin, &token).await;
+    let http = reqwest::Client::new();
+    let api = |method: reqwest::Method, path: &str| {
+        http.request(method, format!("{admin}/api/v1{path}"))
+            .bearer_auth(&token)
+            .header("X-FCP-Tenant-Id", &tenant)
+    };
+    if !api(reqwest::Method::GET, "/captures/allows")
+        .send()
+        .await
+        .unwrap()
+        .status()
+        .is_success()
+    {
+        eprintln!("this FCP takes no captures (before v0.25.491); skipping");
+        return;
+    }
+    let on = api(reqwest::Method::PUT, &format!("/tenants/{tenant}"))
+        .json(&serde_json::json!({"diagnostics": {
+            "capture_allowed": true, "capture_max_mb": 10, "capture_keep_days": 1
+        }}))
+        .send()
+        .await
+        .unwrap();
+    assert!(on.status().is_success(), "{on:?}");
+    let (alice_fcp, alice_user) = signed_in(&admin, &token, "cap-alice").await;
+    let (bob_fcp, bob) = signed_in(&admin, &token, "cap-bob").await;
+    let until_tomorrow = chrono::DateTime::<chrono::Utc>::from(
+        std::time::SystemTime::now() + Duration::from_secs(86_400),
+    );
+    let allowed = api(reqwest::Method::POST, "/captures/allows")
+        .json(&serde_json::json!({
+            "username": alice_user,
+            "until": until_tomorrow.to_rfc3339(),
+            "reason": "anvil's test",
+        }))
+        .send()
+        .await
+        .unwrap();
+    assert!(allowed.status().is_success(), "{allowed:?}");
+
+    let dir = std::env::temp_dir().join(format!("anvil-capture-app-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).unwrap();
+    let alice = phone_with(alice_fcp, "127.0.0.132", Some(dir.join("settings.json"))).await;
+    let bob_phone = phone(bob_fcp, "127.0.0.133").await;
+    until(&alice, "Alice is allowed to capture", |s| s.capture.allowed).await;
+    until(&bob_phone, "Bob registers", |s| {
+        s.registration == Registration::Registered
+    })
+    .await;
+    assert!(
+        alice
+            .execute(Command::SetCapture {
+                mode: anvil_app::CaptureMode::NextCall
+            })
+            .await
+            .unwrap()
+            .ok
+    );
+
+    let call = alice
+        .execute(Command::Call {
+            target: bob,
+            line: None,
+        })
+        .await
+        .unwrap()
+        .call
+        .unwrap();
+    until(
+        &alice,
+        "the call is captured, the next-call setting spent",
+        |s| {
+            s.calls.iter().any(|c| c.id == call && c.capturing)
+                && s.capture.mode == anvil_app::CaptureMode::Off
+        },
+    )
+    .await;
+    until(&bob_phone, "Bob rings", |s| {
+        s.calls.iter().any(|c| c.state == CallState::Ringing)
+    })
+    .await;
+    assert!(
+        bob_phone
+            .execute(Command::Answer { call: None })
+            .await
+            .unwrap()
+            .ok
+    );
+    until(&alice, "Alice's call has the server's id", |s| {
+        s.calls
+            .iter()
+            .any(|c| c.id == call && c.server_call.is_some())
+    })
+    .await;
+    assert!(
+        !bob_phone.state().calls.iter().any(|c| c.capturing),
+        "Bob was not capturing"
+    );
+    tokio::time::sleep(Duration::from_millis(1500)).await;
+    let server_call = alice
+        .state()
+        .calls
+        .iter()
+        .find(|c| c.id == call)
+        .and_then(|c| c.server_call.clone())
+        .unwrap();
+    assert!(
+        alice
+            .execute(Command::Hangup { call: None })
+            .await
+            .unwrap()
+            .ok
+    );
+    until(&alice, "the capture is kept here", |s| {
+        s.calls.is_empty() && s.capture.saved == 1
+    })
+    .await;
+
+    // Uploaded under the server's id for the call.
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(10);
+    let capture = loop {
+        let list: serde_json::Value = api(
+            reqwest::Method::GET,
+            &format!("/captures?username={alice_user}"),
+        )
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+        if let Some(c) = list["data"].as_array().and_then(|d| d.first()).cloned() {
+            break c;
+        }
+        assert!(
+            tokio::time::Instant::now() < deadline,
+            "the capture never reached FCP: {list}"
+        );
+        tokio::time::sleep(Duration::from_millis(250)).await;
+    };
+    // FCP names it `call-<uuid>`; `X-FCP-Call-Id` carries the bare id.
+    assert!(
+        capture["call_id"].as_str().is_some_and(
+            |id| id.trim_start_matches("call-") == server_call.trim_start_matches("call-")
+        ),
+        "{capture} for {server_call}"
+    );
+    let file = api(
+        reqwest::Method::GET,
+        &format!("/captures/{}/file", capture["id"].as_str().unwrap()),
+    )
+    .send()
+    .await
+    .unwrap()
+    .bytes()
+    .await
+    .unwrap();
+    assert_eq!(file[..4], [0x0a, 0x0d, 0x0d, 0x0a], "pcapng");
+    assert_eq!(file.len() as u64, capture["size"].as_u64().unwrap());
+    let text = String::from_utf8_lossy(&file);
+    assert!(
+        text.contains("INVITE sip:") && text.contains("BYE sip:"),
+        "the call's SIP"
+    );
+    assert!(
+        text.contains(server_call.trim_start_matches("call-")),
+        "the server's id, in the SIP"
+    );
+
+    // Kept locally until deleted.
+    let state = alice.state();
+    assert_eq!(state.capture.saved_bytes, file.len() as u64);
+    assert!(alice.execute(Command::DeleteCaptures).await.unwrap().ok);
+    until(&alice, "the captures are deleted", |s| s.capture.saved == 0).await;
+    alice.shutdown().await;
+    bob_phone.shutdown().await;
+    let _ = std::fs::remove_dir_all(&dir);
+}

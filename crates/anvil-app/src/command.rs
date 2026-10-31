@@ -87,6 +87,11 @@ pub enum Command {
         call: Option<u64>,
         on: bool,
     },
+    /// Capture the next call, every call, or none (FCP's
+    /// `docs/CALL_DIAGNOSTICS.md` §3): refused unless FCP allows it.
+    SetCapture { mode: crate::CaptureMode },
+    /// Remove the captures kept on this device.
+    DeleteCaptures,
     /// Keep a contact: a new one (no id) or a change to one, on this device
     /// or, with `on_account`, on the FCP account (a device's contact saved
     /// so moves there).

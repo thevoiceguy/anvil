@@ -690,6 +690,66 @@ FCP's `docs/CALL_DIAGNOSTICS.md` phase 3 (FCP v0.25.490):
   0.25.490, a report from each on the call's record; skipped on an older
   FCP), `test/call_stats_test.dart` for the recents.
 
+### D8 finding 44: call captures (diagnostics phase 5)
+FCP's `docs/CALL_DIAGNOSTICS.md` phase 5 (FCP v0.25.491 takes them):
+- **Who may.** Only while FCP says so: the tenant turns captures on and an
+  administrator allows the user or this app until a date (`capture` on
+  `/me/softphone`). Then Settings shows **Diagnostics → Capture calls**:
+  off, the next call, or every call, with what a capture holds and that it
+  is uploaded. The next-call setting is spent once a call is captured. A
+  captured call shows **Capturing** under the caller.
+- **anvil-core `capture.rs`** writes pcapng: one section header (the app,
+  the account and the call in its comment), one raw-IP interface, and each
+  packet an Enhanced Packet Block with its own IP and UDP header between the
+  real addresses, inbound or outbound.
+  - SIP is taken in the dispatcher as it is sent (before TLS) and in the
+    packet pump as it is read (after TLS), written as UDP datagrams on the
+    real ports so Wireshark's SIP heuristic reads it. A packet comment names
+    the transport it actually used.
+  - A new capture starts with the last ten seconds of SIP, because the
+    INVITE that made the call came before the call existed.
+  - A new TCP connection the transaction manager opens itself does not reach
+    the dispatcher (siphon-rs #158), so that SIP is missing; FCP's apps use
+    TLS or UDP.
+  - RTP, RTCP and DTMF are written as they are without SRTP: sent before SRTP
+    is applied, received after it is removed.
+    - pcapng has no secrets block for SRTP and Wireshark does not decrypt it,
+      so this is how the audio plays.
+    - The headers, sequence numbers and timing are the wire's. The keys are in
+      the captured SDP.
+    - A packet that fails SRTP is written as it arrived, with a comment.
+  - Wireshark reads the media as SRTP because the SDP says RTP/SAVP. In
+    Preferences → Protocols, turn off SDP's "Establish Media Conversation"
+    and turn on RTP's heuristic. The file's header says so.
+  - A capture stops at its size limit, and its last packet says why.
+  - `Anvil::set_capture`, `capture_settings`, `is_capturing`,
+    `finish_capture`; a capture slot on the call's `MediaSockets`.
+- **anvil-app `capture.rs`:** captures are kept in `captures/` beside the
+  settings.
+  - Each one is at most FCP's `max_mb`. The folder keeps 200 MB in all (or
+    one capture's limit, if larger) and a week each, the newest never
+    removed.
+  - At hangup the capture is closed and uploaded with
+    `FcpClient::upload_capture` (`POST /me/devices/{id}/captures?call_id=`),
+    retried for up to about two hours while the app runs. A refusal
+    (400, 403, 404, 413) is final, and the local copy is kept either way.
+  - Settings shows the folder's count and size, with **Delete**, even once
+    captures are no longer allowed.
+  - `State.capture`, `CallView.capturing`, `Command::SetCapture` and
+    `DeleteCaptures`, and `Change::Capture`.
+- Tested:
+  - `capture.rs`'s unit tests: the blocks and IP headers, IPv6's checksum,
+    the limit, the look-back and next-call-only, and file names.
+  - Peer `a_call_is_captured_with_its_sip_and_its_media_outside_srtp`: an
+    SRTP call between two Anvils, its SIP from INVITE to BYE, the keys in the
+    SDP, PCMU packets without an SRTP tag both ways, DTMF and RTCP.
+    `ANVIL_KEEP_CAPTURE=<dir>` keeps the file. tshark 4.4 reads it as the
+    call's SIP and two RTP streams with no loss.
+  - FCP `an_allowed_app_captures_the_next_call_and_uploads_it`, against FCP
+    0.25.491 and skipped on an older one.
+  - The app's folder limits, and widget tests for the setting and the call
+    screen's badge.
+
 ### W5: echo cancellation and noise suppression
 - The desktop's microphone is cleaned before it is sent: WebRTC's audio
   processing — AEC3, its noise suppressor and its high-pass filter — as

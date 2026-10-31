@@ -58,6 +58,10 @@ pub struct State {
     /// A test of the microphone or a speaker under way, if any.
     #[serde(default)]
     pub audio_test: Option<AudioTest>,
+    /// Capturing calls: whether FCP allows it, what the user chose, what
+    /// is kept on this device.
+    #[serde(default)]
+    pub capture: crate::CaptureState,
 }
 
 /// A test of this device's audio, under way.
@@ -231,6 +235,7 @@ impl State {
             directory: None,
             presence: None,
             audio_test: None,
+            capture: crate::CaptureState::default(),
         }
     }
 
@@ -330,6 +335,9 @@ pub struct CallView {
     /// Ringing on a line that does not ring this app: shown, not sounded.
     #[serde(default)]
     pub silent: bool,
+    /// The call is being captured.
+    #[serde(default)]
+    pub capturing: bool,
 }
 
 impl CallView {
@@ -351,6 +359,7 @@ impl CallView {
             recording: false,
             line: None,
             silent: false,
+            capturing: false,
         }
     }
 }
@@ -749,6 +758,10 @@ pub enum Change {
     /// Whether the user may record calls, as FCP said.
     MayRecord {
         on: bool,
+    },
+    /// Capturing calls: allowed, chosen or kept changed.
+    Capture {
+        capture: crate::CaptureState,
     },
     /// The contacts changed, on this device or on the account.
     Contacts {

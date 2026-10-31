@@ -193,6 +193,7 @@ pub(crate) async fn refresh_softphone(inner: &Inner, fcp: &FcpClient) {
     match fcp.softphone().await {
         Ok(config) => {
             inner.set_may_record(config.may_record);
+            inner.set_capture_allowed(&config.device_id, &config.capture);
             inner.set_directory(Some(crate::DirectoryListing {
                 listed: config.directory_listed,
                 may_change: config.may_change_directory_listing,

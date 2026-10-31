@@ -103,6 +103,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   CallingSettings dco_decode_calling_settings(dynamic raw);
 
   @protected
+  CaptureInfo dco_decode_capture_info(dynamic raw);
+
+  @protected
   Contact dco_decode_contact(dynamic raw);
 
   @protected
@@ -361,6 +364,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   CallingSettings sse_decode_calling_settings(SseDeserializer deserializer);
+
+  @protected
+  CaptureInfo sse_decode_capture_info(SseDeserializer deserializer);
 
   @protected
   Contact sse_decode_contact(SseDeserializer deserializer);
@@ -655,6 +661,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
     CallingSettings self,
     SseSerializer serializer,
   );
+
+  @protected
+  void sse_encode_capture_info(CaptureInfo self, SseSerializer serializer);
 
   @protected
   void sse_encode_contact(Contact self, SseSerializer serializer);

@@ -835,6 +835,100 @@ void main() {
     expect(tester.widget<SwitchListTile>(listed).value, isFalse);
   });
 
+  testWidgets('captures show only while allowed, and are chosen and deleted', (
+    tester,
+  ) async {
+    final phone = await signedIn(tester, seed: withData);
+    await go(tester, 'Settings');
+    expect(find.byKey(const Key('captureCalls')), findsNothing);
+    expect(find.byKey(const Key('savedCaptures')), findsNothing);
+
+    phone.set(
+      phone.state.copyWith(
+        capture: CaptureInfo(
+          allowed: true,
+          until: DateTime.utc(2026, 11, 7, 12),
+          maxMb: 50,
+          saved: 2,
+          savedBytes: 3 * 1024 * 1024,
+        ),
+      ),
+      'capture',
+    );
+    await tester.pumpAndSettle();
+    await tester.scrollUntilVisible(
+      find.byKey(const Key('savedCaptures')),
+      200,
+      scrollable: find.byType(Scrollable).first,
+    );
+    expect(
+      find.textContaining('uploaded to your organisation'),
+      findsOneWidget,
+    );
+    final subtitle = tester
+        .widgetList<Text>(
+          find.descendant(
+            of: find.byKey(const Key('captureCalls')),
+            matching: find.byType(Text),
+          ),
+        )
+        .map((t) => t.data)
+        .join(' | ');
+    expect(subtitle, contains('allows this until Sat, Nov 7.'));
+    expect(find.text('2 captures, 3.0 MB'), findsOneWidget);
+    await tapKey(tester, 'captureMode');
+    await tapKey(tester, 'captureMode-next_call');
+    expect(phone.log, contains('capture next_call'));
+    expect(phone.state.capture.mode, CaptureMode.nextCall);
+    await tapKey(tester, 'deleteCaptures');
+    expect(phone.log, contains('delete captures'));
+    expect(find.text('None'), findsOneWidget);
+    expect(
+      tester
+          .widget<TextButton>(find.byKey(const Key('deleteCaptures')))
+          .onPressed,
+      isNull,
+    );
+
+    // Not allowed any more: only what is kept shows, to be deleted.
+    phone.set(
+      phone.state.copyWith(
+        capture: const CaptureInfo(saved: 1, savedBytes: 4096),
+      ),
+      'capture',
+    );
+    await tester.pumpAndSettle();
+    expect(find.byKey(const Key('captureCalls')), findsNothing);
+    expect(find.text('1 capture, 4 KB'), findsOneWidget);
+  });
+
+  testWidgets('a call being captured says so', (tester) async {
+    final phone = await signedIn(tester);
+    await tester.enterText(find.byKey(const Key('target')), '1002');
+    await tester.tap(find.byKey(const Key('call')).last);
+    await tester.pumpAndSettle();
+    expect(find.byKey(const Key('capturingNow')), findsNothing);
+    final call = phone.callOf(1);
+    phone.set(
+      phone.state.copyWith(
+        calls: [
+          PhoneCall(
+            id: call.id,
+            direction: call.direction,
+            remote: call.remote,
+            state: CallState.connected,
+            capturing: true,
+          ),
+        ],
+      ),
+      'call',
+      call: 1,
+    );
+    await tester.pumpAndSettle();
+    expect(find.byKey(const Key('capturingNow')), findsOneWidget);
+    expect(find.text('Capturing'), findsOneWidget);
+  });
+
   testWidgets('voicemail plays, stops, is marked heard and deleted', (
     tester,
   ) async {

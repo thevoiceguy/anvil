@@ -881,6 +881,7 @@ pub(crate) fn start_pipeline(
     let muted = Arc::new(AtomicBool::new(false));
     let muted_send = Arc::clone(&muted);
     let srtp_send = srtp.clone();
+    let capture_send = rtp_socket.capture_slot();
     let send_task = tokio::spawn(async move {
         let mut driver = send_driver;
         let mut seq = initial_seq;
@@ -904,6 +905,7 @@ pub(crate) fn start_pipeline(
                         ssrc,
                         send_spec.rtp_clock_rate,
                         srtp_send.as_ref(),
+                        &capture_send,
                     ).await {
                         Ok(advanced) => {
                             ts = ts.wrapping_add(advanced);
@@ -950,7 +952,8 @@ pub(crate) fn start_pipeline(
                         Bytes::from(payload),
                         marker,
                     );
-                    let Some(bytes) = protect(srtp_send.as_ref(), packet.to_bytes()) else {
+                    let plain = packet.to_bytes();
+                    let Some(bytes) = protect(srtp_send.as_ref(), plain.clone()) else {
                         seq = seq.wrapping_add(1);
                         ts = ts.wrapping_add(ts_per_frame);
                         continue;
@@ -958,6 +961,14 @@ pub(crate) fn start_pipeline(
                     let payload_len = packet.payload.len();
                     match sock_send.send_to(&bytes, remote_rtp).await {
                         Ok(_) => {
+                            crate::capture::tap(
+                                &capture_send,
+                                crate::capture::Direction::Outbound,
+                                &sock_send,
+                                remote_rtp,
+                                &plain,
+                                None,
+                            );
                             metrics_send.on_rtp_tx(bytes.len());
                             rtcp_send.lock().on_sent(ts, payload_len, Instant::now());
                         }
@@ -984,6 +995,7 @@ pub(crate) fn start_pipeline(
     let metrics_recv = Arc::clone(&metrics);
     let hold_recv = Arc::clone(&hold);
     let srtp_recv = srtp.clone();
+    let capture_recv = rtp_socket.capture_slot();
     let dtmf_events = stats_sink.as_ref().map(|s| (s.call, s.events.clone()));
     let recv_task = tokio::spawn(async move {
         let mut driver = recv_driver;
@@ -1009,6 +1021,14 @@ pub(crate) fn start_pipeline(
                 Some(ctx) => match ctx.lock().unprotect_rtp(&buf[..len]) {
                     Ok(plain) => Bytes::from(plain),
                     Err(e) => {
+                        crate::capture::tap(
+                            &capture_recv,
+                            crate::capture::Direction::Inbound,
+                            &sock_recv,
+                            from,
+                            &buf[..len],
+                            Some("failed SRTP authentication: as it arrived"),
+                        );
                         if metrics_recv.on_drop(RxDrop::Srtp) {
                             tracing::info!(
                                 ?call,
@@ -1025,6 +1045,14 @@ pub(crate) fn start_pipeline(
                 },
                 None => Bytes::copy_from_slice(&buf[..len]),
             };
+            crate::capture::tap(
+                &capture_recv,
+                crate::capture::Direction::Inbound,
+                &sock_recv,
+                from,
+                &data,
+                None,
+            );
             let packet = match RtpPacket::parse(data) {
                 Ok(p) => p,
                 Err(e) => {
@@ -1106,6 +1134,7 @@ pub(crate) fn start_pipeline(
             Arc::clone(&rtcp),
             srtp.clone(),
             call,
+            rtp_socket.capture_slot(),
         )
     });
 
@@ -1231,6 +1260,7 @@ async fn send_dtmf_digit(
     ssrc: u32,
     rtp_clock_rate: u32,
     srtp: Option<&Arc<parking_lot::Mutex<forge_rtp::srtp::SrtpContext>>>,
+    capture: &crate::capture::CaptureSlot,
 ) -> anyhow::Result<u32> {
     let digit = DtmfDigit::from_char(ch)
         .map_err(|e| anyhow::anyhow!("invalid DTMF digit {:?}: {:?}", ch, e))?;
@@ -1260,12 +1290,23 @@ async fn send_dtmf_digit(
 
         let payload = Bytes::from(event.to_bytes());
         let packet = RtpPacket::build(DTMF_PAYLOAD_TYPE, *seq, start_ts, ssrc, payload, is_first);
-        let Some(bytes) = protect(srtp, packet.to_bytes()) else {
+        let plain = packet.to_bytes();
+        let Some(bytes) = protect(srtp, plain.clone()) else {
             *seq = seq.wrapping_add(1);
             continue;
         };
         match socket.send_to(&bytes, remote).await {
-            Ok(_) => metrics.on_rtp_tx(bytes.len()),
+            Ok(_) => {
+                metrics.on_rtp_tx(bytes.len());
+                crate::capture::tap(
+                    capture,
+                    crate::capture::Direction::Outbound,
+                    socket,
+                    remote,
+                    &plain,
+                    None,
+                );
+            }
             Err(e) => tracing::warn!(%e, "DTMF send_to failed"),
         }
         *seq = seq.wrapping_add(1);

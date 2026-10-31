@@ -1939,6 +1939,72 @@ abstract class Strings {
   /// In en, this message translates to:
   /// **'Poor audio {score}'**
   String recentPoorAudio(String score);
+
+  /// No description provided for @capturingNow.
+  ///
+  /// In en, this message translates to:
+  /// **'Capturing'**
+  String get capturingNow;
+
+  /// No description provided for @settingsDiagnostics.
+  ///
+  /// In en, this message translates to:
+  /// **'Diagnostics'**
+  String get settingsDiagnostics;
+
+  /// No description provided for @captureCalls.
+  ///
+  /// In en, this message translates to:
+  /// **'Capture calls'**
+  String get captureCalls;
+
+  /// No description provided for @captureCallsSubtitle.
+  ///
+  /// In en, this message translates to:
+  /// **'Each captured call is saved on this device and uploaded to your organisation for troubleshooting. It holds the call\'s signalling and audio.'**
+  String get captureCallsSubtitle;
+
+  /// No description provided for @captureAllowedUntil.
+  ///
+  /// In en, this message translates to:
+  /// **'Your organisation allows this until {date}.'**
+  String captureAllowedUntil(String date);
+
+  /// No description provided for @captureOff.
+  ///
+  /// In en, this message translates to:
+  /// **'Off'**
+  String get captureOff;
+
+  /// No description provided for @captureNextCall.
+  ///
+  /// In en, this message translates to:
+  /// **'Next call'**
+  String get captureNextCall;
+
+  /// No description provided for @captureEveryCall.
+  ///
+  /// In en, this message translates to:
+  /// **'Every call'**
+  String get captureEveryCall;
+
+  /// No description provided for @savedCaptures.
+  ///
+  /// In en, this message translates to:
+  /// **'Captures on this device'**
+  String get savedCaptures;
+
+  /// No description provided for @savedCapturesCount.
+  ///
+  /// In en, this message translates to:
+  /// **'{count, plural, =0{None} =1{1 capture, {size}} other{{count} captures, {size}}}'**
+  String savedCapturesCount(int count, String size);
+
+  /// No description provided for @deleteCaptures.
+  ///
+  /// In en, this message translates to:
+  /// **'Delete'**
+  String get deleteCaptures;
 }
 
 class _StringsDelegate extends LocalizationsDelegate<Strings> {

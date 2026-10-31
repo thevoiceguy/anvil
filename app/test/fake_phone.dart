@@ -401,6 +401,46 @@ class FakePhone implements PhoneApi {
     set(state.copyWith(directoryListed: on), 'directory');
   }
 
+  @override
+  Future<void> setCapture(CaptureMode mode) async {
+    _refuse();
+    log.add('capture ${mode.wire}');
+    final c = state.capture;
+    set(
+      state.copyWith(
+        capture: CaptureInfo(
+          allowed: c.allowed,
+          until: c.until,
+          maxMb: c.maxMb,
+          mode: mode,
+          saved: c.saved,
+          savedBytes: c.savedBytes,
+          folder: c.folder,
+        ),
+      ),
+      'capture',
+    );
+  }
+
+  @override
+  Future<void> deleteCaptures() async {
+    _refuse();
+    log.add('delete captures');
+    final c = state.capture;
+    set(
+      state.copyWith(
+        capture: CaptureInfo(
+          allowed: c.allowed,
+          until: c.until,
+          maxMb: c.maxMb,
+          mode: c.mode,
+          folder: c.folder,
+        ),
+      ),
+      'capture',
+    );
+  }
+
   /// The user's statuses kept, and the next id.
   int _statusIds = 0;
 

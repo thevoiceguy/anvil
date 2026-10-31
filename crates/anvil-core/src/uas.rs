@@ -47,6 +47,10 @@ pub(crate) struct AnvilUasHandler {
     /// Whom this softphone watches, by `<event>|<user@host>`: a NOTIFY
     /// about anyone else ends that subscription (481).
     pub watched: Arc<DashMap<String, ()>>,
+    /// Captures being taken; a new call is captured when they are on.
+    pub captures: Arc<crate::capture::Captures>,
+    /// The account's address, for a capture's header.
+    pub account: String,
 }
 
 #[async_trait]
@@ -221,6 +225,7 @@ impl UasRequestHandler for AnvilUasHandler {
             .map(|v| v.trim().to_string())
             .filter(|v| !v.is_empty());
         let call_id = next_call_id();
+        rtp_socket.set_capture(self.captures.begin(call_id.0, &self.account));
 
         let pending = PendingInbound {
             request: request.clone(),

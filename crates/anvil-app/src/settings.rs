@@ -44,6 +44,13 @@ pub(crate) struct LocalSettings {
     /// The contacts kept on this device, by name.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub contacts: Vec<crate::Contact>,
+    /// Which calls the user captures, while FCP allows it.
+    #[serde(default, skip_serializing_if = "is_off")]
+    pub capture_calls: crate::CaptureMode,
+}
+
+fn is_off(mode: &crate::CaptureMode) -> bool {
+    *mode == crate::CaptureMode::Off
 }
 
 impl Default for LocalSettings {
@@ -61,6 +68,7 @@ impl Default for LocalSettings {
             recents_cleared: BTreeMap::new(),
             hidden_recents: BTreeSet::new(),
             contacts: Vec::new(),
+            capture_calls: crate::CaptureMode::Off,
         }
     }
 }
@@ -180,6 +188,7 @@ mod tests {
                 notes: None,
                 ringtone: Some("classic".into()),
             }],
+            capture_calls: crate::CaptureMode::EveryCall,
         };
         saved.save(&path).unwrap();
         assert_eq!(LocalSettings::load(&path), saved);

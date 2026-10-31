@@ -613,5 +613,33 @@
         "type": "String"
       }
     }
-  }
+  },
+  "capturingNow": "Capturing",
+  "settingsDiagnostics": "Diagnostics",
+  "captureCalls": "Capture calls",
+  "captureCallsSubtitle": "Each captured call is saved on this device and uploaded to your organisation for troubleshooting. It holds the call's signalling and audio.",
+  "captureAllowedUntil": "Your organisation allows this until {date}.",
+  "@captureAllowedUntil": {
+    "placeholders": {
+      "date": {
+        "type": "String"
+      }
+    }
+  },
+  "captureOff": "Off",
+  "captureNextCall": "Next call",
+  "captureEveryCall": "Every call",
+  "savedCaptures": "Captures on this device",
+  "savedCapturesCount": "{count, plural, =0{None} =1{1 capture, {size}} other{{count} captures, {size}}}",
+  "@savedCapturesCount": {
+    "placeholders": {
+      "count": {
+        "type": "int"
+      },
+      "size": {
+        "type": "String"
+      }
+    }
+  },
+  "deleteCaptures": "Delete"
 }
