@@ -179,7 +179,12 @@ void twoCalls(FakePhone phone) => phone.set(
         state: CallState.connected,
         codec: 'opus',
         encrypted: true,
-        quality: CallQuality(jitterMs: 4, lossPermille: 0, rttMs: 30),
+        quality: CallQuality(
+          jitterMs: 4,
+          lossPermille: 0,
+          rttMs: 30,
+          mosHundredths: 438,
+        ),
         recording: true,
       ),
     ],

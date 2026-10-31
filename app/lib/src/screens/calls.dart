@@ -14,6 +14,7 @@ import '../mobile/platform.dart';
 import '../phone/phone_api.dart';
 import '../phone/phone_model.dart';
 import 'audio_controls.dart';
+import 'call_stats.dart';
 import 'contacts.dart';
 import 'lines.dart';
 
@@ -233,7 +234,7 @@ class _InCallPanelState extends State<InCallPanel> {
                   ),
                 ),
               const SizedBox(height: 8),
-              if (connected) _MediaLine(call: call),
+              if (connected) _MediaLine(model: model, call: call),
               const SizedBox(height: 24),
               if (_keypad && connected)
                 DigitPad(
@@ -480,9 +481,11 @@ class _CallTimerState extends State<CallTimer> {
   }
 }
 
-/// Encryption, the line's quality and the codec.
+/// Encryption, the line's quality with its score, and the codec; the
+/// quality opens the call's stats.
 class _MediaLine extends StatelessWidget {
-  const _MediaLine({required this.call});
+  const _MediaLine({required this.model, required this.call});
+  final PhoneModel model;
   final PhoneCall call;
 
   @override
@@ -490,23 +493,14 @@ class _MediaLine extends StatelessWidget {
     final s = Strings.of(context);
     final small = Theme.of(context).textTheme.bodySmall;
     final quality = call.quality;
-    final (qIcon, qColor, qLabel) = switch (quality?.level) {
-      null => (null, null, null),
-      QualityLevel.good => (
-        Icons.signal_cellular_alt,
-        AnvilColors.answer,
-        s.qualityGood,
-      ),
-      QualityLevel.fair => (
-        Icons.signal_cellular_alt_2_bar,
-        AnvilColors.held,
-        s.qualityFair,
-      ),
-      QualityLevel.poor => (
-        Icons.signal_cellular_alt_1_bar,
-        AnvilColors.hangup,
-        s.qualityPoor,
-      ),
+    final (color, label) = quality == null
+        ? (null, null)
+        : levelLook(s, quality.level);
+    final icon = switch (quality?.level) {
+      null => Icons.signal_cellular_alt,
+      QualityLevel.good => Icons.signal_cellular_alt,
+      QualityLevel.fair => Icons.signal_cellular_alt_2_bar,
+      QualityLevel.poor => Icons.signal_cellular_alt_1_bar,
     };
     return Wrap(
       spacing: 12,
@@ -521,29 +515,54 @@ class _MediaLine extends StatelessWidget {
             size: 16,
           ),
         ),
-        if (qIcon != null)
-          Tooltip(
-            message: [
-              qLabel!,
+        Tooltip(
+          message: [
+            label ?? s.statsWaiting,
+            if (quality != null)
               s.qualityPackets(
-                quality!.packetsReceived,
+                quality.packetsReceived,
                 quality.packetsPlayed,
                 quality.packetsDropped,
               ),
-              if ((quality.unexpectedPt, quality.expectedPt) case (
-                final pt?,
-                final expected?,
-              ))
-                s.qualityUnexpectedPt(pt, expected),
-              if (quality.lastSource case final from?) s.qualityFrom(from),
-            ].join('\n'),
-            child: Icon(
-              qIcon,
-              key: const Key('quality'),
-              size: 16,
-              color: qColor,
+            if ((quality?.unexpectedPt, quality?.expectedPt) case (
+              final pt?,
+              final expected?,
+            ))
+              s.qualityUnexpectedPt(pt, expected),
+            if (quality?.lastSource case final from?) s.qualityFrom(from),
+          ].join('\n'),
+          child: InkWell(
+            key: const Key('callStatsButton'),
+            borderRadius: BorderRadius.circular(8),
+            onTap: () => showCallStats(context, model, call.id),
+            child: Semantics(
+              button: true,
+              label: s.statsOpen,
+              child: Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 2),
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Icon(
+                      icon,
+                      key: quality == null ? null : const Key('quality'),
+                      size: 16,
+                      color: color,
+                    ),
+                    if (quality?.mos case final mos?) ...[
+                      const SizedBox(width: 4),
+                      Text(
+                        mos.toStringAsFixed(1),
+                        key: const Key('mos'),
+                        style: small?.copyWith(color: color),
+                      ),
+                    ],
+                  ],
+                ),
+              ),
             ),
           ),
+        ),
         if (call.codec != null) Text(call.codec!.toUpperCase(), style: small),
       ],
     );

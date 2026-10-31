@@ -911,4 +911,112 @@ class StringsEn extends Strings {
 
   @override
   String get appearanceJoin => 'Join';
+
+  @override
+  String get callStats => 'Call stats';
+
+  @override
+  String get statsOpen =>
+      'Call stats: what is sent and received, loss, jitter and the round trip';
+
+  @override
+  String get statsScoreHint =>
+      'Estimated from loss, jitter and delay (E-model MOS, 1 to 4.5)';
+
+  @override
+  String get statsYouHear => 'You hear';
+
+  @override
+  String get statsTheyHear => 'They hear';
+
+  @override
+  String get statsAudio => 'Audio';
+
+  @override
+  String statsCodecValue(String codec, String khz, String ptime) {
+    return '$codec · $khz kHz · $ptime ms packets';
+  }
+
+  @override
+  String get statsEncryption => 'Encryption';
+
+  @override
+  String get statsSrtp => 'SRTP';
+
+  @override
+  String get statsNone => 'None';
+
+  @override
+  String get statsMedia => 'Media';
+
+  @override
+  String get statsSent => 'Sent';
+
+  @override
+  String get statsReceived => 'Received';
+
+  @override
+  String statsRate(String pps, String kbps) {
+    return '$pps packets/s · $kbps kb/s';
+  }
+
+  @override
+  String statsTotal(String packets, String kb) {
+    return '$packets packets · $kb KB in all';
+  }
+
+  @override
+  String get statsLoss => 'Loss';
+
+  @override
+  String statsLossValue(
+    String recent,
+    String whole,
+    String lost,
+    String expected,
+  ) {
+    return '$recent% last 5 s · $whole% in all ($lost of $expected)';
+  }
+
+  @override
+  String get statsJitter => 'Jitter';
+
+  @override
+  String statsMs(String ms) {
+    return '$ms ms';
+  }
+
+  @override
+  String get statsFarEnd => 'Far end reports';
+
+  @override
+  String statsFarValue(String loss, String jitter, String lost) {
+    return '$loss% lost · $jitter ms jitter · $lost lost in all';
+  }
+
+  @override
+  String get statsNoReports => 'No reports yet';
+
+  @override
+  String get statsNoRtcp => 'No RTCP on this call';
+
+  @override
+  String get statsRoundTrip => 'Round trip';
+
+  @override
+  String get statsRtcp => 'RTCP reports';
+
+  @override
+  String statsRtcpValue(String sent, String received) {
+    return '$sent sent · $received received';
+  }
+
+  @override
+  String get statsDropped => 'Not played';
+
+  @override
+  String get statsUnknown => 'Not yet measured';
+
+  @override
+  String get statsWaiting => 'Measuring…';
 }

@@ -606,8 +606,7 @@ async fn start_media_inbound(
     let playback = audio.make_playback(fmt).ok()?;
     let sink = media::StatsSink {
         call,
-        codec,
-        interval: std::time::Duration::from_secs(2),
+        interval: std::time::Duration::from_secs(1),
         events,
     };
     media::start_pipeline(

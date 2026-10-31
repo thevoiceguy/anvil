@@ -10,7 +10,7 @@ enum Direction { incoming, outgoing }
 
 enum CallState { dialing, ringing, connected }
 
-/// A connected call's media, as last measured.
+/// A connected call's media, as last measured (every second).
 class CallQuality {
   const CallQuality({
     required this.jitterMs,
@@ -22,9 +22,34 @@ class CallQuality {
     this.unexpectedPt,
     this.expectedPt,
     this.lastSource,
+    this.recentLossPermille = 0,
+    this.packetsSent = 0,
+    this.bytesSent = 0,
+    this.rtpReceived = 0,
+    this.bytesReceived = 0,
+    this.packetsExpected = 0,
+    this.packetsLost = 0,
+    this.sendKbps = 0,
+    this.recvKbps = 0,
+    this.sendPps = 0,
+    this.recvPps = 0,
+    this.farLossPermille,
+    this.farJitterMs,
+    this.farLost,
+    this.rtcp = false,
+    this.rtcpSent = 0,
+    this.rtcpReceived = 0,
+    this.clockRate = 0,
+    this.ptimeMs = 0,
+    this.localRtp,
+    this.remoteRtp,
+    this.mosHundredths = 0,
+    this.farMosHundredths,
   });
 
   final int jitterMs;
+
+  /// The far end's packets lost over the whole call, per thousand.
   final int lossPermille;
   final int? rttMs;
 
@@ -45,8 +70,70 @@ class CallQuality {
   /// Where the last packet came from (`address:port`).
   final String? lastSource;
 
-  /// Good, fair or poor, as a person would hear it.
+  /// The far end's packets lost over the last five seconds, per thousand.
+  final int recentLossPermille;
+
+  final int packetsSent;
+  final int bytesSent;
+
+  /// RTP received, played or not.
+  final int rtpReceived;
+  final int bytesReceived;
+
+  /// The far end's packets its sequence numbers say were sent, and those
+  /// that never arrived.
+  final int packetsExpected;
+  final int packetsLost;
+
+  /// What flowed in the last second.
+  final int sendKbps;
+  final int recvKbps;
+  final int sendPps;
+  final int recvPps;
+
+  /// What the far end last reported of ours over RTCP: its loss in its
+  /// last interval per thousand, its jitter, and its losses in all.
+  final int? farLossPermille;
+  final int? farJitterMs;
+  final int? farLost;
+
+  /// The call has RTCP; the reports sent and read.
+  final bool rtcp;
+  final int rtcpSent;
+  final int rtcpReceived;
+
+  /// The codec's clock in Hz and its audio per packet in ms.
+  final int clockRate;
+  final int ptimeMs;
+
+  /// Where media flows between (`address:port`).
+  final String? localRtp;
+  final String? remoteRtp;
+
+  /// The estimated score (E-model MOS, 1 to 4.5) in hundredths: what the
+  /// user hears (0 before it is measured), and what the far end hears once
+  /// it has reported.
+  final int mosHundredths;
+  final int? farMosHundredths;
+
+  /// The lower of the two scores, once measured.
+  double? get mos {
+    if (mosHundredths == 0) return null;
+    final far = farMosHundredths;
+    final worst = far != null && far < mosHundredths ? far : mosHundredths;
+    return worst / 100;
+  }
+
+  /// Good, fair or poor, as a person would hear it: by the score (FCP calls
+  /// a call under 3.1 poor), else by loss, jitter and the round trip.
   QualityLevel get level {
+    if (mos case final m?) {
+      return m >= 4.0
+          ? QualityLevel.good
+          : m >= 3.1
+          ? QualityLevel.fair
+          : QualityLevel.poor;
+    }
     if (lossPermille >= 50 || jitterMs >= 60 || (rttMs ?? 0) >= 400) {
       return QualityLevel.poor;
     }
@@ -113,6 +200,7 @@ class PhoneCall {
     CallState? state,
     bool? held,
     bool? muted,
+    String? codec,
     bool? encrypted,
     CallQuality? quality,
     DateTime? connectedAt,
@@ -125,7 +213,7 @@ class PhoneCall {
     state: state ?? this.state,
     held: held ?? this.held,
     muted: muted ?? this.muted,
-    codec: codec,
+    codec: codec ?? this.codec,
     encrypted: encrypted ?? this.encrypted,
     quality: quality ?? this.quality,
     connectedAt: connectedAt ?? this.connectedAt,

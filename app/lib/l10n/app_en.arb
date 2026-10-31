@@ -400,21 +400,33 @@
   "presenceRinging": "Ringing",
   "presenceIdle": "Away (idle)",
   "presenceChoose": "Your status",
-  "presenceNote": "Add a note\u2026",
+  "presenceNote": "Add a note…",
   "presenceNoteIs": "Note: {note}",
-  "@presenceNoteIs": {"placeholders": {"note": {"type": "String"}}},
+  "@presenceNoteIs": {
+    "placeholders": {
+      "note": {
+        "type": "String"
+      }
+    }
+  },
   "presenceNoteTitle": "A note beside your status",
   "presenceNoteHint": "Back at 2",
-  "presenceClearAfter": "Clear after\u2026",
+  "presenceClearAfter": "Clear after…",
   "presenceUntil": "Until {time}",
-  "@presenceUntil": {"placeholders": {"time": {"type": "String"}}},
+  "@presenceUntil": {
+    "placeholders": {
+      "time": {
+        "type": "String"
+      }
+    }
+  },
   "presenceClearAfterTitle": "Clear the status after",
   "clearAfter30m": "30 minutes",
   "clearAfter1h": "1 hour",
   "clearAfter2h": "2 hours",
   "clearAfterToday": "Today",
   "clearAfterNever": "Never",
-  "editStatuses": "Edit statuses\u2026",
+  "editStatuses": "Edit statuses…",
   "statusesTitle": "Your statuses",
   "statusesNone": "Add your own, like WFH or At lunch.",
   "statusAdd": "Add a status",
@@ -422,18 +434,35 @@
   "statusLabel": "Name",
   "statusState": "Shows as",
   "statusDndNote": "Choosing it turns do not disturb on: calls go to voicemail.",
-  "clearButton": "Clear",
   "doneButton": "Done",
   "idleAway": "Away when idle",
   "idleAwaySubtitle": "Shown as away after no keyboard or mouse for a while",
   "idleOff": "Off",
   "idleMinutes": "{minutes} minutes",
-  "@idleMinutes": {"placeholders": {"minutes": {"type": "int"}}},
+  "@idleMinutes": {
+    "placeholders": {
+      "minutes": {
+        "type": "int"
+      }
+    }
+  },
   "linesTitle": "Lines",
   "lineFrom": "From {label}",
-  "@lineFrom": {"placeholders": {"label": {"type": "String"}}},
+  "@lineFrom": {
+    "placeholders": {
+      "label": {
+        "type": "String"
+      }
+    }
+  },
   "lineOn": "On {label}",
-  "@lineOn": {"placeholders": {"label": {"type": "String"}}},
+  "@lineOn": {
+    "placeholders": {
+      "label": {
+        "type": "String"
+      }
+    }
+  },
   "lineReady": "Ready",
   "lineRegistering": "Connecting…",
   "lineNotRegistered": "Not connected",
@@ -442,7 +471,13 @@
   "lineHeld": "On hold",
   "lineSilent": "Doesn't ring here",
   "lineVoicemail": "{count} new",
-  "@lineVoicemail": {"placeholders": {"count": {"type": "int"}}},
+  "@lineVoicemail": {
+    "placeholders": {
+      "count": {
+        "type": "int"
+      }
+    }
+  },
   "lineChoose": "Place calls from",
   "lineRename": "Rename",
   "lineRenameTitle": "Name this line",
@@ -454,5 +489,113 @@
   "appearanceSeized": "In use",
   "appearanceYours": "yours",
   "appearancePickUp": "Pick up",
-  "appearanceJoin": "Join"
+  "appearanceJoin": "Join",
+  "callStats": "Call stats",
+  "statsOpen": "Call stats: what is sent and received, loss, jitter and the round trip",
+  "statsScoreHint": "Estimated from loss, jitter and delay (E-model MOS, 1 to 4.5)",
+  "statsYouHear": "You hear",
+  "statsTheyHear": "They hear",
+  "statsAudio": "Audio",
+  "statsCodecValue": "{codec} · {khz} kHz · {ptime} ms packets",
+  "@statsCodecValue": {
+    "placeholders": {
+      "codec": {
+        "type": "String"
+      },
+      "khz": {
+        "type": "String"
+      },
+      "ptime": {
+        "type": "String"
+      }
+    }
+  },
+  "statsEncryption": "Encryption",
+  "statsSrtp": "SRTP",
+  "statsNone": "None",
+  "statsMedia": "Media",
+  "statsSent": "Sent",
+  "statsReceived": "Received",
+  "statsRate": "{pps} packets/s · {kbps} kb/s",
+  "@statsRate": {
+    "placeholders": {
+      "pps": {
+        "type": "String"
+      },
+      "kbps": {
+        "type": "String"
+      }
+    }
+  },
+  "statsTotal": "{packets} packets · {kb} KB in all",
+  "@statsTotal": {
+    "placeholders": {
+      "packets": {
+        "type": "String"
+      },
+      "kb": {
+        "type": "String"
+      }
+    }
+  },
+  "statsLoss": "Loss",
+  "statsLossValue": "{recent}% last 5 s · {whole}% in all ({lost} of {expected})",
+  "@statsLossValue": {
+    "placeholders": {
+      "recent": {
+        "type": "String"
+      },
+      "whole": {
+        "type": "String"
+      },
+      "lost": {
+        "type": "String"
+      },
+      "expected": {
+        "type": "String"
+      }
+    }
+  },
+  "statsJitter": "Jitter",
+  "statsMs": "{ms} ms",
+  "@statsMs": {
+    "placeholders": {
+      "ms": {
+        "type": "String"
+      }
+    }
+  },
+  "statsFarEnd": "Far end reports",
+  "statsFarValue": "{loss}% lost · {jitter} ms jitter · {lost} lost in all",
+  "@statsFarValue": {
+    "placeholders": {
+      "loss": {
+        "type": "String"
+      },
+      "jitter": {
+        "type": "String"
+      },
+      "lost": {
+        "type": "String"
+      }
+    }
+  },
+  "statsNoReports": "No reports yet",
+  "statsNoRtcp": "No RTCP on this call",
+  "statsRoundTrip": "Round trip",
+  "statsRtcp": "RTCP reports",
+  "statsRtcpValue": "{sent} sent · {received} received",
+  "@statsRtcpValue": {
+    "placeholders": {
+      "sent": {
+        "type": "String"
+      },
+      "received": {
+        "type": "String"
+      }
+    }
+  },
+  "statsDropped": "Not played",
+  "statsUnknown": "Not yet measured",
+  "statsWaiting": "Measuring…"
 }

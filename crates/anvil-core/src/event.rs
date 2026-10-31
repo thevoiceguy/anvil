@@ -43,24 +43,38 @@ pub enum EndReason {
     Parked(String),
 }
 
-/// Periodic media statistics for an active call.
+/// A call's media each second while it is up: everything [`CallStats`]
+/// holds, what flowed in the last second, loss over the last five, and the
+/// estimated score of what each side hears.
 #[derive(Debug, Clone, Copy)]
 pub struct MediaStats {
-    pub codec: Codec,
-    pub jitter_ms: f32,
-    pub packet_loss_pct: f32,
-    pub rtt_ms: Option<f32>,
-    pub recv_kbps: f32,
+    pub call: CallStats,
     pub send_kbps: f32,
-    /// What arrived on the call's RTP socket so far, and what became of it.
-    pub receive: ReceiveCounts,
-    /// What the far end last reported receiving of ours (RTCP).
-    pub remote: Option<crate::RemoteReport>,
+    pub recv_kbps: f32,
+    pub send_pps: f32,
+    pub recv_pps: f32,
+    /// The far end's packets lost over the last five seconds, in percent.
+    pub recent_loss_pct: f32,
+    /// What the user hears: our loss over the last five seconds, our
+    /// jitter, the round trip.
+    pub mos: crate::quality::Mos,
+    /// What the far end hears, once it has reported over RTCP.
+    pub far_mos: Option<crate::quality::Mos>,
+}
+
+impl MediaStats {
+    /// The lower of the two scores: how the call is going.
+    pub fn worst_mos(&self) -> crate::quality::Mos {
+        match self.far_mos {
+            Some(far) if far.score < self.mos.score => far,
+            _ => self.mos,
+        }
+    }
 }
 
 /// A call's media as it stands ([`crate::Anvil::call_stats`]): what was
 /// sent and received, what the far end reports, the round trip.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, Copy, PartialEq)]
 pub struct CallStats {
     pub codec: Codec,
     /// The codec's RTP clock, in Hz.

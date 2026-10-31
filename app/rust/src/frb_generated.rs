@@ -2744,6 +2744,13 @@ impl SseDecode for i32 {
     }
 }
 
+impl SseDecode for i64 {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
+        deserializer.cursor.read_i64::<NativeEndian>().unwrap()
+    }
+}
+
 impl SseDecode for crate::api::phone::Line {
     // Codec=Sse (Serialization based), see doc to use other codecs
     fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
@@ -3046,6 +3053,17 @@ impl SseDecode for Option<crate::api::phone::CallingSettings> {
     }
 }
 
+impl SseDecode for Option<i64> {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
+        if (<bool>::sse_decode(deserializer)) {
+            return Some(<i64>::sse_decode(deserializer));
+        } else {
+            return None;
+        }
+    }
+}
+
 impl SseDecode for Option<crate::api::phone::MyPresence> {
     // Codec=Sse (Serialization based), see doc to use other codecs
     fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
@@ -3303,6 +3321,29 @@ impl SseDecode for crate::api::phone::Quality {
         let mut var_unexpectedPt = <Option<u8>>::sse_decode(deserializer);
         let mut var_expectedPt = <Option<u8>>::sse_decode(deserializer);
         let mut var_lastSource = <Option<String>>::sse_decode(deserializer);
+        let mut var_recentLossPermille = <u32>::sse_decode(deserializer);
+        let mut var_packetsSent = <u64>::sse_decode(deserializer);
+        let mut var_bytesSent = <u64>::sse_decode(deserializer);
+        let mut var_rtpReceived = <u64>::sse_decode(deserializer);
+        let mut var_bytesReceived = <u64>::sse_decode(deserializer);
+        let mut var_packetsExpected = <u64>::sse_decode(deserializer);
+        let mut var_packetsLost = <u64>::sse_decode(deserializer);
+        let mut var_sendKbps = <u32>::sse_decode(deserializer);
+        let mut var_recvKbps = <u32>::sse_decode(deserializer);
+        let mut var_sendPps = <u32>::sse_decode(deserializer);
+        let mut var_recvPps = <u32>::sse_decode(deserializer);
+        let mut var_farLossPermille = <Option<u32>>::sse_decode(deserializer);
+        let mut var_farJitterMs = <Option<u32>>::sse_decode(deserializer);
+        let mut var_farLost = <Option<i64>>::sse_decode(deserializer);
+        let mut var_rtcp = <bool>::sse_decode(deserializer);
+        let mut var_rtcpSent = <u64>::sse_decode(deserializer);
+        let mut var_rtcpReceived = <u64>::sse_decode(deserializer);
+        let mut var_clockRate = <u32>::sse_decode(deserializer);
+        let mut var_ptimeMs = <u32>::sse_decode(deserializer);
+        let mut var_localRtp = <Option<String>>::sse_decode(deserializer);
+        let mut var_remoteRtp = <Option<String>>::sse_decode(deserializer);
+        let mut var_mosHundredths = <u16>::sse_decode(deserializer);
+        let mut var_farMosHundredths = <Option<u16>>::sse_decode(deserializer);
         return crate::api::phone::Quality {
             jitter_ms: var_jitterMs,
             packet_loss_permille: var_packetLossPermille,
@@ -3313,6 +3354,29 @@ impl SseDecode for crate::api::phone::Quality {
             unexpected_pt: var_unexpectedPt,
             expected_pt: var_expectedPt,
             last_source: var_lastSource,
+            recent_loss_permille: var_recentLossPermille,
+            packets_sent: var_packetsSent,
+            bytes_sent: var_bytesSent,
+            rtp_received: var_rtpReceived,
+            bytes_received: var_bytesReceived,
+            packets_expected: var_packetsExpected,
+            packets_lost: var_packetsLost,
+            send_kbps: var_sendKbps,
+            recv_kbps: var_recvKbps,
+            send_pps: var_sendPps,
+            recv_pps: var_recvPps,
+            far_loss_permille: var_farLossPermille,
+            far_jitter_ms: var_farJitterMs,
+            far_lost: var_farLost,
+            rtcp: var_rtcp,
+            rtcp_sent: var_rtcpSent,
+            rtcp_received: var_rtcpReceived,
+            clock_rate: var_clockRate,
+            ptime_ms: var_ptimeMs,
+            local_rtp: var_localRtp,
+            remote_rtp: var_remoteRtp,
+            mos_hundredths: var_mosHundredths,
+            far_mos_hundredths: var_farMosHundredths,
         };
     }
 }
@@ -4055,6 +4119,29 @@ impl flutter_rust_bridge::IntoDart for crate::api::phone::Quality {
             self.unexpected_pt.into_into_dart().into_dart(),
             self.expected_pt.into_into_dart().into_dart(),
             self.last_source.into_into_dart().into_dart(),
+            self.recent_loss_permille.into_into_dart().into_dart(),
+            self.packets_sent.into_into_dart().into_dart(),
+            self.bytes_sent.into_into_dart().into_dart(),
+            self.rtp_received.into_into_dart().into_dart(),
+            self.bytes_received.into_into_dart().into_dart(),
+            self.packets_expected.into_into_dart().into_dart(),
+            self.packets_lost.into_into_dart().into_dart(),
+            self.send_kbps.into_into_dart().into_dart(),
+            self.recv_kbps.into_into_dart().into_dart(),
+            self.send_pps.into_into_dart().into_dart(),
+            self.recv_pps.into_into_dart().into_dart(),
+            self.far_loss_permille.into_into_dart().into_dart(),
+            self.far_jitter_ms.into_into_dart().into_dart(),
+            self.far_lost.into_into_dart().into_dart(),
+            self.rtcp.into_into_dart().into_dart(),
+            self.rtcp_sent.into_into_dart().into_dart(),
+            self.rtcp_received.into_into_dart().into_dart(),
+            self.clock_rate.into_into_dart().into_dart(),
+            self.ptime_ms.into_into_dart().into_dart(),
+            self.local_rtp.into_into_dart().into_dart(),
+            self.remote_rtp.into_into_dart().into_dart(),
+            self.mos_hundredths.into_into_dart().into_dart(),
+            self.far_mos_hundredths.into_into_dart().into_dart(),
         ]
         .into_dart()
     }
@@ -4450,6 +4537,13 @@ impl SseEncode for i32 {
     }
 }
 
+impl SseEncode for i64 {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
+        serializer.cursor.write_i64::<NativeEndian>(self).unwrap();
+    }
+}
+
 impl SseEncode for crate::api::phone::Line {
     // Codec=Sse (Serialization based), see doc to use other codecs
     fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
@@ -4680,6 +4774,16 @@ impl SseEncode for Option<crate::api::phone::CallingSettings> {
     }
 }
 
+impl SseEncode for Option<i64> {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
+        <bool>::sse_encode(self.is_some(), serializer);
+        if let Some(value) = self {
+            <i64>::sse_encode(value, serializer);
+        }
+    }
+}
+
 impl SseEncode for Option<crate::api::phone::MyPresence> {
     // Codec=Sse (Serialization based), see doc to use other codecs
     fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
@@ -4866,6 +4970,29 @@ impl SseEncode for crate::api::phone::Quality {
         <Option<u8>>::sse_encode(self.unexpected_pt, serializer);
         <Option<u8>>::sse_encode(self.expected_pt, serializer);
         <Option<String>>::sse_encode(self.last_source, serializer);
+        <u32>::sse_encode(self.recent_loss_permille, serializer);
+        <u64>::sse_encode(self.packets_sent, serializer);
+        <u64>::sse_encode(self.bytes_sent, serializer);
+        <u64>::sse_encode(self.rtp_received, serializer);
+        <u64>::sse_encode(self.bytes_received, serializer);
+        <u64>::sse_encode(self.packets_expected, serializer);
+        <u64>::sse_encode(self.packets_lost, serializer);
+        <u32>::sse_encode(self.send_kbps, serializer);
+        <u32>::sse_encode(self.recv_kbps, serializer);
+        <u32>::sse_encode(self.send_pps, serializer);
+        <u32>::sse_encode(self.recv_pps, serializer);
+        <Option<u32>>::sse_encode(self.far_loss_permille, serializer);
+        <Option<u32>>::sse_encode(self.far_jitter_ms, serializer);
+        <Option<i64>>::sse_encode(self.far_lost, serializer);
+        <bool>::sse_encode(self.rtcp, serializer);
+        <u64>::sse_encode(self.rtcp_sent, serializer);
+        <u64>::sse_encode(self.rtcp_received, serializer);
+        <u32>::sse_encode(self.clock_rate, serializer);
+        <u32>::sse_encode(self.ptime_ms, serializer);
+        <Option<String>>::sse_encode(self.local_rtp, serializer);
+        <Option<String>>::sse_encode(self.remote_rtp, serializer);
+        <u16>::sse_encode(self.mos_hundredths, serializer);
+        <Option<u16>>::sse_encode(self.far_mos_hundredths, serializer);
     }
 }
 

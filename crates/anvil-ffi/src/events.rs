@@ -100,7 +100,7 @@ pub struct AnvilMediaStats {
     pub codec: AnvilCodec,
     pub jitter_ms: f32,
     pub packet_loss_pct: f32,
-    /// 0 if RTT isn't yet known. RTT requires RTCP RR/SR (deferred).
+    /// 0 until RTCP has measured the round trip.
     pub rtt_ms: f32,
     pub recv_kbps: f32,
     pub send_kbps: f32,
@@ -281,7 +281,7 @@ pub(crate) fn dispatch(slot: CallbackSlot, event: &Event) {
         Event::MediaStats { call, stats } => {
             ev.kind = AnvilEventKind::MediaStats;
             ev.call_id = call.0;
-            ev.codec = codec_to_c(stats.codec);
+            ev.codec = codec_to_c(stats.call.codec);
             ev.stats = stats_to_c(stats);
         }
         Event::Error { call, error } => {
@@ -368,10 +368,10 @@ fn codec_to_c(c: Codec) -> AnvilCodec {
 
 fn stats_to_c(s: &MediaStats) -> AnvilMediaStats {
     AnvilMediaStats {
-        codec: codec_to_c(s.codec),
-        jitter_ms: s.jitter_ms,
-        packet_loss_pct: s.packet_loss_pct,
-        rtt_ms: s.rtt_ms.unwrap_or(0.0),
+        codec: codec_to_c(s.call.codec),
+        jitter_ms: s.call.jitter_ms,
+        packet_loss_pct: s.call.loss_pct(),
+        rtt_ms: s.call.rtt_ms.unwrap_or(0.0),
         recv_kbps: s.recv_kbps,
         send_kbps: s.send_kbps,
     }

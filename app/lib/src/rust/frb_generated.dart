@@ -2371,6 +2371,12 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   }
 
   @protected
+  PlatformInt64 dco_decode_box_autoadd_i_64(dynamic raw) {
+    // Codec=Dco (DartCObject based), see doc to use other codecs
+    return dco_decode_i_64(raw);
+  }
+
+  @protected
   MyPresence dco_decode_box_autoadd_my_presence(dynamic raw) {
     // Codec=Dco (DartCObject based), see doc to use other codecs
     return dco_decode_my_presence(raw);
@@ -2540,6 +2546,12 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   int dco_decode_i_32(dynamic raw) {
     // Codec=Dco (DartCObject based), see doc to use other codecs
     return raw as int;
+  }
+
+  @protected
+  PlatformInt64 dco_decode_i_64(dynamic raw) {
+    // Codec=Dco (DartCObject based), see doc to use other codecs
+    return dcoDecodeI64(raw);
   }
 
   @protected
@@ -2713,6 +2725,12 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   }
 
   @protected
+  PlatformInt64? dco_decode_opt_box_autoadd_i_64(dynamic raw) {
+    // Codec=Dco (DartCObject based), see doc to use other codecs
+    return raw == null ? null : dco_decode_box_autoadd_i_64(raw);
+  }
+
+  @protected
   MyPresence? dco_decode_opt_box_autoadd_my_presence(dynamic raw) {
     // Codec=Dco (DartCObject based), see doc to use other codecs
     return raw == null ? null : dco_decode_box_autoadd_my_presence(raw);
@@ -2866,8 +2884,8 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   Quality dco_decode_quality(dynamic raw) {
     // Codec=Dco (DartCObject based), see doc to use other codecs
     final arr = raw as List<dynamic>;
-    if (arr.length != 9)
-      throw Exception('unexpected arr length: expect 9 but see ${arr.length}');
+    if (arr.length != 32)
+      throw Exception('unexpected arr length: expect 32 but see ${arr.length}');
     return Quality(
       jitterMs: dco_decode_u_32(arr[0]),
       packetLossPermille: dco_decode_u_32(arr[1]),
@@ -2878,6 +2896,29 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       unexpectedPt: dco_decode_opt_box_autoadd_u_8(arr[6]),
       expectedPt: dco_decode_opt_box_autoadd_u_8(arr[7]),
       lastSource: dco_decode_opt_String(arr[8]),
+      recentLossPermille: dco_decode_u_32(arr[9]),
+      packetsSent: dco_decode_u_64(arr[10]),
+      bytesSent: dco_decode_u_64(arr[11]),
+      rtpReceived: dco_decode_u_64(arr[12]),
+      bytesReceived: dco_decode_u_64(arr[13]),
+      packetsExpected: dco_decode_u_64(arr[14]),
+      packetsLost: dco_decode_u_64(arr[15]),
+      sendKbps: dco_decode_u_32(arr[16]),
+      recvKbps: dco_decode_u_32(arr[17]),
+      sendPps: dco_decode_u_32(arr[18]),
+      recvPps: dco_decode_u_32(arr[19]),
+      farLossPermille: dco_decode_opt_box_autoadd_u_32(arr[20]),
+      farJitterMs: dco_decode_opt_box_autoadd_u_32(arr[21]),
+      farLost: dco_decode_opt_box_autoadd_i_64(arr[22]),
+      rtcp: dco_decode_bool(arr[23]),
+      rtcpSent: dco_decode_u_64(arr[24]),
+      rtcpReceived: dco_decode_u_64(arr[25]),
+      clockRate: dco_decode_u_32(arr[26]),
+      ptimeMs: dco_decode_u_32(arr[27]),
+      localRtp: dco_decode_opt_String(arr[28]),
+      remoteRtp: dco_decode_opt_String(arr[29]),
+      mosHundredths: dco_decode_u_16(arr[30]),
+      farMosHundredths: dco_decode_opt_box_autoadd_u_16(arr[31]),
     );
   }
 
@@ -3136,6 +3177,12 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   }
 
   @protected
+  PlatformInt64 sse_decode_box_autoadd_i_64(SseDeserializer deserializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    return (sse_decode_i_64(deserializer));
+  }
+
+  @protected
   MyPresence sse_decode_box_autoadd_my_presence(SseDeserializer deserializer) {
     // Codec=Sse (Serialization based), see doc to use other codecs
     return (sse_decode_my_presence(deserializer));
@@ -3328,6 +3375,12 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   int sse_decode_i_32(SseDeserializer deserializer) {
     // Codec=Sse (Serialization based), see doc to use other codecs
     return deserializer.buffer.getInt32();
+  }
+
+  @protected
+  PlatformInt64 sse_decode_i_64(SseDeserializer deserializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    return deserializer.buffer.getPlatformInt64();
   }
 
   @protected
@@ -3627,6 +3680,17 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   }
 
   @protected
+  PlatformInt64? sse_decode_opt_box_autoadd_i_64(SseDeserializer deserializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+
+    if (sse_decode_bool(deserializer)) {
+      return (sse_decode_box_autoadd_i_64(deserializer));
+    } else {
+      return null;
+    }
+  }
+
+  @protected
   MyPresence? sse_decode_opt_box_autoadd_my_presence(
     SseDeserializer deserializer,
   ) {
@@ -3876,6 +3940,29 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     var var_unexpectedPt = sse_decode_opt_box_autoadd_u_8(deserializer);
     var var_expectedPt = sse_decode_opt_box_autoadd_u_8(deserializer);
     var var_lastSource = sse_decode_opt_String(deserializer);
+    var var_recentLossPermille = sse_decode_u_32(deserializer);
+    var var_packetsSent = sse_decode_u_64(deserializer);
+    var var_bytesSent = sse_decode_u_64(deserializer);
+    var var_rtpReceived = sse_decode_u_64(deserializer);
+    var var_bytesReceived = sse_decode_u_64(deserializer);
+    var var_packetsExpected = sse_decode_u_64(deserializer);
+    var var_packetsLost = sse_decode_u_64(deserializer);
+    var var_sendKbps = sse_decode_u_32(deserializer);
+    var var_recvKbps = sse_decode_u_32(deserializer);
+    var var_sendPps = sse_decode_u_32(deserializer);
+    var var_recvPps = sse_decode_u_32(deserializer);
+    var var_farLossPermille = sse_decode_opt_box_autoadd_u_32(deserializer);
+    var var_farJitterMs = sse_decode_opt_box_autoadd_u_32(deserializer);
+    var var_farLost = sse_decode_opt_box_autoadd_i_64(deserializer);
+    var var_rtcp = sse_decode_bool(deserializer);
+    var var_rtcpSent = sse_decode_u_64(deserializer);
+    var var_rtcpReceived = sse_decode_u_64(deserializer);
+    var var_clockRate = sse_decode_u_32(deserializer);
+    var var_ptimeMs = sse_decode_u_32(deserializer);
+    var var_localRtp = sse_decode_opt_String(deserializer);
+    var var_remoteRtp = sse_decode_opt_String(deserializer);
+    var var_mosHundredths = sse_decode_u_16(deserializer);
+    var var_farMosHundredths = sse_decode_opt_box_autoadd_u_16(deserializer);
     return Quality(
       jitterMs: var_jitterMs,
       packetLossPermille: var_packetLossPermille,
@@ -3886,6 +3973,29 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       unexpectedPt: var_unexpectedPt,
       expectedPt: var_expectedPt,
       lastSource: var_lastSource,
+      recentLossPermille: var_recentLossPermille,
+      packetsSent: var_packetsSent,
+      bytesSent: var_bytesSent,
+      rtpReceived: var_rtpReceived,
+      bytesReceived: var_bytesReceived,
+      packetsExpected: var_packetsExpected,
+      packetsLost: var_packetsLost,
+      sendKbps: var_sendKbps,
+      recvKbps: var_recvKbps,
+      sendPps: var_sendPps,
+      recvPps: var_recvPps,
+      farLossPermille: var_farLossPermille,
+      farJitterMs: var_farJitterMs,
+      farLost: var_farLost,
+      rtcp: var_rtcp,
+      rtcpSent: var_rtcpSent,
+      rtcpReceived: var_rtcpReceived,
+      clockRate: var_clockRate,
+      ptimeMs: var_ptimeMs,
+      localRtp: var_localRtp,
+      remoteRtp: var_remoteRtp,
+      mosHundredths: var_mosHundredths,
+      farMosHundredths: var_farMosHundredths,
     );
   }
 
@@ -4139,6 +4249,15 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   }
 
   @protected
+  void sse_encode_box_autoadd_i_64(
+    PlatformInt64 self,
+    SseSerializer serializer,
+  ) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    sse_encode_i_64(self, serializer);
+  }
+
+  @protected
   void sse_encode_box_autoadd_my_presence(
     MyPresence self,
     SseSerializer serializer,
@@ -4296,6 +4415,12 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   void sse_encode_i_32(int self, SseSerializer serializer) {
     // Codec=Sse (Serialization based), see doc to use other codecs
     serializer.buffer.putInt32(self);
+  }
+
+  @protected
+  void sse_encode_i_64(PlatformInt64 self, SseSerializer serializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    serializer.buffer.putPlatformInt64(self);
   }
 
   @protected
@@ -4540,6 +4665,19 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   }
 
   @protected
+  void sse_encode_opt_box_autoadd_i_64(
+    PlatformInt64? self,
+    SseSerializer serializer,
+  ) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+
+    sse_encode_bool(self != null, serializer);
+    if (self != null) {
+      sse_encode_box_autoadd_i_64(self, serializer);
+    }
+  }
+
+  @protected
   void sse_encode_opt_box_autoadd_my_presence(
     MyPresence? self,
     SseSerializer serializer,
@@ -4739,6 +4877,29 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     sse_encode_opt_box_autoadd_u_8(self.unexpectedPt, serializer);
     sse_encode_opt_box_autoadd_u_8(self.expectedPt, serializer);
     sse_encode_opt_String(self.lastSource, serializer);
+    sse_encode_u_32(self.recentLossPermille, serializer);
+    sse_encode_u_64(self.packetsSent, serializer);
+    sse_encode_u_64(self.bytesSent, serializer);
+    sse_encode_u_64(self.rtpReceived, serializer);
+    sse_encode_u_64(self.bytesReceived, serializer);
+    sse_encode_u_64(self.packetsExpected, serializer);
+    sse_encode_u_64(self.packetsLost, serializer);
+    sse_encode_u_32(self.sendKbps, serializer);
+    sse_encode_u_32(self.recvKbps, serializer);
+    sse_encode_u_32(self.sendPps, serializer);
+    sse_encode_u_32(self.recvPps, serializer);
+    sse_encode_opt_box_autoadd_u_32(self.farLossPermille, serializer);
+    sse_encode_opt_box_autoadd_u_32(self.farJitterMs, serializer);
+    sse_encode_opt_box_autoadd_i_64(self.farLost, serializer);
+    sse_encode_bool(self.rtcp, serializer);
+    sse_encode_u_64(self.rtcpSent, serializer);
+    sse_encode_u_64(self.rtcpReceived, serializer);
+    sse_encode_u_32(self.clockRate, serializer);
+    sse_encode_u_32(self.ptimeMs, serializer);
+    sse_encode_opt_String(self.localRtp, serializer);
+    sse_encode_opt_String(self.remoteRtp, serializer);
+    sse_encode_u_16(self.mosHundredths, serializer);
+    sse_encode_opt_box_autoadd_u_16(self.farMosHundredths, serializer);
   }
 
   @protected

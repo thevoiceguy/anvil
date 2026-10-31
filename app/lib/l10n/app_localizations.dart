@@ -1748,6 +1748,185 @@ abstract class Strings {
   /// In en, this message translates to:
   /// **'Join'**
   String get appearanceJoin;
+
+  /// No description provided for @callStats.
+  ///
+  /// In en, this message translates to:
+  /// **'Call stats'**
+  String get callStats;
+
+  /// No description provided for @statsOpen.
+  ///
+  /// In en, this message translates to:
+  /// **'Call stats: what is sent and received, loss, jitter and the round trip'**
+  String get statsOpen;
+
+  /// No description provided for @statsScoreHint.
+  ///
+  /// In en, this message translates to:
+  /// **'Estimated from loss, jitter and delay (E-model MOS, 1 to 4.5)'**
+  String get statsScoreHint;
+
+  /// No description provided for @statsYouHear.
+  ///
+  /// In en, this message translates to:
+  /// **'You hear'**
+  String get statsYouHear;
+
+  /// No description provided for @statsTheyHear.
+  ///
+  /// In en, this message translates to:
+  /// **'They hear'**
+  String get statsTheyHear;
+
+  /// No description provided for @statsAudio.
+  ///
+  /// In en, this message translates to:
+  /// **'Audio'**
+  String get statsAudio;
+
+  /// No description provided for @statsCodecValue.
+  ///
+  /// In en, this message translates to:
+  /// **'{codec} · {khz} kHz · {ptime} ms packets'**
+  String statsCodecValue(String codec, String khz, String ptime);
+
+  /// No description provided for @statsEncryption.
+  ///
+  /// In en, this message translates to:
+  /// **'Encryption'**
+  String get statsEncryption;
+
+  /// No description provided for @statsSrtp.
+  ///
+  /// In en, this message translates to:
+  /// **'SRTP'**
+  String get statsSrtp;
+
+  /// No description provided for @statsNone.
+  ///
+  /// In en, this message translates to:
+  /// **'None'**
+  String get statsNone;
+
+  /// No description provided for @statsMedia.
+  ///
+  /// In en, this message translates to:
+  /// **'Media'**
+  String get statsMedia;
+
+  /// No description provided for @statsSent.
+  ///
+  /// In en, this message translates to:
+  /// **'Sent'**
+  String get statsSent;
+
+  /// No description provided for @statsReceived.
+  ///
+  /// In en, this message translates to:
+  /// **'Received'**
+  String get statsReceived;
+
+  /// No description provided for @statsRate.
+  ///
+  /// In en, this message translates to:
+  /// **'{pps} packets/s · {kbps} kb/s'**
+  String statsRate(String pps, String kbps);
+
+  /// No description provided for @statsTotal.
+  ///
+  /// In en, this message translates to:
+  /// **'{packets} packets · {kb} KB in all'**
+  String statsTotal(String packets, String kb);
+
+  /// No description provided for @statsLoss.
+  ///
+  /// In en, this message translates to:
+  /// **'Loss'**
+  String get statsLoss;
+
+  /// No description provided for @statsLossValue.
+  ///
+  /// In en, this message translates to:
+  /// **'{recent}% last 5 s · {whole}% in all ({lost} of {expected})'**
+  String statsLossValue(
+    String recent,
+    String whole,
+    String lost,
+    String expected,
+  );
+
+  /// No description provided for @statsJitter.
+  ///
+  /// In en, this message translates to:
+  /// **'Jitter'**
+  String get statsJitter;
+
+  /// No description provided for @statsMs.
+  ///
+  /// In en, this message translates to:
+  /// **'{ms} ms'**
+  String statsMs(String ms);
+
+  /// No description provided for @statsFarEnd.
+  ///
+  /// In en, this message translates to:
+  /// **'Far end reports'**
+  String get statsFarEnd;
+
+  /// No description provided for @statsFarValue.
+  ///
+  /// In en, this message translates to:
+  /// **'{loss}% lost · {jitter} ms jitter · {lost} lost in all'**
+  String statsFarValue(String loss, String jitter, String lost);
+
+  /// No description provided for @statsNoReports.
+  ///
+  /// In en, this message translates to:
+  /// **'No reports yet'**
+  String get statsNoReports;
+
+  /// No description provided for @statsNoRtcp.
+  ///
+  /// In en, this message translates to:
+  /// **'No RTCP on this call'**
+  String get statsNoRtcp;
+
+  /// No description provided for @statsRoundTrip.
+  ///
+  /// In en, this message translates to:
+  /// **'Round trip'**
+  String get statsRoundTrip;
+
+  /// No description provided for @statsRtcp.
+  ///
+  /// In en, this message translates to:
+  /// **'RTCP reports'**
+  String get statsRtcp;
+
+  /// No description provided for @statsRtcpValue.
+  ///
+  /// In en, this message translates to:
+  /// **'{sent} sent · {received} received'**
+  String statsRtcpValue(String sent, String received);
+
+  /// No description provided for @statsDropped.
+  ///
+  /// In en, this message translates to:
+  /// **'Not played'**
+  String get statsDropped;
+
+  /// No description provided for @statsUnknown.
+  ///
+  /// In en, this message translates to:
+  /// **'Not yet measured'**
+  String get statsUnknown;
+
+  /// No description provided for @statsWaiting.
+  ///
+  /// In en, this message translates to:
+  /// **'Measuring…'**
+  String get statsWaiting;
 }
 
 class _StringsDelegate extends LocalizationsDelegate<Strings> {
