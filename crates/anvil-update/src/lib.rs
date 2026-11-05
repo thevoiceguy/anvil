@@ -21,7 +21,7 @@ use futures::StreamExt;
 use serde::{Deserialize, Serialize};
 use tokio::io::AsyncWriteExt;
 
-pub use install::Install;
+pub use install::{App, Install, ANVIL};
 
 /// The public key releases are signed with (Ed25519, raw). Its private half
 /// is the repository's `ANVIL_UPDATE_KEY` secret; `app/packaging/update-key.pub.pem`
@@ -39,7 +39,7 @@ pub const FEED: &str = "https://github.com/thevoiceguy/anvil/releases/latest/dow
 pub enum UpdateError {
     #[error("the update server: {0}")]
     Http(#[from] reqwest::Error),
-    #[error("the manifest's signature is not Anvil's")]
+    #[error("the manifest is not signed with the releases' key")]
     BadSignature,
     #[error("the manifest cannot be read: {0}")]
     BadManifest(String),
@@ -105,6 +105,7 @@ impl Available {
 
 /// Checks for, fetches and installs updates for this copy of the app.
 pub struct Updater {
+    app: App,
     http: reqwest::Client,
     feed: String,
     key: Vec<u8>,
@@ -113,13 +114,25 @@ pub struct Updater {
 }
 
 impl Updater {
-    /// For this copy (`current` is its version), against the releases.
+    /// For this copy of Anvil (`current` is its version), against Anvil's releases.
     pub fn new(current: &str) -> Result<Self, UpdateError> {
         Self::with(current, FEED, &UPDATE_KEY, Install::this())
     }
 
-    /// Against another feed and key: for tests.
+    /// Anvil against another feed and key: for tests.
     pub fn with(
+        current: &str,
+        feed: &str,
+        key: &[u8],
+        install: Install,
+    ) -> Result<Self, UpdateError> {
+        Self::with_app(ANVIL, current, feed, key, install)
+    }
+
+    /// Another app (`current` its version, `install` as [`Install::detect`] finds it), against its own releases'
+    /// `feed` (where its `latest.json` and `latest.json.sig` are) and the public `key` they are signed with.
+    pub fn with_app(
+        app: App,
         current: &str,
         feed: &str,
         key: &[u8],
@@ -132,6 +145,7 @@ impl Updater {
             .timeout(std::time::Duration::from_secs(600))
             .build()?;
         Ok(Self {
+            app,
             http,
             feed: if feed.ends_with('/') {
                 feed.to_string()
@@ -220,7 +234,7 @@ impl Updater {
     /// Install `file` (from [`download`](Self::download)) once this process
     /// has exited, then start the app again. The caller quits right after.
     pub fn install(&self, file: &Path) -> Result<(), UpdateError> {
-        self.install.start(file, std::process::id())
+        self.install.start(&self.app, file, std::process::id())
     }
 }
 

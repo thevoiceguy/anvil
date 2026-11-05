@@ -838,6 +838,11 @@ Three PRs:
     v0.2.20 was out, and would have installed it). Settings show the
     version and check by hand, with an update offered or not, and say how
     it went.
+  - Another app packaged the same way (the DSIP app, thevoiceguy/dsip-app)
+    uses the crate with its own description (`App`: its name, its Windows
+    install folder, its disk image's bundle, its .deb's prefix), its own
+    feed and its own key (`Updater::with_app`, `Install::detect`); Anvil's
+    is `ANVIL`, and `Updater::new` and `Install::this` are unchanged.
   - The key's private half is the repository secret and one offline copy
     kept by the owner. Lost, existing installs cannot take updates until
     they are reinstalled by hand with a build carrying a new key.
