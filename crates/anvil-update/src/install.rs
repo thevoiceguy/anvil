@@ -5,10 +5,33 @@ use std::process::Command;
 
 use crate::UpdateError;
 
+/// What the updater knows of the app it updates: where each way of installing it puts it, and what it is called
+/// there. Anvil's is [`ANVIL`]; another app built the same way (an Inno Setup per user, a disk image, an AppImage and
+/// a .deb) passes its own.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct App {
+    /// Its name in file names: `Anvil` (the AppImage staged as `.Anvil.AppImage.new`).
+    pub name: &'static str,
+    /// The folder the Windows setup installs to, under `%LOCALAPPDATA%\Programs`: `Anvil`.
+    pub windows_dir: &'static str,
+    /// The bundle in the release's disk image: `Anvil.app`.
+    pub mac_bundle: &'static str,
+    /// Where the .deb installs it: `/opt/anvil`.
+    pub deb_prefix: &'static str,
+}
+
+/// Anvil.
+pub const ANVIL: App = App {
+    name: "Anvil",
+    windows_dir: "Anvil",
+    mac_bundle: "Anvil.app",
+    deb_prefix: "/opt/anvil",
+};
+
 /// How this copy was installed.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Install {
-    /// By the Windows setup, in `%LOCALAPPDATA%\Programs\Anvil`: the new
+    /// By the Windows setup, in `%LOCALAPPDATA%\Programs\<App::windows_dir>`: the new
     /// setup runs silently over it.
     WindowsSetup,
     /// An app bundle on macOS, in a folder this user may write: the new one
@@ -26,21 +49,26 @@ pub enum Install {
 }
 
 impl Install {
-    /// This copy.
+    /// This copy of Anvil.
     pub fn this() -> Self {
+        Self::detect(&ANVIL)
+    }
+
+    /// This copy of `app`.
+    pub fn detect(app: &App) -> Self {
         let Ok(exe) = std::env::current_exe() else {
             return Self::manual("where this copy is cannot be told", None);
         };
         let exe = exe.canonicalize().unwrap_or(exe);
         if cfg!(target_os = "windows") {
             let installed = std::env::var_os("LOCALAPPDATA")
-                .map(|d| PathBuf::from(d).join("Programs").join("Anvil"));
+                .map(|d| PathBuf::from(d).join("Programs").join(app.windows_dir));
             match (exe.parent(), installed) {
                 (Some(dir), Some(installed)) if same_dir(dir, &installed) => Self::WindowsSetup,
                 _ => Self::manual("not installed by the setup", Some("windows-x86_64-setup")),
             }
         } else if cfg!(target_os = "macos") {
-            // …/Anvil.app/Contents/MacOS/Anvil
+            // …/Anvil.app/Contents/MacOS/Anvil (a branded install renames the bundle)
             match exe.ancestors().nth(3) {
                 Some(bundle) if bundle.extension().is_some_and(|e| e == "app") => {
                     let writable = bundle.parent().is_some_and(writable);
@@ -61,7 +89,7 @@ impl Install {
             Self::AppImage {
                 path: PathBuf::from(appimage),
             }
-        } else if exe.starts_with("/opt/anvil") {
+        } else if exe.starts_with(app.deb_prefix) {
             Self::manual(
                 "installed from the .deb: install the new one with apt",
                 Some("linux-amd64-deb"),
@@ -96,7 +124,7 @@ impl Install {
 
     /// Start installing `file` once process `pid` (this one) has exited,
     /// and start the app again after.
-    pub(crate) fn start(&self, file: &Path, pid: u32) -> Result<(), UpdateError> {
+    pub(crate) fn start(&self, app: &App, file: &Path, pid: u32) -> Result<(), UpdateError> {
         match self {
             Self::WindowsSetup => {
                 // Once this app has gone (a tray app that hangs on is ended
@@ -123,7 +151,7 @@ mnt=$(mktemp -d)
 hdiutil attach -nobrowse -noautoopen -mountpoint "$mnt" {dmg}
 new={bundle}.new.$$
 old={bundle}.old.$$
-ditto "$mnt/Anvil.app" "$new"
+ditto "$mnt/"{image} "$new"
 hdiutil detach "$mnt" -quiet || true
 mv {bundle} "$old"
 mv "$new" {bundle}
@@ -132,6 +160,7 @@ open {bundle}
 "#,
                     dmg = quote(file),
                     bundle = quote(bundle),
+                    image = quote(Path::new(app.mac_bundle)),
                 );
                 let mut command = Command::new("/bin/sh");
                 command.args(["-c", &script]);
@@ -145,7 +174,7 @@ open {bundle}
                 let dir = path.parent().ok_or_else(|| {
                     UpdateError::CannotInstall("the AppImage has no folder".into())
                 })?;
-                let staged = dir.join(".Anvil.AppImage.new");
+                let staged = dir.join(format!(".{}.AppImage.new", app.name));
                 std::fs::copy(file, &staged)?;
                 set_executable(&staged)?;
                 std::fs::rename(&staged, path)?;
@@ -314,7 +343,7 @@ mod tests {
         std::fs::remove_file(&marker).unwrap();
 
         // Then as the app runs it: hidden, outliving its caller.
-        Install::WindowsSetup.start(&setup, pid).unwrap();
+        Install::WindowsSetup.start(&ANVIL, &setup, pid).unwrap();
         let deadline = std::time::Instant::now() + std::time::Duration::from_secs(60);
         while !marker.exists() {
             assert!(
@@ -342,6 +371,30 @@ mod tests {
         }
     }
 
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn another_app_is_found_where_its_own_deb_installs_it() {
+        if std::env::var_os("APPIMAGE").is_some() {
+            return;
+        }
+        // This test binary stands for the other app, its folder for that app's .deb prefix.
+        let exe = std::env::current_exe().unwrap().canonicalize().unwrap();
+        let prefix: &'static str =
+            Box::leak(exe.parent().unwrap().display().to_string().into_boxed_str());
+        let other = App {
+            name: "Other",
+            windows_dir: "Other",
+            mac_bundle: "Other.app",
+            deb_prefix: prefix,
+        };
+        match Install::detect(&other) {
+            Install::Manual { target, .. } => assert_eq!(target, Some("linux-amd64-deb")),
+            found => panic!("{found:?}"),
+        }
+        // and Anvil is not there
+        assert_eq!(Install::detect(&ANVIL).target(), None);
+    }
+
     #[cfg(unix)]
     #[test]
     fn an_appimage_is_replaced_in_place_and_started_once_this_has_gone() {
@@ -363,7 +416,7 @@ mod tests {
         gone.wait().unwrap();
 
         Install::AppImage { path: app.clone() }
-            .start(&new, pid)
+            .start(&ANVIL, &new, pid)
             .unwrap();
         assert!(std::fs::read_to_string(&app)
             .unwrap()
