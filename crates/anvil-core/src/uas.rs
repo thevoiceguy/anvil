@@ -209,8 +209,15 @@ impl UasRequestHandler for AnvilUasHandler {
         };
 
         // Send 180 Ringing so the caller knows we're alerting. We don't
-        // loop the ring tone locally in M4; a UI would own that.
-        let ringing = UserAgentServer::create_response(request, 180, "Ringing");
+        // loop the ring tone locally in M4; a UI would own that. It is in
+        // the dialog the 200 will confirm, so it carries the 200's To tag:
+        // `create_response` makes a tag of its own, and a caller that saw
+        // two treated them as two dialogs and kept the ringing one.
+        let mut ringing = UserAgentServer::create_response(request, 180, "Ringing");
+        if let Some(to) = response.headers().get("To") {
+            let to = to.to_string();
+            ringing.headers_mut().set_or_push("To", to).ok();
+        }
         handle.send_provisional(ringing).await;
 
         let from_display = display_name_from_header(request.headers().get("From"));
