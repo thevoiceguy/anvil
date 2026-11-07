@@ -437,3 +437,62 @@ async fn the_ringing_and_the_answer_carry_one_to_tag() {
     assert_eq!(ringing, answered, "the 180 and the 200 are one dialog");
     bob.shutdown().await.unwrap();
 }
+
+/// A response names where its request came from (RFC 3581 §4): a caller
+/// that asked with `;rport` is told its port and address. Anvil echoed a
+/// bare `;rport` and no `received` (#68); siphon-rs v2026.11.07 stamps every
+/// response its server transaction sends.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_response_tells_the_caller_its_port_and_address() {
+    let (bob, mut bob_events) = start(account(
+        "sip:bob@127.0.0.1",
+        "sip:127.0.0.1:9",
+        "bob",
+        "",
+        "127.0.0.3",
+        3600,
+    ))
+    .await;
+    let caller = tokio::net::UdpSocket::bind("127.0.0.5:0").await.unwrap();
+    let me = caller.local_addr().unwrap();
+    let bob_addr = bob.sip_address();
+    let sdp = "v=0\r\no=- 1 1 IN IP4 127.0.0.5\r\ns=-\r\nc=IN IP4 127.0.0.5\r\nt=0 0\r\n\
+               m=audio 40002 RTP/AVP 0\r\na=rtpmap:0 PCMU/8000\r\n";
+    // The sent-by names an address the request did not come from, as a
+    // caller behind NAT does.
+    let invite = format!(
+        "INVITE sip:bob@{bob_addr} SIP/2.0\r\n\
+         Via: SIP/2.0/UDP 10.9.8.7:5060;branch=z9hG4bK-rport;rport\r\n\
+         Max-Forwards: 70\r\n\
+         From: <sip:carol@127.0.0.5>;tag=carol\r\n\
+         To: <sip:bob@{bob_addr}>\r\n\
+         Call-ID: rport@127.0.0.5\r\n\
+         CSeq: 1 INVITE\r\n\
+         Contact: <sip:carol@{me}>\r\n\
+         Content-Type: application/sdp\r\n\
+         Content-Length: {}\r\n\r\n{sdp}",
+        sdp.len()
+    );
+    caller.send_to(invite.as_bytes(), bob_addr).await.unwrap();
+
+    let mut buf = vec![0u8; 8192];
+    let via = loop {
+        let (n, _) = tokio::time::timeout(SOON, caller.recv_from(&mut buf))
+            .await
+            .expect("a 180")
+            .unwrap();
+        let text = String::from_utf8_lossy(&buf[..n]).to_string();
+        if text.starts_with("SIP/2.0 180 ") {
+            break text
+                .lines()
+                .find(|l| l.to_ascii_lowercase().starts_with("via:"))
+                .expect("a Via")
+                .to_string();
+        }
+    };
+    assert!(via.contains(&format!("rport={}", me.port())), "{via}");
+    assert!(via.contains("received=127.0.0.5"), "{via}");
+    let incoming = rings(&mut bob_events).await;
+    bob.hangup(incoming).await.expect("decline");
+    bob.shutdown().await.unwrap();
+}
