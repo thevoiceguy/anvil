@@ -496,3 +496,124 @@ async fn a_response_tells_the_caller_its_port_and_address() {
     bob.hangup(incoming).await.expect("decline");
     bob.shutdown().await.unwrap();
 }
+
+/// Every request Anvil sends names, in its Via, the address it can be
+/// answered at: its advertised one, never the `0.0.0.0` its socket is
+/// bound to (RFC 3261 §18.1.1). Bound to any interface, its in-dialog
+/// requests said `0.0.0.0` (#67).
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn every_request_s_via_names_where_to_answer() {
+    let (alice, mut alice_events) = start(account(
+        "sip:alice@127.0.0.1",
+        "sip:127.0.0.1:9",
+        "alice",
+        "",
+        "0.0.0.0",
+        3600,
+    ))
+    .await;
+    let advertised = alice.sip_address();
+    assert!(!advertised.ip().is_unspecified(), "{advertised}");
+    let callee = tokio::net::UdpSocket::bind("127.0.0.6:0").await.unwrap();
+    let callee_addr = callee.local_addr().unwrap();
+    let out = alice
+        .place_call(&format!("sip:dave@{callee_addr}"))
+        .await
+        .expect("the call is placed");
+
+    /// The next request `want` the callee is sent, and where from.
+    async fn next(callee: &tokio::net::UdpSocket, want: &str) -> (String, std::net::SocketAddr) {
+        let mut buf = vec![0u8; 16384];
+        loop {
+            let (n, from) = tokio::time::timeout(SOON, callee.recv_from(&mut buf))
+                .await
+                .unwrap_or_else(|_| panic!("no {want}"))
+                .unwrap();
+            let text = String::from_utf8_lossy(&buf[..n]).to_string();
+            if text.starts_with(&format!("{want} ")) {
+                return (text, from);
+            }
+        }
+    }
+    let sent_by = |text: &str| {
+        let via = text
+            .lines()
+            .find(|l| l.to_ascii_lowercase().starts_with("via:"))
+            .unwrap_or_else(|| panic!("a Via in\n{text}"))
+            .to_string();
+        via.split_whitespace()
+            .nth(2)
+            .unwrap_or("")
+            .split(';')
+            .next()
+            .unwrap()
+            .to_string()
+    };
+    // `code` to `request`, with the headers a response copies, a tag and
+    // a Contact, and `body` as SDP when given.
+    let answer = |request: &str, code: &str, body: &str| {
+        let mut out = format!("SIP/2.0 {code}\r\n");
+        for line in request.split("\r\n\r\n").next().unwrap().lines().skip(1) {
+            let name = line
+                .split(':')
+                .next()
+                .unwrap_or("")
+                .trim()
+                .to_ascii_lowercase();
+            match name.as_str() {
+                "via" | "v" | "from" | "f" | "call-id" | "i" | "cseq" => {
+                    out.push_str(line);
+                    out.push_str("\r\n");
+                }
+                "to" | "t" => {
+                    out.push_str(line);
+                    if !line.contains("tag=") {
+                        out.push_str(";tag=dave");
+                    }
+                    out.push_str("\r\n");
+                }
+                _ => {}
+            }
+        }
+        out.push_str(&format!("Contact: <sip:dave@{callee_addr}>\r\n"));
+        if !body.is_empty() {
+            out.push_str("Content-Type: application/sdp\r\n");
+        }
+        out.push_str(&format!("Content-Length: {}\r\n\r\n{body}", body.len()));
+        out
+    };
+
+    let (invite, from) = next(&callee, "INVITE").await;
+    assert_eq!(sent_by(&invite), advertised.to_string(), "the INVITE");
+    let sdp = "v=0\r\no=- 1 1 IN IP4 127.0.0.6\r\ns=-\r\nc=IN IP4 127.0.0.6\r\nt=0 0\r\n\
+               m=audio 40004 RTP/AVP 0\r\na=rtpmap:0 PCMU/8000\r\n";
+    callee
+        .send_to(answer(&invite, "200 OK", sdp).as_bytes(), from)
+        .await
+        .unwrap();
+    let (ack, _) = next(&callee, "ACK").await;
+    assert_eq!(sent_by(&ack), advertised.to_string(), "the ACK");
+    expect(&mut alice_events, SOON, |e| match e {
+        anvil_core::Event::CallEstablished { call, .. } if *call == out => Some(()),
+        _ => None,
+    })
+    .await
+    .expect("the call is up");
+
+    // The BYE waits for its answer, so it is sent beside the callee.
+    let alice = std::sync::Arc::new(alice);
+    let hangup = {
+        let alice = std::sync::Arc::clone(&alice);
+        tokio::spawn(async move { alice.hangup(out).await })
+    };
+    let (bye, from) = next(&callee, "BYE").await;
+    assert_eq!(sent_by(&bye), advertised.to_string(), "the BYE");
+    callee
+        .send_to(answer(&bye, "200 OK", "").as_bytes(), from)
+        .await
+        .unwrap();
+    hangup.await.unwrap().expect("the BYE is answered");
+    if let Ok(alice) = std::sync::Arc::try_unwrap(alice) {
+        alice.shutdown().await.unwrap();
+    }
+}

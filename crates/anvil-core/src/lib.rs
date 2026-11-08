@@ -219,6 +219,10 @@ impl Anvil {
             .dispatcher(Arc::clone(&dispatcher))
             .contact_advertised_addr(advertised.to_string())
             .map_err(|e| AnvilError::Config(format!("contact address: {e}")))?
+            // The Via's sent-by too: unset, it is the bound address, which
+            // is 0.0.0.0 on any interface (#67).
+            .via_advertised_addr(advertised.to_string())
+            .map_err(|e| AnvilError::Config(format!("via address: {e}")))?
             .credentials(cfg.account.username.clone(), cfg.account.password.clone());
 
         // Out-of-dialog requests (REGISTER, a new INVITE, …) go through
