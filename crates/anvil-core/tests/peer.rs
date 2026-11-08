@@ -367,3 +367,73 @@ async fn a_call_is_captured_with_its_sip_and_its_media_outside_srtp() {
     alice.shutdown().await.unwrap();
     bob.shutdown().await.unwrap();
 }
+
+/// The 180 and the 200 to one INVITE carry one To tag: they are one
+/// dialog. Anvil rang under a tag of its own and answered under the
+/// dialog's, and FCP's call manager kept the ringing dialog for good.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn the_ringing_and_the_answer_carry_one_to_tag() {
+    let (bob, mut bob_events) = start(account(
+        "sip:bob@127.0.0.1",
+        "sip:127.0.0.1:9",
+        "bob",
+        "",
+        "127.0.0.3",
+        3600,
+    ))
+    .await;
+    let caller = tokio::net::UdpSocket::bind("127.0.0.4:0").await.unwrap();
+    let me = caller.local_addr().unwrap();
+    let bob_addr = bob.sip_address();
+    let sdp = "v=0\r\no=- 1 1 IN IP4 127.0.0.4\r\ns=-\r\nc=IN IP4 127.0.0.4\r\nt=0 0\r\n\
+               m=audio 40000 RTP/AVP 0\r\na=rtpmap:0 PCMU/8000\r\n";
+    let invite = format!(
+        "INVITE sip:bob@{bob_addr} SIP/2.0\r\n\
+         Via: SIP/2.0/UDP {me};branch=z9hG4bK-one-tag;rport\r\n\
+         Max-Forwards: 70\r\n\
+         From: <sip:carol@127.0.0.4>;tag=carol\r\n\
+         To: <sip:bob@{bob_addr}>\r\n\
+         Call-ID: one-tag@127.0.0.4\r\n\
+         CSeq: 1 INVITE\r\n\
+         Contact: <sip:carol@{me}>\r\n\
+         Content-Type: application/sdp\r\n\
+         Content-Length: {}\r\n\r\n{sdp}",
+        sdp.len()
+    );
+    caller.send_to(invite.as_bytes(), bob_addr).await.unwrap();
+
+    // The tag of the first response with `code` that comes back.
+    async fn to_tag_of(caller: &tokio::net::UdpSocket, code: &str) -> String {
+        let mut buf = vec![0u8; 8192];
+        loop {
+            let (n, _) = tokio::time::timeout(SOON, caller.recv_from(&mut buf))
+                .await
+                .unwrap_or_else(|_| panic!("no {code}"))
+                .unwrap();
+            let text = String::from_utf8_lossy(&buf[..n]).to_string();
+            if !text.starts_with(&format!("SIP/2.0 {code} ")) {
+                continue;
+            }
+            let to = text
+                .lines()
+                .find(|l| l.to_ascii_lowercase().starts_with("to:"))
+                .unwrap_or_else(|| panic!("a To in\n{text}"));
+            return to
+                .split("tag=")
+                .nth(1)
+                .unwrap_or_else(|| panic!("a To tag in {to}"))
+                .split(';')
+                .next()
+                .unwrap()
+                .trim()
+                .to_string();
+        }
+    }
+
+    let ringing = to_tag_of(&caller, "180").await;
+    let incoming = rings(&mut bob_events).await;
+    bob.answer(incoming).await.expect("answer");
+    let answered = to_tag_of(&caller, "200").await;
+    assert_eq!(ringing, answered, "the 180 and the 200 are one dialog");
+    bob.shutdown().await.unwrap();
+}
