@@ -104,11 +104,21 @@ pub async fn start(account: AccountConfig) -> (Anvil, EventStream) {
 
 /// An Anvil with its own media settings (SRTP, codecs).
 pub async fn start_with(account: AccountConfig, media: MediaConfig) -> (Anvil, EventStream) {
+    start_with_video(account, media, None).await
+}
+
+/// An Anvil with its own media settings and, when given, a video host.
+pub async fn start_with_video(
+    account: AccountConfig,
+    media: MediaConfig,
+    video: Option<anvil_core::video::synthetic::SyntheticVideoHost>,
+) -> (Anvil, EventStream) {
     log();
     Anvil::start(AnvilConfig {
         account,
         media,
         audio: Box::new(Quiet),
+        video: video.map(|v| Box::new(v) as Box<dyn anvil_core::video::host::VideoHost>),
         brand: BrandConfig::default(),
     })
     .await

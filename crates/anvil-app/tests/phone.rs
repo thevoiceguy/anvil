@@ -98,6 +98,7 @@ async fn start(
             },
             media: MediaConfig::default(),
             audio,
+            video: None,
             brand: BrandConfig::default(),
         },
         fcp: None,

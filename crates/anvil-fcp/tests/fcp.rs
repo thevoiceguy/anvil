@@ -249,6 +249,7 @@ async fn softphone_with(
         account,
         media,
         audio,
+        video: None,
         brand: BrandConfig::default(),
     })
     .await
@@ -506,6 +507,7 @@ async fn anvil_takes_on_the_tenants_brand() {
                 account,
                 media: MediaConfig::default(),
                 audio: Box::new(Quiet),
+                video: None,
                 brand: anvil_fcp::brand_config(client, Some(cache)).unwrap(),
             })
             .await
@@ -1140,6 +1142,7 @@ async fn anvil_over_tls_is_called_encrypted() {
             hz: 660.0,
             heard: Arc::clone(&bob_heard),
         }),
+        video: None,
         brand: BrandConfig::default(),
     })
     .await

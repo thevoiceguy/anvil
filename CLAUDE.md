@@ -151,7 +151,8 @@ in response.
 ## Non-goals (for now)
 
 - No proxy / B2BUA / registrar mode. Anvil is a UAC/UAS endpoint only.
-- No video. Audio-only softphone.
+- Video is the core's (`anvil-core/src/video/`, `docs/ARCHITECTURE.md` §5a); the
+  platforms' camera and codec hosts come with FCP's softphone video phases A2–A3.
 - No conferencing within Anvil — forge-media has it, but composing it here is out of scope.
 - No in-app call recording until after Phase 2 (storage + legal review).
 - No Windows SIP TLS cert pinning until forge-media/siphon-rs standardize it.

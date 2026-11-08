@@ -51,6 +51,8 @@ pub(crate) struct AnvilUasHandler {
     pub captures: Arc<crate::capture::Captures>,
     /// The account's address, for a capture's header.
     pub account: String,
+    /// The platform's video, when it has any.
+    pub video: Option<Arc<dyn crate::video::host::VideoHost>>,
 }
 
 #[async_trait]
@@ -155,7 +157,7 @@ impl UasRequestHandler for AnvilUasHandler {
         // Initial INVITE only — no re-INVITE flows through here, so the
         // direction is always `sendrecv`. Hold handling lives in a separate
         // `dispatch_request` path.
-        let sdp_body = media::build_sdp(
+        let audio_answer = media::build_sdp(
             &[chosen],
             &self.local_user,
             &self.media_ip.to_string(),
@@ -163,6 +165,35 @@ impl UasRequestHandler for AnvilUasHandler {
             media::MediaDirection::Sendrecv,
             srtp_keys.as_ref().map(|k| &k.ours),
         );
+        // Its video: each section taken where the host can, declined where
+        // it cannot (or all of them, without a host). An answer has every
+        // section the offer had, in its order (RFC 3264 §6).
+        let mut video = match &self.video {
+            Some(host) => {
+                crate::video::CallVideo::answer(
+                    offered_body,
+                    Arc::clone(host),
+                    self.media_ip,
+                    self.srtp,
+                    rtp_socket.capture_slot(),
+                )
+                .await
+            }
+            None => None,
+        };
+        let declined;
+        let sections = match &mut video {
+            Some(v) => v.sdp_sections(),
+            None => {
+                declined = crate::video::sdp::sections(offered_body);
+                declined
+                    .iter()
+                    .map(crate::video::sdp::LocalSection::declined)
+                    .collect()
+            }
+        };
+        let offers_video = video.as_ref().is_some_and(|v| v.any_live());
+        let sdp_body = crate::video::sdp::with_sections(audio_answer.clone(), &sections);
 
         // Build the 200 OK now (including dialog) so `answer()` can send it
         // without re-deriving anything. Note: `accept_invite` inserts the
@@ -241,6 +272,7 @@ impl UasRequestHandler for AnvilUasHandler {
             dialog,
             sdp_answer_sent: false,
             rtp_socket: rtp_socket.clone(),
+            audio_answer,
         };
 
         self.calls.insert(
@@ -255,6 +287,7 @@ impl UasRequestHandler for AnvilUasHandler {
                 srtp: srtp_keys,
                 parked: None,
                 server_call: server_call.clone(),
+                video,
             },
         );
 
@@ -266,6 +299,7 @@ impl UasRequestHandler for AnvilUasHandler {
                 display_name: from_display,
                 server_call,
                 line,
+                video: offers_video,
             })
             .await;
 
@@ -434,8 +468,9 @@ pub(crate) async fn send_answer_and_start_media(
     audio: &Arc<dyn AudioHost>,
     events: &mpsc::Sender<Event>,
     codecs: &[Codec],
+    media_wanted: crate::video::CallMedia,
 ) -> Result<Codec, crate::error::AnvilError> {
-    let (server_handle, answer_response, dialog, rtp_socket, offer_body, srtp) = {
+    let (server_handle, mut answer_response, dialog, rtp_socket, offer_body, audio_answer, srtp) = {
         let mut entry = calls
             .get_mut(&call)
             .ok_or(crate::error::AnvilError::NoSuchCall(call))?;
@@ -454,9 +489,31 @@ pub(crate) async fn send_answer_and_start_media(
             pending.dialog.clone(),
             pending.rtp_socket.clone(),
             pending.request.body().to_vec(),
+            pending.audio_answer.clone(),
             entry.srtp.as_ref().and_then(|k| k.context()),
         )
     };
+
+    // Without the video offered: every section declined, and the answer
+    // made again to say so.
+    if !media_wanted.video {
+        let sections = calls.get_mut(&call).and_then(|mut e| {
+            let v = e.video.as_mut()?;
+            v.decline_all();
+            Some(v.sdp_sections())
+        });
+        if let Some(sections) = sections {
+            let body = crate::video::sdp::with_sections(audio_answer, &sections);
+            if answer_response
+                .set_body(bytes::Bytes::from(body.into_bytes()))
+                .is_err()
+            {
+                return Err(crate::error::AnvilError::Internal(
+                    "the answer's body could not be set".into(),
+                ));
+            }
+        }
+    }
 
     let remote = media::extract_remote_rtp_addr(&offer_body);
     // Codec was already chosen when on_invite built the answer SDP; cheaper
@@ -482,6 +539,12 @@ pub(crate) async fn send_answer_and_start_media(
         entry.pipeline = pipeline;
         entry.negotiated_codec = Some(codec);
         entry.inbound = None; // no longer pending
+        if let Some(v) = entry.video.as_mut() {
+            v.start(Some(crate::video::VideoEvents {
+                call,
+                tx: events.clone(),
+            }));
+        }
     }
 
     Ok(codec)
@@ -567,13 +630,30 @@ async fn handle_reinvite(
         }
     };
 
-    let sdp_body = media::build_sdp(
-        &[codec],
-        local_user,
-        &media_ip.to_string(),
-        rtp_port,
-        our_direction,
-        crypto.as_ref(),
+    // The video sections, each answered: one we carry follows the offer,
+    // one we do not is declined.
+    let sections = call_id
+        .and_then(|id| {
+            let mut entry = calls.get_mut(&id)?;
+            Some(match entry.video.as_mut() {
+                Some(v) => v.reoffered(request.body()),
+                None => crate::video::sdp::sections(request.body())
+                    .iter()
+                    .map(crate::video::sdp::LocalSection::declined)
+                    .collect(),
+            })
+        })
+        .unwrap_or_default();
+    let sdp_body = crate::video::sdp::with_sections(
+        media::build_sdp(
+            &[codec],
+            local_user,
+            &media_ip.to_string(),
+            rtp_port,
+            our_direction,
+            crypto.as_ref(),
+        ),
+        &sections,
     );
 
     // Build 200 OK with our SDP answer. Skip `UserAgentServer::accept_invite`

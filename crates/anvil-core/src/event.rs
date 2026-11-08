@@ -170,6 +170,11 @@ pub enum Event {
         /// Which of the account's lines the call is for (FCP's
         /// `X-FCP-Line`, a line's key: `own`, `extension:1005`, …).
         line: Option<String>,
+        /// The call offers video this softphone can carry: answered with
+        /// [`answer`](crate::Anvil::answer) it has video, with
+        /// [`answer_with_media`](crate::Anvil::answer_with_media) and
+        /// [`CallMedia::AUDIO`](crate::CallMedia::AUDIO) it does not.
+        video: bool,
     },
     CallRinging {
         call: CallId,
@@ -245,6 +250,22 @@ pub enum Event {
     /// it changes.
     PushChanged {
         state: PushState,
+    },
+    /// A video stream of `call` began: ours going out, or one coming in
+    /// (each incoming stream has its own sink, from
+    /// [`VideoHost::start_receive`](crate::video::host::VideoHost::start_receive)).
+    VideoStarted {
+        call: CallId,
+        stream: crate::video::host::StreamId,
+        direction: crate::video::VideoStreamDirection,
+        kind: crate::video::host::VideoKind,
+        codec: crate::video::host::VideoCodec,
+    },
+    /// A video stream of `call` ended (an incoming one fell silent, or the
+    /// section was dropped). The end of a call ends its streams unsaid.
+    VideoStopped {
+        call: CallId,
+        stream: crate::video::host::StreamId,
     },
     Error {
         call: Option<CallId>,

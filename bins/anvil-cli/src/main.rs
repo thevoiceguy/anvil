@@ -1146,6 +1146,7 @@ async fn phone_config(
         account,
         media,
         audio,
+        video: None,
         brand,
     };
 

@@ -10,10 +10,11 @@ extension points for platform integration.
 
 **Goals.** One Rust core that runs on Linux, macOS, Windows, iOS, and Android, exposing
 a stable API that platform-native UIs consume. SIP-based calling (REGISTER, INVITE,
-BYE, REFER, basic SUBSCRIBE/NOTIFY for presence). Audio-only, G.711 + G.722 + Opus.
-RFC 2833 DTMF. NAT-friendly over UDP, TCP, TLS.
+BYE, REFER, basic SUBSCRIBE/NOTIFY for presence). Audio in G.711 + G.722 + Opus;
+video in H.264 and VP8 (§5a), one-to-one and in FCP's video rooms. RFC 2833 DTMF.
+NAT-friendly over UDP, TCP, TLS.
 
-**Non-goals.** Video. In-app recording beyond basic RTP tap. Acting as a proxy, B2BUA,
+**Non-goals.** In-app recording beyond basic RTP tap. Acting as a proxy, B2BUA,
 or registrar — Anvil is a UAC/UAS endpoint. PSTN trunking. Kernel-offload RTP
 (forge-kernel is Linux-only and not portable).
 
@@ -259,6 +260,44 @@ Implementations:
 
 Keeping the host trait out of `anvil-core`'s own crate graph means the core compiles
 even when `cpal` is unavailable (Android targets without NDK setup, CI without audio).
+
+---
+
+## 5a. Video
+
+The design is FCP's `docs/SOFTPHONE_VIDEO.md` (§2.3–2.4); the code is
+`anvil-core/src/video/`. The core owns the network; a `VideoHost`, supplied by the
+platform as `AnvilConfig::video`, owns the camera, the codecs and the screen. They
+pass **coded frames** (Annex B H.264, raw VP8), because the codec that matters on
+each platform is its hardware one.
+
+```rust
+pub trait VideoHost: Send + Sync {
+    fn codecs(&self) -> Vec<VideoCodecCaps>;
+    fn cameras(&self) -> Vec<CameraInfo>;
+    fn start_send(&self, cfg: SendConfig) -> Result<Box<dyn VideoSource>>;
+    fn start_receive(&self, stream: StreamId, cfg: ReceiveConfig) -> Result<Box<dyn VideoSink>>;
+}
+```
+
+Three layers, so a second transport adds itself and rewrites nothing:
+
+- **`host`**: the traits above. A sink is one incoming stream, whoever sent it.
+- **`session`**: one source going out and any number of streams coming in, each
+  SSRC with its own assembler, NACK and PLI state and its own sink. It is given a
+  `StreamPlan` (codec, payload type, direction, the feedback the far end takes) and
+  a `MediaTransport`, and never reads SDP or opens a socket.
+- **SIP's transport**: `sdp` reads and writes the `m=video` sections; `SdesTransport`
+  is a socket pair and SDES keys per section; `CallVideo` turns a call's offer,
+  answer and re-INVITEs into plans. A WebRTC transport (ICE, DTLS-SRTP, BUNDLE) is
+  to sit beside it for rooms that forward each participant's stream.
+
+On a call: `place_call_with_media(target, CallMedia::VIDEO)` offers a camera section;
+`IncomingCall { video }` says an offer has video this softphone can take;
+`answer_with_media(call, CallMedia::AUDIO)` declines it (port 0). Hold stops video
+both ways (`inactive`) and resuming starts on a keyframe. `VideoStarted` and
+`VideoStopped` report each stream. `SyntheticVideoHost` sends numbered frames and
+records what arrives, so the core, the CLI and CI need no camera.
 
 ---
 
