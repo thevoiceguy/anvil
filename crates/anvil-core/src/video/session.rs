@@ -153,13 +153,22 @@ const TARGET_STEP: f64 = 0.05;
 /// SDES item type CNAME (RFC 3550 §6.5.1).
 const SDES_CNAME: u8 = 1;
 
-/// A direction a session can be told to take, shared with its tasks.
+/// A direction a session can be told to take, shared with its tasks,
+/// and whether incoming tiles stay while it does not receive (a hold
+/// freezes them; the far end's camera turned off removes them).
 #[derive(Debug)]
-pub(crate) struct DirectionCell(AtomicU8);
+pub(crate) struct DirectionCell(AtomicU8, std::sync::atomic::AtomicBool);
 
 impl DirectionCell {
     fn new(d: MediaDirection) -> Arc<Self> {
-        Arc::new(Self(AtomicU8::new(Self::code(d))))
+        Arc::new(Self(
+            AtomicU8::new(Self::code(d)),
+            std::sync::atomic::AtomicBool::new(true),
+        ))
+    }
+
+    fn keeps_tiles(&self) -> bool {
+        self.1.load(Ordering::Relaxed)
     }
 
     fn code(d: MediaDirection) -> u8 {
@@ -196,6 +205,8 @@ enum SendCommand {
     Keyframe,
     /// The far end's REMB, in bits a second.
     Target(u64),
+    /// The direction changed: open or close the camera.
+    Wake,
 }
 
 /// What a session's streams share with it besides the transport.
@@ -280,31 +291,19 @@ impl VideoSession {
             keyframe_requests: 0,
         }));
 
-        let send_task = plan.send.clone().and_then(|cfg| {
-            let source = match host.start_send(cfg.clone()) {
-                Ok(s) => s,
-                Err(e) => {
-                    tracing::warn!(%e, kind = ?plan.kind, "video source would not start; receiving only");
-                    return None;
-                }
-            };
-            let id = StreamId(links.streams.fetch_add(1, Ordering::Relaxed));
-            outgoing.lock().id = Some(id);
-            if let Some(ev) = &links.events {
-                ev.started(id, VideoStreamDirection::Outgoing, plan.kind, plan.codec);
-            }
-            Some(tokio::spawn(send_loop(SendLoop {
-                source,
+        let send_task = plan.send.clone().map(|cfg| {
+            tokio::spawn(send_loop(SendLoop {
+                host: Arc::clone(&host),
                 cfg,
+                kind: plan.kind,
                 pt: plan.pt,
                 seq,
                 transport: Arc::clone(&transport),
                 direction: Arc::clone(&direction),
                 commands: command_rx,
-                events: links.events.clone(),
-                id,
+                links: links.clone(),
                 outgoing: Arc::clone(&outgoing),
-            })))
+            }))
         });
 
         let recv_task = tokio::spawn(recv_loop(RecvLoop {
@@ -337,12 +336,21 @@ impl VideoSession {
         self.direction.get()
     }
 
-    /// Send, receive, both or neither from now on (hold, resume). A
-    /// source sending again starts on a keyframe.
+    /// Send, receive, both or neither from now on (hold, resume, the
+    /// camera on or off). The camera is open only while sending; opened
+    /// again, it starts on a keyframe.
+    #[cfg(test)]
     pub(crate) fn set_direction(&self, d: MediaDirection) {
-        let was = self.direction.set(d);
-        if d.sends() && !was.sends() {
-            let _ = self.commands.try_send(SendCommand::Keyframe);
+        self.set_direction_keeping(d, true);
+    }
+
+    /// As [`set_direction`](Self::set_direction); not receiving with
+    /// `keep_tiles` false (the far end stopped sending, not a hold), the
+    /// incoming streams end.
+    pub(crate) fn set_direction_keeping(&self, d: MediaDirection, keep_tiles: bool) {
+        self.direction.1.store(keep_tiles, Ordering::Relaxed);
+        if self.direction.set(d) != d {
+            let _ = self.commands.try_send(SendCommand::Wake);
         }
     }
 }
@@ -382,16 +390,24 @@ pub(crate) fn ladder(kbps: u32, max: Resolution, fps: u32) -> (Resolution, u32) 
 }
 
 struct SendLoop {
-    source: Box<dyn VideoSource>,
+    host: Arc<dyn VideoHost>,
     cfg: SendConfig,
+    kind: super::host::VideoKind,
     pt: u8,
     seq: u16,
     transport: Arc<dyn MediaTransport>,
     direction: Arc<DirectionCell>,
     commands: mpsc::Receiver<SendCommand>,
-    events: Option<VideoEvents>,
-    id: StreamId,
+    links: SessionLinks,
     outgoing: Arc<Mutex<Outgoing>>,
+}
+
+/// The next frame of `source`, or never when there is none.
+async fn next_frame(source: &mut Option<Box<dyn VideoSource>>) -> Option<(EncodingId, CodedFrame)> {
+    match source {
+        Some(s) => s.next_frame().await,
+        None => std::future::pending().await,
+    }
 }
 
 async fn send_loop(mut s: SendLoop) {
@@ -400,26 +416,80 @@ async fn send_loop(mut s: SendLoop) {
     let codec = s.cfg.codec.forge();
     let ours = s.cfg.encodings.first().copied().unwrap_or(EncodingId(0));
     let mut target = s.cfg.kbps;
+    let mut target_changed = false;
     let mut last_forced: Option<Instant> = None;
     let mut resent: HashMap<u16, Instant> = HashMap::new();
     let mut budget = ResendBudget::new();
     let mut keyframe_due = false;
     let ssrc = s.outgoing.lock().ssrc;
+    // The camera is open only while the session sends: not before the
+    // user agreed to send (an upgrade taken receive-only), not on hold.
+    let mut source: Option<Box<dyn VideoSource>> = None;
+    // It would not open: not again until the session stops sending.
+    let mut refused = false;
+    let mut id: Option<StreamId> = None;
     loop {
-        // A keyframe asked for, once the last one made is old enough.
-        if keyframe_due && last_forced.is_none_or(|t| t.elapsed() >= KEYFRAME_MIN_INTERVAL) {
-            keyframe_due = false;
-            last_forced = Some(Instant::now());
-            s.source.request_keyframe();
+        let sends = s.direction.get().sends();
+        if !sends {
+            if source.take().is_some() {
+                tracing::debug!(kind = ?s.kind, "video: the camera closes (not sending)");
+            }
+            refused = false;
+        } else if source.is_none() && !refused {
+            match s.host.start_send(s.cfg.clone()) {
+                Ok(src) => {
+                    // A new source starts on a keyframe, as encoders do.
+                    if target != s.cfg.kbps {
+                        let (max, fps) = ladder(target, s.cfg.max, s.cfg.fps);
+                        src.set_target(target, max, fps);
+                    }
+                    source = Some(src);
+                    keyframe_due = false;
+                    target_changed = false;
+                    if id.is_none() {
+                        let new = StreamId(s.links.streams.fetch_add(1, Ordering::Relaxed));
+                        id = Some(new);
+                        s.outgoing.lock().id = Some(new);
+                        if let Some(ev) = &s.links.events {
+                            ev.started(new, VideoStreamDirection::Outgoing, s.kind, s.cfg.codec);
+                        }
+                    }
+                }
+                Err(e) => {
+                    tracing::warn!(%e, kind = ?s.kind, "video source would not start; receiving only");
+                    refused = true;
+                }
+            }
+        }
+        if let Some(src) = &source {
+            // A keyframe asked for, once the last one made is old enough.
+            if keyframe_due && last_forced.is_none_or(|t| t.elapsed() >= KEYFRAME_MIN_INTERVAL) {
+                keyframe_due = false;
+                last_forced = Some(Instant::now());
+                src.request_keyframe();
+            }
+            if target_changed {
+                target_changed = false;
+                let (max, fps) = ladder(target, s.cfg.max, s.cfg.fps);
+                tracing::debug!(
+                    kbps = target,
+                    ?max,
+                    fps,
+                    "video: the far end's estimate moved the target"
+                );
+                src.set_target(target, max, fps);
+            }
         }
         tokio::select! {
             biased;
-            Some(cmd) = s.commands.recv() => match cmd {
-                SendCommand::Keyframe => {
+            cmd = s.commands.recv() => match cmd {
+                None => break,
+                Some(SendCommand::Wake) => {}
+                Some(SendCommand::Keyframe) => {
                     s.outgoing.lock().keyframe_requests += 1;
                     keyframe_due = true;
                 }
-                SendCommand::Resend(seqs) => {
+                Some(SendCommand::Resend(seqs)) => {
                     let rtt = {
                         let mut o = s.outgoing.lock();
                         o.nacks += seqs.len() as u32;
@@ -442,7 +512,7 @@ async fn send_loop(mut s: SendLoop) {
                         s.transport.send_rtp(packet.clone()).await;
                     }
                 }
-                SendCommand::Target(bps) => {
+                Some(SendCommand::Target(bps)) => {
                     // What the far end allows, within what we were set up
                     // to send.
                     let kbps = ((bps / 1000) as u32).clamp((MIN_BPS / 1000) as u32, s.cfg.kbps.max(1));
@@ -450,15 +520,16 @@ async fn send_loop(mut s: SendLoop) {
                         || (kbps == s.cfg.kbps && target != kbps)
                     {
                         target = kbps;
-                        let (max, fps) = ladder(kbps, s.cfg.max, s.cfg.fps);
-                        tracing::debug!(kbps, ?max, fps, "video: the far end's estimate moved the target");
-                        s.source.set_target(kbps, max, fps);
+                        target_changed = true;
                         s.outgoing.lock().target_kbps = kbps;
                     }
                 }
             },
-            next = s.source.next_frame() => {
-                let Some((encoding, frame)) = next else { break };
+            next = next_frame(&mut source) => {
+                let Some((encoding, frame)) = next else {
+                    tracing::info!(kind = ?s.kind, "video: the source ended");
+                    break;
+                };
                 // One encoding is sent today; the others a host may make
                 // for simulcast are for a transport that can carry them.
                 if encoding != ours || !s.direction.get().sends() {
@@ -500,8 +571,9 @@ async fn send_loop(mut s: SendLoop) {
             }
         }
     }
-    if let Some(ev) = &s.events {
-        ev.stopped(s.id);
+    drop(source);
+    if let (Some(ev), Some(id)) = (&s.links.events, id) {
+        ev.stopped(id);
     }
 }
 
@@ -1005,18 +1077,22 @@ impl RecvLoop {
     /// Streams fallen silent have ended (a transfer brought another SSRC,
     /// or the far end stopped sending): their tiles go.
     fn sweep(&mut self) {
-        // Silence while not receiving is ours, not the stream ending.
-        if !self.direction.get().receives() {
+        let now = Instant::now();
+        let receiving = self.direction.get().receives();
+        // Silence while held is ours, not the stream ending: its tile
+        // freezes.
+        if !receiving && self.direction.keeps_tiles() {
             for s in self.incoming.values_mut() {
-                s.last_packet = Instant::now();
+                s.last_packet = now;
             }
             return;
         }
-        let now = Instant::now();
         let gone: Vec<u32> = self
             .incoming
             .iter()
-            .filter(|(_, s)| now.saturating_duration_since(s.last_packet) >= STREAM_IDLE)
+            .filter(|(_, s)| {
+                !receiving || now.saturating_duration_since(s.last_packet) >= STREAM_IDLE
+            })
             .map(|(ssrc, _)| *ssrc)
             .collect();
         for ssrc in gone {
@@ -1298,7 +1374,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn on_hold_nothing_is_sent_and_resuming_starts_on_a_keyframe() {
+    async fn on_hold_nothing_is_sent_the_camera_closes_and_resuming_starts_on_a_keyframe() {
         let a_host = SyntheticVideoHost::new(&[VideoCodec::H264]).with_fps(50);
         let b_host = SyntheticVideoHost::new(&[VideoCodec::H264]).with_fps(50);
         let (a, b, a_out, _) = joined(VideoCodec::H264, ALL, a_host.clone(), b_host.clone());
@@ -1318,7 +1394,8 @@ mod tests {
         tokio::time::sleep(Duration::from_millis(300)).await;
         assert_eq!(a_out.rtp_log.lock().len(), sent, "held: nothing sent");
 
-        let requests = a_host.record().sent[0].keyframe_requests;
+        // The camera closed with the hold.
+        assert!(a_host.record().sent[0].stopped, "held: the camera is off");
         let shown = b_host
             .record()
             .received
@@ -1329,10 +1406,7 @@ mod tests {
             .len();
         a.set_direction(MediaDirection::Sendrecv);
         b.set_direction(MediaDirection::Sendrecv);
-        until("a keyframe on resuming", || {
-            a_host.record().sent[0].keyframe_requests > requests
-        })
-        .await;
+        until("the camera opens again", || a_host.record().sent.len() == 2).await;
         until("frames again", || {
             b_host
                 .record()

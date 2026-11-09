@@ -319,8 +319,20 @@ Within a session:
 
 On a call: `place_call_with_media(target, CallMedia::VIDEO)` offers a camera section;
 `IncomingCall { video }` says an offer has video this softphone can take;
-`answer_with_media(call, CallMedia::AUDIO)` declines it (port 0). Hold stops video
-both ways (`inactive`) and resuming starts on a keyframe. `VideoStarted`,
+`answer_with_media(call, CallMedia::AUDIO)` declines it (port 0).
+`set_video(call, on)` is a re-INVITE: on adds a camera section to an audio call (or
+takes a stopped one up again, or starts sending on one we only receive); off makes
+it receive-only while the far end still sends, and stops it (port 0) when neither
+does. Video the far end adds mid-call is taken **receive-only**, with
+`VideoRequested`: the camera opens only when the user says (`set_video`, or
+answering with video), and a session opens it only while it sends, so hold closes
+it. Hold stops video both ways (`inactive`, the tiles frozen) and resuming starts
+on a keyframe; the far end's camera turned off (`recvonly`) removes its tile. A
+re-INVITE that crosses an offer of ours is answered 491 (RFC 3261 §14.2), and
+`set_video` tries again after 2.1–4 s when its own is; a refused offer leaves the
+call as it was. The C interface has `anvil_place_call_media`, `anvil_answer_media`,
+`anvil_set_video` and the `Video*` events; `anvil-cli --video synthetic` calls with
+the synthetic host and prints what arrived. `VideoStarted`,
 `VideoStats` (each second: rate, frame rate, loss, NACKs and keyframe requests, the
 target or the estimate, jitter, playout delay, the offset from the audio, the round
 trip) and `VideoStopped` report each stream. `SyntheticVideoHost` sends numbered frames and

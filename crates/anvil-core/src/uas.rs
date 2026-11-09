@@ -75,6 +75,11 @@ impl UasRequestHandler for AnvilUasHandler {
                 &self.calls,
                 &self.local_user,
                 self.media_ip,
+                ReinviteVideo {
+                    host: self.video.clone(),
+                    srtp: self.srtp,
+                    events: self.events.clone(),
+                },
             )
             .await;
             return Ok(());
@@ -288,6 +293,7 @@ impl UasRequestHandler for AnvilUasHandler {
                 parked: None,
                 server_call: server_call.clone(),
                 video,
+                held: false,
             },
         );
 
@@ -584,6 +590,13 @@ pub(crate) async fn reject_inbound(
     Ok(())
 }
 
+/// What a re-INVITE's video sections are answered with.
+struct ReinviteVideo {
+    host: Option<Arc<dyn crate::video::host::VideoHost>>,
+    srtp: crate::config::SrtpMode,
+    events: mpsc::Sender<Event>,
+}
+
 /// Handle an in-dialog re-INVITE: direction-only SDP change (hold / resume).
 /// Mirrors the peer's direction onto our pipeline's hold state, answers
 /// with the mirrored direction at the same RTP port, and 200 OKs.
@@ -594,6 +607,7 @@ async fn handle_reinvite(
     calls: &DashMap<CallId, CallEntry>,
     local_user: &str,
     media_ip: std::net::IpAddr,
+    video: ReinviteVideo,
 ) {
     let peer_direction = media::extract_direction(request.body());
     let our_direction = peer_direction.mirror();
@@ -635,20 +649,68 @@ async fn handle_reinvite(
         }
     };
 
+    // An offer of ours not yet answered: the offers cross (glare). 491,
+    // and the far end tries again (RFC 3261 §14.2). Waiting here would
+    // hold up the answer to ours.
+    if call_id.is_some_and(|id| {
+        calls
+            .get(&id)
+            .is_some_and(|e| e.video.as_ref().is_some_and(|v| v.offer_pending()))
+    }) {
+        tracing::info!("re-INVITE crosses an offer of ours; 491");
+        let resp = UserAgentServer::create_response(request, 491, "Request Pending");
+        handle.send_final(resp).await;
+        return;
+    }
+
     // The video sections, each answered: one we carry follows the offer,
-    // one we do not is declined.
-    let sections = call_id
-        .and_then(|id| {
-            let mut entry = calls.get_mut(&id)?;
-            Some(match entry.video.as_mut() {
-                Some(v) => v.reoffered(request.body()),
-                None => crate::video::sdp::sections(request.body())
-                    .iter()
-                    .map(crate::video::sdp::LocalSection::declined)
-                    .collect(),
-            })
-        })
-        .unwrap_or_default();
+    // one it adds (an audio call gaining video) is taken receive-only, one
+    // we cannot take is declined. The call's video comes out of the map
+    // while sockets are bound for new sections.
+    let offered = crate::video::sdp::sections(request.body());
+    let (mut call_video, capture, audio) = match call_id.and_then(|id| calls.get_mut(&id)) {
+        Some(mut e) => {
+            let audio = e
+                .pipeline
+                .as_ref()
+                .map(|p| Arc::clone(&p.rtcp) as Arc<dyn crate::video::playout::AudioClock>);
+            (e.video.take(), e.rtp_socket.capture_slot(), audio)
+        }
+        None => (None, crate::capture::CaptureSlot::default(), None),
+    };
+    if call_video.is_none() && !offered.is_empty() {
+        if let Some(host) = &video.host {
+            let mut v = crate::video::CallVideo::empty(Arc::clone(host), capture);
+            v.set_audio(audio);
+            call_video = Some(v);
+        }
+    }
+    let (sections, asked) = match call_video.as_mut() {
+        Some(v) => {
+            v.reoffered(
+                request.body(),
+                crate::video::SectionSetup {
+                    media_ip,
+                    srtp: video.srtp,
+                },
+                call_id.map(|call| crate::video::VideoEvents {
+                    call,
+                    tx: video.events.clone(),
+                }),
+            )
+            .await
+        }
+        None => (
+            offered
+                .iter()
+                .map(crate::video::sdp::LocalSection::declined)
+                .collect(),
+            false,
+        ),
+    };
+    if let Some(mut e) = call_id.and_then(|id| calls.get_mut(&id)) {
+        e.video = call_video;
+    }
     let sdp_body = crate::video::sdp::with_sections(
         media::build_sdp(
             &[codec],
@@ -686,6 +748,9 @@ async fn handle_reinvite(
             ?our_direction,
             "re-INVITE applied hold state"
         );
+    }
+    if let (true, Some(call)) = (asked, call_id) {
+        let _ = video.events.send(Event::VideoRequested { call }).await;
     }
 }
 

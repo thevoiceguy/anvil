@@ -1,7 +1,8 @@
 //! Anvil against FCP, the server it is built for: users made through FCP's
 //! admin API register with digest, call each other through FCP's B2BUA both
 //! ways, hang up from either side, decline, stay registered past the expiry
-//! FCP granted, and meet FCP's minimum expiry.
+//! FCP granted, and meet FCP's minimum expiry; and carry video through
+//! FCP's relay (offered, held, a camera off, an audio call gaining it).
 //!
 //! Skipped unless these name a running FCP (an admin and a call manager):
 //!
@@ -171,6 +172,30 @@ impl Fcp {
         account.outbound_proxy = Some(format!("sip:{}", self.sip));
         change(&mut account);
         start(account).await
+    }
+
+    /// [`anvil`](Self::anvil) with a synthetic video host. Video phones
+    /// are bound to 127.0.0.1: siphon-rs's TCP connections leave from the
+    /// address the route picks (127.0.0.1 on loopback), and FCP, seeing
+    /// signaling from one address and media from another, takes the phone
+    /// to be behind NAT and accepts its media only from where its
+    /// signaling came. A phone on a network sends both from one address.
+    async fn video_anvil(
+        &self,
+        user: &User,
+        ip: &str,
+        host: anvil_core::video::synthetic::SyntheticVideoHost,
+    ) -> (anvil_core::Anvil, anvil_core::EventStream) {
+        let mut account = account(
+            &format!("sip:{}@{}", user.username, self.domain),
+            &format!("sip:{}", self.domain),
+            &user.username,
+            &user.password,
+            ip,
+            3600,
+        );
+        account.outbound_proxy = Some(format!("sip:{}", self.sip));
+        start_with_video(account, Default::default(), Some(host)).await
     }
 
     /// Where to call `user`: their name in the tenant's domain.
@@ -499,6 +524,172 @@ async fn each_phone_reads_the_others_reports_through_fcp() {
             tokio::time::sleep(Duration::from_millis(250)).await;
         }
     }
+
+    alice.hangup(out).await.expect("BYE");
+    hung_up_by_the_other_side(&mut bob_events, incoming).await;
+    alice.unregister().await.expect("unregisters");
+    bob.unregister().await.expect("unregisters");
+    alice.shutdown().await.unwrap();
+    bob.shutdown().await.unwrap();
+    fcp.remove(&alice_user).await;
+    fcp.remove(&bob_user).await;
+}
+
+/// The one live stream `host` receives, once it has shown more than
+/// `frames`.
+async fn shows(
+    host: &anvil_core::video::synthetic::SyntheticVideoHost,
+    frames: usize,
+) -> anvil_core::video::synthetic::ReceivedStream {
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(10);
+    loop {
+        let record = host.record();
+        let live: Vec<_> = record.received.values().filter(|s| !s.stopped).collect();
+        if let [s] = live.as_slice() {
+            if s.frames.len() > frames {
+                return (*s).clone();
+            }
+        }
+        assert!(
+            tokio::time::Instant::now() < deadline,
+            "no {frames} frames through FCP: {record:?}"
+        );
+        tokio::time::sleep(Duration::from_millis(50)).await;
+    }
+}
+
+fn from_a_keyframe_in_order(s: &anvil_core::video::synthetic::ReceivedStream) {
+    let n = s.numbers();
+    assert!(s.frames[0].1, "the picture starts on a keyframe");
+    assert!(n.windows(2).all(|w| w[1] == w[0] + 1), "in order: {n:?}");
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_video_call_goes_through_fcp_both_ways() {
+    use anvil_core::video::synthetic::SyntheticVideoHost;
+    use anvil_core::video::VideoStreamDirection;
+    use anvil_core::CallMedia;
+
+    let fcp = fcp_or_skip!();
+    let (alice_user, bob_user) = (fcp.user("alice").await, fcp.user("bob").await);
+    let a_host = SyntheticVideoHost::default().with_fps(30);
+    let b_host = SyntheticVideoHost::default().with_fps(30);
+    let (alice, mut alice_events) = fcp
+        .video_anvil(&alice_user, "127.0.0.1", a_host.clone())
+        .await;
+    let (bob, mut bob_events) = fcp
+        .video_anvil(&bob_user, "127.0.0.1", b_host.clone())
+        .await;
+    register(&alice, &mut alice_events).await;
+    register(&bob, &mut bob_events).await;
+
+    let out = alice
+        .place_call_with_media(&fcp.uri(&bob_user), CallMedia::VIDEO)
+        .await
+        .expect("the call is placed");
+    let (incoming, offered) = expect(&mut bob_events, SOON, |e| match e {
+        Event::IncomingCall { call, video, .. } => Some((*call, *video)),
+        _ => None,
+    })
+    .await
+    .expect("bob rings");
+    assert!(offered, "FCP carries the video offer to bob");
+    bob.answer_with_media(incoming, CallMedia::VIDEO)
+        .await
+        .expect("bob answers");
+
+    // Each camera reaches the other through FCP's relay.
+    from_a_keyframe_in_order(&shows(&b_host, 60).await);
+    from_a_keyframe_in_order(&shows(&a_host, 60).await);
+
+    // RTCP passes through: Alice's reports come back with a round trip.
+    let sent = expect(&mut alice_events, Duration::from_secs(10), |e| match e {
+        Event::VideoStats { call, stats, .. }
+            if *call == out
+                && stats.direction == VideoStreamDirection::Outgoing
+                && stats.rtt_ms.is_some() =>
+        {
+            Some(*stats)
+        }
+        _ => None,
+    })
+    .await
+    .expect("alice's camera hears of its stream through FCP");
+    assert!(sent.rtt_ms.unwrap() < 500.0, "{sent:?}");
+
+    // Held through FCP and back: the picture returns on a keyframe.
+    alice.hold(out, true).await.expect("hold");
+    tokio::time::sleep(Duration::from_millis(500)).await;
+    let shown = shows(&b_host, 0).await.frames.len();
+    alice.hold(out, false).await.expect("resume");
+    let s = shows(&b_host, shown + 10).await;
+    assert!(s.frames[shown].1, "back on a keyframe");
+
+    // Alice's camera off: Bob's tile of her goes, she still sees him.
+    alice.set_video(out, false).await.expect("camera off");
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(5);
+    while !b_host.record().received.values().all(|s| s.stopped) {
+        assert!(
+            tokio::time::Instant::now() < deadline,
+            "bob's tile of alice stays"
+        );
+        tokio::time::sleep(Duration::from_millis(50)).await;
+    }
+    let seen = shows(&a_host, 0).await.frames.len();
+    shows(&a_host, seen + 20).await;
+
+    alice.hangup(out).await.expect("BYE");
+    hung_up_by_the_other_side(&mut bob_events, incoming).await;
+    alice.unregister().await.expect("unregisters");
+    bob.unregister().await.expect("unregisters");
+    alice.shutdown().await.unwrap();
+    bob.shutdown().await.unwrap();
+    fcp.remove(&alice_user).await;
+    fcp.remove(&bob_user).await;
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn an_audio_call_through_fcp_gains_video() {
+    use anvil_core::video::synthetic::SyntheticVideoHost;
+
+    let fcp = fcp_or_skip!();
+    let (alice_user, bob_user) = (fcp.user("alice").await, fcp.user("bob").await);
+    let a_host = SyntheticVideoHost::default().with_fps(30);
+    let b_host = SyntheticVideoHost::default().with_fps(30);
+    let (alice, mut alice_events) = fcp
+        .video_anvil(&alice_user, "127.0.0.1", a_host.clone())
+        .await;
+    let (bob, mut bob_events) = fcp
+        .video_anvil(&bob_user, "127.0.0.1", b_host.clone())
+        .await;
+    register(&alice, &mut alice_events).await;
+    register(&bob, &mut bob_events).await;
+    let (out, incoming) = answered_call(
+        &alice,
+        &mut alice_events,
+        &bob,
+        &mut bob_events,
+        &fcp.uri(&bob_user),
+    )
+    .await;
+
+    alice.set_video(out, true).await.expect("alice's camera on");
+    expect(&mut bob_events, SOON, |e| match e {
+        Event::VideoRequested { call } if *call == incoming => Some(()),
+        _ => None,
+    })
+    .await
+    .expect("bob is asked through FCP");
+    from_a_keyframe_in_order(&shows(&b_host, 30).await);
+    assert!(
+        b_host.record().sent.is_empty(),
+        "bob's camera is his to open"
+    );
+
+    bob.set_video(incoming, true)
+        .await
+        .expect("bob's camera on");
+    from_a_keyframe_in_order(&shows(&a_host, 30).await);
 
     alice.hangup(out).await.expect("BYE");
     hung_up_by_the_other_side(&mut bob_events, incoming).await;

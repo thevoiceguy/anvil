@@ -291,6 +291,95 @@ pub unsafe extern "C" fn anvil_place_call(
     })
 }
 
+/// Place a call as `anvil_place_call` does, offering video when `video`
+/// is non-zero and this softphone has a video host (else it is an audio
+/// call).
+///
+/// # Safety
+/// As `anvil_place_call`.
+#[no_mangle]
+pub unsafe extern "C" fn anvil_place_call_media(
+    handle: *mut AnvilHandle,
+    target: *const c_char,
+    video: u8,
+    out_call_id: *mut u64,
+) -> AnvilStatus {
+    catch_ffi(|| unsafe {
+        let Some(handle) = handle.as_mut() else {
+            return AnvilStatus::NullArgument;
+        };
+        if out_call_id.is_null() {
+            return AnvilStatus::NullArgument;
+        }
+        let target = match cstr_to_string(target) {
+            Ok(s) => s,
+            Err(s) => return s,
+        };
+        let media = anvil_core::CallMedia { video: video != 0 };
+        match handle.block_on(handle.anvil().place_call_with_media(&target, media)) {
+            Ok(call) => {
+                *out_call_id = call.0;
+                AnvilStatus::Ok
+            }
+            Err(e) => map_anvil_err(&e),
+        }
+    })
+}
+
+/// Answer an incoming call, taking the video it offers when `video` is
+/// non-zero, declining it (an audio call) when zero.
+///
+/// # Safety
+/// As `anvil_answer`.
+#[no_mangle]
+pub unsafe extern "C" fn anvil_answer_media(
+    handle: *mut AnvilHandle,
+    call_id: u64,
+    video: u8,
+) -> AnvilStatus {
+    catch_ffi(|| unsafe {
+        let Some(handle) = handle.as_mut() else {
+            return AnvilStatus::NullArgument;
+        };
+        let media = anvil_core::CallMedia { video: video != 0 };
+        match handle.block_on(
+            handle
+                .anvil()
+                .answer_with_media(anvil_core::CallId(call_id), media),
+        ) {
+            Ok(()) => AnvilStatus::Ok,
+            Err(e) => map_anvil_err(&e),
+        }
+    })
+}
+
+/// Turn our camera on (`on != 0`) or off in a call: a re-INVITE. On adds
+/// video to an audio call, or sends to one the far end added
+/// (`VideoRequested`). `Config` when this softphone has no video.
+///
+/// # Safety
+/// `handle` must be valid; `call_id` must refer to an established call.
+#[no_mangle]
+pub unsafe extern "C" fn anvil_set_video(
+    handle: *mut AnvilHandle,
+    call_id: u64,
+    on: u8,
+) -> AnvilStatus {
+    catch_ffi(|| unsafe {
+        let Some(handle) = handle.as_mut() else {
+            return AnvilStatus::NullArgument;
+        };
+        match handle.block_on(
+            handle
+                .anvil()
+                .set_video(anvil_core::CallId(call_id), on != 0),
+        ) {
+            Ok(()) => AnvilStatus::Ok,
+            Err(e) => map_anvil_err(&e),
+        }
+    })
+}
+
 /// Answer an incoming call signalled by `IncomingCall`.
 ///
 /// # Safety

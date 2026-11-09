@@ -66,8 +66,11 @@ pub(crate) struct CallEntry {
     /// INVITE of an incoming call or the 200 OK of one we placed: what
     /// the server's API names it by.
     pub server_call: Option<String>,
-    /// The call's video over SIP, when it was offered or accepted.
+    /// The call's video over SIP, when it was offered or accepted (or
+    /// later added).
     pub video: Option<crate::video::CallVideo>,
+    /// We hold the call (our last offer said so).
+    pub held: bool,
 }
 
 /// A call's SRTP keys.

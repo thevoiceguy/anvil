@@ -261,6 +261,13 @@ pub enum Event {
         kind: crate::video::host::VideoKind,
         codec: crate::video::host::VideoCodec,
     },
+    /// The far end added video to `call` (a re-INVITE) and would see our
+    /// camera. Its picture is taken and shown (`VideoStarted`); ours is
+    /// not sent until the app calls
+    /// [`set_video(call, true)`](crate::Anvil::set_video).
+    VideoRequested {
+        call: CallId,
+    },
     /// A video stream's last second, each second while it runs.
     VideoStats {
         call: CallId,

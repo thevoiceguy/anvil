@@ -858,6 +858,7 @@ impl Anvil {
                 parked: None,
                 server_call: None,
                 video: call_video,
+                held: false,
             },
         );
 
@@ -1033,6 +1034,165 @@ impl Anvil {
             .map_err(|_| AnvilError::Internal("DTMF channel closed".into()))
     }
 
+    /// Turn our camera on or off in a call (FCP's
+    /// `docs/SOFTPHONE_VIDEO.md` §2.3): a re-INVITE. On, an audio call
+    /// gains a camera section, a stopped one is taken up again, or one we
+    /// only receive (an upgrade the far end made, `VideoRequested`) starts
+    /// sending. Off, the camera section stops (port 0) both ways. A
+    /// refused re-INVITE leaves the call as it was.
+    pub async fn set_video(&self, call: CallId, on: bool) -> Result<(), AnvilError> {
+        // Our re-INVITE crossing one of theirs is refused with 491: again
+        // after a random 2.1–4 s (RFC 3261 §14.1), a few times.
+        for attempt in 0..3 {
+            match self.set_video_once(call, on).await {
+                Err(AnvilError::Transport(e))
+                    if e.starts_with("re-INVITE rejected: 491") && attempt < 2 =>
+                {
+                    let wait: u64 = rand::Rng::gen_range(&mut rand::thread_rng(), 2100..4000);
+                    tracing::info!(?call, wait, "re-INVITE crossed theirs; trying again");
+                    tokio::time::sleep(std::time::Duration::from_millis(wait)).await;
+                }
+                done => return done,
+            }
+        }
+        unreachable!("the last attempt returns")
+    }
+
+    async fn set_video_once(&self, call: CallId, on: bool) -> Result<(), AnvilError> {
+        let host = self
+            .video
+            .as_ref()
+            .filter(|h| !video::host::usable_codecs(h.as_ref()).is_empty())
+            .cloned();
+        if on && host.is_none() {
+            return Err(AnvilError::Config("this softphone has no video".into()));
+        }
+        // What the offer needs, and the call's video out of the map while
+        // its new sockets are bound.
+        let (mut call_video, codec, rtp_port, crypto, held, secure, audio) = {
+            let mut entry = self
+                .calls
+                .get_mut(&call)
+                .ok_or(AnvilError::NoSuchCall(call))?;
+            let codec = entry
+                .negotiated_codec
+                .ok_or_else(|| AnvilError::Internal(format!("{call:?} is not answered")))?;
+            let rtp_port = entry
+                .rtp_socket
+                .local_addr()
+                .map_err(|e| AnvilError::Media(format!("rtp local_addr: {e}")))?
+                .port();
+            let audio = entry
+                .pipeline
+                .as_ref()
+                .map(|p| Arc::clone(&p.rtcp) as Arc<dyn video::playout::AudioClock>);
+            let capture = entry.rtp_socket.capture_slot();
+            let v = entry.video.take().or_else(|| {
+                host.as_ref()
+                    .map(|h| video::CallVideo::empty(Arc::clone(h), capture))
+            });
+            (
+                v,
+                codec,
+                rtp_port,
+                entry.srtp.as_ref().map(|k| k.ours.clone()),
+                entry.held,
+                entry.srtp.is_some(),
+                audio,
+            )
+        };
+        let Some(v) = call_video.as_mut() else {
+            // Off, on a call that never had video: nothing to do.
+            return Ok(());
+        };
+        if v.camera_on() == on {
+            if let Some(mut entry) = self.calls.get_mut(&call) {
+                entry.video = call_video;
+            }
+            return Ok(());
+        }
+        v.set_audio(audio);
+        // Video as secure as the call's audio.
+        let setup = video::SectionSetup {
+            media_ip: self.media_ip,
+            srtp: if secure {
+                config::SrtpMode::Required
+            } else {
+                config::SrtpMode::Off
+            },
+        };
+        let sections = v.offer_camera(on, setup).await;
+        if let Some(mut entry) = self.calls.get_mut(&call) {
+            entry.video = call_video;
+        }
+
+        let sdp_body = video::sdp::with_sections(
+            media::build_sdp(
+                &[codec],
+                &self.local_user,
+                &self.media_ip.to_string(),
+                rtp_port,
+                if held {
+                    media::MediaDirection::Sendonly
+                } else {
+                    media::MediaDirection::Sendrecv
+                },
+                crypto.as_ref(),
+            ),
+            &sections,
+        );
+        let refused = |calls: &DashMap<CallId, CallEntry>| {
+            if let Some(mut entry) = calls.get_mut(&call) {
+                if let Some(v) = entry.video.as_mut() {
+                    v.offer_refused();
+                }
+            }
+        };
+        let mut dialog = match self.dialog_of(call).await {
+            Ok(d) => d,
+            Err(e) => {
+                refused(&self.calls);
+                return Err(e);
+            }
+        };
+        let sent = self.uac.reinvite(&mut dialog, Some(&sdp_body)).await;
+        self.store_dialog(call, dialog).await;
+        let handle = match sent {
+            Ok(h) => h,
+            Err(e) => {
+                refused(&self.calls);
+                return Err(AnvilError::Transport(format!("re-INVITE: {e}")));
+            }
+        };
+        let resp = match handle.await_final().await {
+            Ok(r) => r,
+            Err(e) => {
+                refused(&self.calls);
+                return Err(AnvilError::Transport(format!("re-INVITE await: {e}")));
+            }
+        };
+        if !(200..300).contains(&resp.code()) {
+            refused(&self.calls);
+            return Err(AnvilError::Transport(format!(
+                "re-INVITE rejected: {} {}",
+                resp.code(),
+                resp.reason()
+            )));
+        }
+        if let Some(mut entry) = self.calls.get_mut(&call) {
+            if let Some(v) = entry.video.as_mut() {
+                v.answered(
+                    resp.body(),
+                    Some(video::VideoEvents {
+                        call,
+                        tx: self.events.clone(),
+                    }),
+                );
+            }
+        }
+        Ok(())
+    }
+
     /// Put a call on hold (`on = true`) or resume it (`on = false`). Sends
     /// an in-dialog re-INVITE with the appropriate direction attribute and
     /// applies the state locally once the peer confirms with a 2xx.
@@ -1095,16 +1255,11 @@ impl Anvil {
         };
 
         // Video stops both ways on hold: a held call shows no camera, and
-        // sends none.
-        let video_direction = if on {
-            media::MediaDirection::Inactive
-        } else {
-            media::MediaDirection::Sendrecv
-        };
+        // sends none. Resumed, each section is as the user allows.
         let video_sections = self
             .calls
-            .get(&call)
-            .and_then(|e| e.video.as_ref().map(|v| v.offer_with(video_direction)))
+            .get_mut(&call)
+            .and_then(|mut e| e.video.as_mut().map(|v| v.offer_for_hold(on)))
             .unwrap_or_default();
         let sdp_body = video::sdp::with_sections(
             media::build_sdp(
@@ -1139,8 +1294,15 @@ impl Anvil {
         // we want to do; the answer confirms it and mirrors the peer's.
         bundle.hold_state.apply(direction);
         if let Some(mut entry) = self.calls.get_mut(&call) {
+            entry.held = on;
             if let Some(v) = entry.video.as_mut() {
-                v.reanswered(resp.body(), video_direction);
+                v.answered(
+                    resp.body(),
+                    Some(video::VideoEvents {
+                        call,
+                        tx: self.events.clone(),
+                    }),
+                );
             }
         }
         Ok(())
