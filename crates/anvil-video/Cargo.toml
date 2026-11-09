@@ -25,11 +25,15 @@ bzip2   = "0.6"
 reqwest = { version = "0.12", default-features = false, features = ["rustls-tls-native-roots"] }
 sha2    = "0.10"
 
-# Linux: V4L2 cameras, VP8 through libvpx (BSD, no royalties).
+# Linux: V4L2 cameras, VP8 through libvpx (BSD, no royalties), its
+# bindings made by build.rs from the installed headers.
 [target.'cfg(target_os = "linux")'.dependencies]
 v4l            = "0.14"
-env-libvpx-sys = { version = "5.1", features = ["generate"] }
 zune-jpeg      = "0.5"
+
+[build-dependencies]
+bindgen    = "0.72"
+pkg-config = "0.3"
 
 [dev-dependencies]
 tokio = { workspace = true, features = ["test-util"] }

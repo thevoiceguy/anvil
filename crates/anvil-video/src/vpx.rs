@@ -5,7 +5,16 @@ use std::mem::MaybeUninit;
 use std::os::raw::c_int;
 use std::ptr;
 
-use vpx_sys as vpx;
+#[allow(
+    non_camel_case_types,
+    non_snake_case,
+    non_upper_case_globals,
+    dead_code,
+    clippy::all
+)]
+mod vpx {
+    include!(concat!(env!("OUT_DIR"), "/vpx.rs"));
+}
 
 use crate::codec::{Decoder, Encoded, Encoder};
 use crate::picture::Picture;
