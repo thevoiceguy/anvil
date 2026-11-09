@@ -58,6 +58,11 @@ fn link(vpx: &pkg_config::Library) {
     if let Ok(dir) = pkg_config::get_variable("vpx", "libdir") {
         dirs.push(PathBuf::from(dir));
     }
+    // Debian's and Ubuntu's vpx.pc says /usr/lib; the archive is in the
+    // multiarch directory.
+    if let Ok(arch) = std::env::var("CARGO_CFG_TARGET_ARCH") {
+        dirs.push(PathBuf::from(format!("/usr/lib/{arch}-linux-gnu")));
+    }
     for dir in &vpx.link_paths {
         println!("cargo:rustc-link-search=native={}", dir.display());
     }

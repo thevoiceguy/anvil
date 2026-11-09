@@ -86,7 +86,7 @@ pub(crate) mod desktop {
     }
 
     /// A host of the test's own, where none was made yet.
-    #[cfg(test)]
+    #[cfg(all(test, target_os = "linux"))]
     pub(crate) fn install(host: DesktopVideoHost) -> bool {
         HOST.set(host).is_ok()
     }
