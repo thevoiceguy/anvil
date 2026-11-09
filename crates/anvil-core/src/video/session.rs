@@ -55,14 +55,75 @@ const NACK_RETRY: Duration = Duration::from_millis(100);
 
 /// A packet asked for this long ago and still missing is given up: the
 /// picture waits for a keyframe instead (the frames after a loss cannot
-/// be decoded without one). Room for a few retries on a long path.
+/// be decoded without one). Room for a few retries on a long path; both
+/// this and the retry stretch with the round trip, up to the most a
+/// picture is let freeze for one packet.
 const NACK_GIVE_UP: Duration = Duration::from_millis(400);
+const NACK_GIVE_UP_MAX: Duration = Duration::from_millis(1500);
+
+/// A packet is not sent again sooner than this after its last resend (or
+/// a round trip, when longer).
+const RESEND_GAP: Duration = Duration::from_millis(100);
+/// Resends are remembered this long.
+const RESEND_FORGET: Duration = Duration::from_secs(2);
+/// Resends take at most this share of the target, so a lossy path is not
+/// filled with them (the loss is often the path being full).
+const RESEND_SHARE: f64 = 0.5;
+
+/// What resends may still spend: [`RESEND_SHARE`] of the target a
+/// second, up to a second's worth.
+struct ResendBudget {
+    bytes: f64,
+    at: Option<Instant>,
+    cap: f64,
+}
+
+impl ResendBudget {
+    fn new() -> Self {
+        Self {
+            bytes: 0.0,
+            at: None,
+            cap: 0.0,
+        }
+    }
+
+    fn refill(&mut self, now: Instant, target_kbps: u32) {
+        let per_second = f64::from(target_kbps) * 125.0 * RESEND_SHARE;
+        self.cap = per_second;
+        let secs = self
+            .at
+            .map_or(1.0, |t| now.saturating_duration_since(t).as_secs_f64());
+        self.at = Some(now);
+        self.bytes = (self.bytes + per_second * secs).min(self.cap);
+    }
+
+    fn take(&mut self, bytes: usize) -> bool {
+        if self.bytes < bytes as f64 {
+            return false;
+        }
+        self.bytes -= bytes as f64;
+        true
+    }
+}
+
+/// A sender makes at most one keyframe asked for in this long; requests
+/// within it are served by the next one after it. Each is several frames'
+/// worth of bytes, and on a congested path a keyframe for every request
+/// keeps the path congested.
+const KEYFRAME_MIN_INTERVAL: Duration = Duration::from_millis(500);
 
 /// Packets held out of order while a gap is asked for: more than the
 /// sender's cache keeps, so the gap is given up by time, not by count.
 /// (forge-rtp's default of 16 is ~100 ms at 1.5 Mb/s, under one round
 /// trip on many paths.)
 const REORDER_WINDOW: usize = 1024;
+/// A gap wider than this is a burst no retransmission will mend in
+/// time, and asking for it all would add a burst of resends to whatever
+/// caused it: a keyframe is asked for instead.
+const MAX_NACK_LIST: usize = 64;
+/// Each missing packet is asked for at most this many times.
+const MAX_NACK_TRIES: u8 = 3;
+
 /// Without NACK, how long a gap waits for a reordered packet.
 const REORDER_WAIT: Duration = Duration::from_millis(50);
 const MAX_FRAME_BYTES: usize = 4 * 1024 * 1024;
@@ -260,6 +321,7 @@ impl VideoSession {
             estimator: Box::new(RembEstimator::default()),
             estimate: None,
             last_remb: None,
+            rtt: None,
             stats_at: Instant::now(),
         }));
 
@@ -338,18 +400,45 @@ async fn send_loop(mut s: SendLoop) {
     let codec = s.cfg.codec.forge();
     let ours = s.cfg.encodings.first().copied().unwrap_or(EncodingId(0));
     let mut target = s.cfg.kbps;
+    let mut last_forced: Option<Instant> = None;
+    let mut resent: HashMap<u16, Instant> = HashMap::new();
+    let mut budget = ResendBudget::new();
+    let mut keyframe_due = false;
     let ssrc = s.outgoing.lock().ssrc;
     loop {
+        // A keyframe asked for, once the last one made is old enough.
+        if keyframe_due && last_forced.is_none_or(|t| t.elapsed() >= KEYFRAME_MIN_INTERVAL) {
+            keyframe_due = false;
+            last_forced = Some(Instant::now());
+            s.source.request_keyframe();
+        }
         tokio::select! {
             biased;
             Some(cmd) = s.commands.recv() => match cmd {
                 SendCommand::Keyframe => {
                     s.outgoing.lock().keyframe_requests += 1;
-                    s.source.request_keyframe();
+                    keyframe_due = true;
                 }
                 SendCommand::Resend(seqs) => {
-                    s.outgoing.lock().nacks += seqs.len() as u32;
-                    for (_, packet) in cache.lookup(&seqs) {
+                    let rtt = {
+                        let mut o = s.outgoing.lock();
+                        o.nacks += seqs.len() as u32;
+                        o.rtt.mean_ms()
+                    };
+                    let now = Instant::now();
+                    // Not again within a round trip: the last one may be
+                    // on its way still.
+                    let gap = RESEND_GAP.max(Duration::from_secs_f32(rtt.unwrap_or(0.0).max(0.0) / 1000.0));
+                    resent.retain(|_, t| now.saturating_duration_since(*t) < RESEND_FORGET);
+                    budget.refill(now, target);
+                    for (seq, packet) in cache.lookup(&seqs) {
+                        if resent.get(&seq).is_some_and(|t| now.saturating_duration_since(*t) < gap) {
+                            continue;
+                        }
+                        if !budget.take(packet.len()) {
+                            break;
+                        }
+                        resent.insert(seq, now);
                         s.transport.send_rtp(packet.clone()).await;
                     }
                 }
@@ -422,8 +511,9 @@ struct Incoming {
     assembler: FrameAssembler,
     sink: Box<dyn VideoSink>,
     gate: KeyframeRequestGate,
-    /// Sequence numbers asked for: when first, and when last.
-    nacked: BTreeMap<u16, (Instant, Instant)>,
+    /// Sequence numbers missing: when first seen, when last asked for,
+    /// and how often.
+    nacked: BTreeMap<u16, (Instant, Instant, u8)>,
     last_packet: Instant,
     /// When it (re)started: its first packet, or the end of a hold.
     started: Instant,
@@ -480,6 +570,8 @@ struct RecvLoop {
     estimate: Option<u64>,
     /// The last REMB sent: its value and when.
     last_remb: Option<(u64, Instant)>,
+    /// The round trip, from our reports: what a retransmission takes.
+    rtt: Option<Duration>,
     stats_at: Instant,
 }
 
@@ -621,13 +713,21 @@ impl RecvLoop {
         let missing = s.assembler.missing();
         // Each gap from when it was first seen; without NACK only
         // reordering can fill it, which takes moments.
-        let give_up = if fb.nack { NACK_GIVE_UP } else { REORDER_WAIT };
+        let rtt = self.rtt.unwrap_or_default();
+        let (retry, give_up) = if fb.nack {
+            (
+                NACK_RETRY.max(rtt.mul_f32(1.25)),
+                NACK_GIVE_UP.max(rtt * 3 + NACK_RETRY).min(NACK_GIVE_UP_MAX),
+            )
+        } else {
+            (NACK_RETRY, REORDER_WAIT)
+        };
         let given_up = missing.iter().any(|seq| {
             s.nacked
                 .get(seq)
-                .is_some_and(|(first, _)| now.saturating_duration_since(*first) >= give_up)
+                .is_some_and(|(first, _, _)| now.saturating_duration_since(*first) >= give_up)
         });
-        if given_up {
+        if given_up || missing.len() > MAX_NACK_LIST {
             // Let it go, and the picture with it until a keyframe.
             s.assembler.reset();
             s.nacked.clear();
@@ -639,15 +739,15 @@ impl RecvLoop {
             let ask: Vec<u16> = missing
                 .into_iter()
                 .filter(|seq| {
-                    s.nacked
-                        .get(seq)
-                        .is_none_or(|(_, t)| now.saturating_duration_since(*t) >= NACK_RETRY)
+                    s.nacked.get(seq).is_none_or(|(_, t, tries)| {
+                        *tries < MAX_NACK_TRIES && now.saturating_duration_since(*t) >= retry
+                    })
                 })
                 .collect();
             if !ask.is_empty() {
                 for seq in &ask {
-                    let first = s.nacked.get(seq).map_or(now, |(f, _)| *f);
-                    s.nacked.insert(*seq, (first, now));
+                    let (first, tries) = s.nacked.get(seq).map_or((now, 0), |(f, _, n)| (*f, *n));
+                    s.nacked.insert(*seq, (first, now, tries + 1));
                 }
                 // Forget what is far behind: it is lost or it came.
                 while s.nacked.len() > 256 {
@@ -749,6 +849,12 @@ impl RecvLoop {
                 .is_some_and(|(sent, _)| (e as f64) < sent as f64 * REMB_DROP)
         });
         if report {
+            self.rtt = self
+                .outgoing
+                .lock()
+                .rtt
+                .mean_ms()
+                .map(|ms| Duration::from_secs_f32(ms.max(0.0) / 1000.0));
             let packet = self.report(remb, now);
             self.transport.send_rtcp(packet).await;
             self.stats(now);
@@ -1402,18 +1508,32 @@ mod tests {
             .unwrap()
             .frames
             .len();
-        until("frames through the bottleneck", || {
-            b_host
-                .record()
-                .received
-                .values()
-                .next()
-                .unwrap()
-                .frames
-                .len()
-                > shown + 30
-        })
+        until_within(
+            Duration::from_secs(10),
+            "frames through the bottleneck",
+            || {
+                b_host
+                    .record()
+                    .received
+                    .values()
+                    .next()
+                    .unwrap()
+                    .frames
+                    .len()
+                    > shown + 30
+            },
+        )
         .await;
+        // And it settles: no storm of resends or keyframes keeps the path
+        // full.
+        let calm = stats_until(
+            &mut b_events,
+            VideoStreamDirection::Incoming,
+            "a calm second",
+            |s| s.fps > 20.0,
+        )
+        .await;
+        assert!(calm.nacks < 50 && calm.keyframe_requests <= 1, "{calm:?}");
     }
 
     #[tokio::test]

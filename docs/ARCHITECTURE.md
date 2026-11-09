@@ -309,8 +309,13 @@ Within a session:
   reports tie the stream's clock and the call's audio to the far end's NTP clock,
   video waits (up to 500 ms) to be shown when its audio is heard. The sink is given
   the moment to show each frame.
-- **Loss.** A gap is asked for by NACK and given up after 400 ms (50 ms without
-  NACK), after which the stream waits for a keyframe.
+- **Loss.** A gap is asked for by NACK, each packet at most three times, retried
+  and given up on the round trip's scale (400 ms to 1.5 s; 50 ms without NACK),
+  after which the stream waits for a keyframe. A burst of more than 64 packets goes
+  straight to a keyframe request. The sender resends a packet at most once a round
+  trip, spends at most half its target on resends, and makes at most one requested
+  keyframe each 500 ms — on a congested path, resends and keyframes on demand are
+  what keep it congested.
 
 On a call: `place_call_with_media(target, CallMedia::VIDEO)` offers a camera section;
 `IncomingCall { video }` says an offer has video this softphone can take;
