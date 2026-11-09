@@ -104,8 +104,17 @@ impl Crypto {
 
 /// Every `a=crypto` attribute in an SDP body that this takes.
 pub(crate) fn offered(sdp: &[u8]) -> Vec<Crypto> {
+    // The audio section's (or the session's, for a body without one): a
+    // video section has keys of its own.
+    let mut in_audio = true;
     String::from_utf8_lossy(sdp)
         .lines()
+        .filter(|line| {
+            if let Some(m) = line.strip_prefix("m=") {
+                in_audio = m.starts_with("audio ");
+            }
+            in_audio
+        })
         .filter_map(|line| line.trim().strip_prefix("a=crypto:"))
         .filter_map(Crypto::parse)
         .collect()

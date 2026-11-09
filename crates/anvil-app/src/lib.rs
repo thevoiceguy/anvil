@@ -1984,6 +1984,7 @@ async fn follow(inner: std::sync::Weak<Inner>, mut events: EventStream) {
                 display_name,
                 server_call,
                 line,
+                ..
             } => {
                 // A line that does not ring this app shows its call, quietly.
                 let silent = line.as_deref().is_some_and(|key| {

@@ -163,6 +163,7 @@ pub unsafe extern "C" fn anvil_start(
             account,
             media: MediaConfig::default(),
             audio,
+            video: None,
             brand: BrandConfig::default(),
         };
 

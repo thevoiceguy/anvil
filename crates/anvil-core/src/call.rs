@@ -35,6 +35,9 @@ pub(crate) struct PendingInbound {
     pub dialog: Dialog,
     pub sdp_answer_sent: bool,
     pub rtp_socket: MediaSockets,
+    /// The answer's audio, to which its video sections are added: made
+    /// again when the app answers without the video offered.
+    pub audio_answer: String,
 }
 
 /// Runtime state for one active call.
@@ -63,6 +66,8 @@ pub(crate) struct CallEntry {
     /// INVITE of an incoming call or the 200 OK of one we placed: what
     /// the server's API names it by.
     pub server_call: Option<String>,
+    /// The call's video over SIP, when it was offered or accepted.
+    pub video: Option<crate::video::CallVideo>,
 }
 
 /// A call's SRTP keys.

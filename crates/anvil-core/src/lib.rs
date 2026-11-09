@@ -32,6 +32,8 @@ pub(crate) mod transport;
 #[cfg(feature = "tls")]
 pub use transport::install_default_crypto_provider;
 pub(crate) mod uas;
+pub mod video;
+pub use video::CallMedia;
 pub mod watch;
 
 pub use brand::{
@@ -72,6 +74,8 @@ pub struct Anvil {
     events: mpsc::Sender<Event>,
     calls: Arc<DashMap<CallId, CallEntry>>,
     audio: Arc<dyn AudioHost>,
+    /// The platform's video, when it has any.
+    video: Option<Arc<dyn video::host::VideoHost>>,
     /// IP used in SDP offers: STUN's answer, `AccountConfig::bind_addr`'s
     /// host, else this machine's address on the route to the registrar.
     media_ip: IpAddr,
@@ -286,6 +290,7 @@ impl Anvil {
             .max(1);
 
         let audio: Arc<dyn AudioHost> = Arc::from(cfg.audio);
+        let video: Option<Arc<dyn video::host::VideoHost>> = cfg.video.map(Arc::from);
         let watched: Arc<DashMap<String, ()>> = Arc::new(DashMap::new());
         let branding = brand::Branding::new(
             cfg.brand,
@@ -322,6 +327,7 @@ impl Anvil {
             watched: Arc::clone(&watched),
             captures: Arc::clone(&captures),
             account: cfg.account.aor.clone(),
+            video: video.clone(),
         });
 
         let pump = {
@@ -366,6 +372,7 @@ impl Anvil {
                 events: event_tx,
                 calls,
                 audio,
+                video,
                 media_ip,
                 local_user,
                 advertised,
@@ -712,6 +719,24 @@ impl Anvil {
         self.place_call_from(target, None).await
     }
 
+    /// Place a call carrying `media`: with [`CallMedia::VIDEO`] it offers a
+    /// camera section beside the audio, where the softphone has a video
+    /// host (without one the call is audio, as [`place_call`](Self::place_call)).
+    pub async fn place_call_with_media(
+        &self,
+        target: &str,
+        media: CallMedia,
+    ) -> Result<CallId, AnvilError> {
+        self.place_call_with(target, None, None, media).await
+    }
+
+    /// Whether calls can carry video here (a video host with a codec).
+    pub fn has_video(&self) -> bool {
+        self.video
+            .as_ref()
+            .is_some_and(|h| !video::host::usable_codecs(h.as_ref()).is_empty())
+    }
+
     /// Place an outgoing call from one of the account's lines: the INVITE's
     /// `From` is the line's address (`None`, the account's own).
     pub async fn place_call_from(
@@ -719,7 +744,8 @@ impl Anvil {
         target: &str,
         line: Option<&str>,
     ) -> Result<CallId, AnvilError> {
-        self.place_call_with(target, line, None).await
+        self.place_call_with(target, line, None, CallMedia::AUDIO)
+            .await
     }
 
     /// Take appearance `index` of the shared line `line` (its address):
@@ -732,8 +758,13 @@ impl Anvil {
             .map_err(|e| AnvilError::Config(format!("invalid line {line:?}: {e:?}")))?
             .host()
             .to_string();
-        self.place_call_with(line, Some(line), Some(sca::take(&host, index)))
-            .await
+        self.place_call_with(
+            line,
+            Some(line),
+            Some(sca::take(&host, index)),
+            CallMedia::AUDIO,
+        )
+        .await
     }
 
     async fn place_call_with(
@@ -741,6 +772,7 @@ impl Anvil {
         target: &str,
         line: Option<&str>,
         call_info: Option<String>,
+        media: CallMedia,
     ) -> Result<CallId, AnvilError> {
         let from = line
             .map(|l| {
@@ -763,16 +795,34 @@ impl Anvil {
         // key of ours when media is to be encrypted.
         let ours = (self.srtp != config::SrtpMode::Off)
             .then(|| srtp::Crypto::generate(1, srtp::Suite::AesCm128HmacSha1_80));
-        let sdp_body = media::build_sdp(
-            &self.codecs,
-            &self.local_user,
-            &self.media_ip.to_string(),
-            rtp_port,
-            media::MediaDirection::Sendrecv,
-            ours.as_ref(),
+        let call_video = match (&self.video, media.video) {
+            (Some(host), true) => {
+                video::CallVideo::offer(
+                    Arc::clone(host),
+                    self.media_ip,
+                    self.srtp,
+                    rtp_socket.capture_slot(),
+                )
+                .await
+            }
+            _ => None,
+        };
+        let sdp_body = video::sdp::with_sections(
+            media::build_sdp(
+                &self.codecs,
+                &self.local_user,
+                &self.media_ip.to_string(),
+                rtp_port,
+                media::MediaDirection::Sendrecv,
+                ours.as_ref(),
+            ),
+            &call_video
+                .as_ref()
+                .map(|v| v.sdp_sections())
+                .unwrap_or_default(),
         );
 
-        tracing::debug!(%target, rtp_port, "sending INVITE");
+        tracing::debug!(%target, rtp_port, video = call_video.is_some(), "sending INVITE");
         let handle = match call_info {
             None => {
                 self.uac
@@ -807,6 +857,7 @@ impl Anvil {
                 srtp: ours.map(|ours| call::CallSrtp { ours, theirs: None }),
                 parked: None,
                 server_call: None,
+                video: call_video,
             },
         );
 
@@ -830,12 +881,24 @@ impl Anvil {
 
     /// Answer an incoming call that was signalled via `Event::IncomingCall`.
     pub async fn answer(&self, call: CallId) -> Result<(), AnvilError> {
+        self.answer_with_media(call, CallMedia::VIDEO).await
+    }
+
+    /// Answer an incoming call with `media`: [`CallMedia::AUDIO`] declines
+    /// the video it offers (its sections answered with port 0), and the call
+    /// is audio only.
+    pub async fn answer_with_media(
+        &self,
+        call: CallId,
+        media: CallMedia,
+    ) -> Result<(), AnvilError> {
         let codec = uas::send_answer_and_start_media(
             call,
             &self.calls,
             &self.audio,
             &self.events,
             &self.codecs,
+            media,
         )
         .await?;
         let _ = self
@@ -1031,13 +1094,28 @@ impl Anvil {
             media::MediaDirection::Sendrecv
         };
 
-        let sdp_body = media::build_sdp(
-            &[bundle.codec],
-            &self.local_user,
-            &self.media_ip.to_string(),
-            bundle.rtp_port,
-            direction,
-            bundle.crypto.as_ref(),
+        // Video stops both ways on hold: a held call shows no camera, and
+        // sends none.
+        let video_direction = if on {
+            media::MediaDirection::Inactive
+        } else {
+            media::MediaDirection::Sendrecv
+        };
+        let video_sections = self
+            .calls
+            .get(&call)
+            .and_then(|e| e.video.as_ref().map(|v| v.offer_with(video_direction)))
+            .unwrap_or_default();
+        let sdp_body = video::sdp::with_sections(
+            media::build_sdp(
+                &[bundle.codec],
+                &self.local_user,
+                &self.media_ip.to_string(),
+                bundle.rtp_port,
+                direction,
+                bundle.crypto.as_ref(),
+            ),
+            &video_sections,
         );
 
         let sent = self.uac.reinvite(&mut dialog, Some(&sdp_body)).await;
@@ -1060,6 +1138,11 @@ impl Anvil {
         // Apply locally. Per RFC 3264, our direction in the offer is what
         // we want to do; the answer confirms it and mirrors the peer's.
         bundle.hold_state.apply(direction);
+        if let Some(mut entry) = self.calls.get_mut(&call) {
+            if let Some(v) = entry.video.as_mut() {
+                v.reanswered(resp.body(), video_direction);
+            }
+        }
         Ok(())
     }
 
@@ -2013,6 +2096,15 @@ async fn drive_outgoing_call(
             if let Some(mut entry) = calls.get_mut(&call_id) {
                 entry.negotiated_codec = Some(codec);
                 entry.pipeline = pipeline;
+                if let Some(v) = entry.video.as_mut() {
+                    v.answered(
+                        body_slice,
+                        Some(video::VideoEvents {
+                            call: call_id,
+                            tx: events.clone(),
+                        }),
+                    );
+                }
                 entry.parked = resp
                     .headers()
                     .get("X-FCP-Parked")

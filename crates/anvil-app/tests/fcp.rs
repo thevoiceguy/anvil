@@ -117,6 +117,7 @@ async fn phone_with(fcp: Arc<FcpClient>, ip: &str, settings_path: Option<PathBuf
             account,
             media: config.media_config(),
             audio: Box::new(Quiet),
+            video: None,
             brand: BrandConfig::default(),
         },
         fcp: Some(fcp),

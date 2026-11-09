@@ -387,12 +387,36 @@ pub(crate) enum MediaDirection {
 }
 
 impl MediaDirection {
-    fn as_sdp_attr(self) -> &'static str {
+    pub(crate) fn as_sdp_attr(self) -> &'static str {
         match self {
             Self::Sendrecv => "sendrecv",
             Self::Sendonly => "sendonly",
             Self::Recvonly => "recvonly",
             Self::Inactive => "inactive",
+        }
+    }
+
+    /// The direction an `a=` property names.
+    pub(crate) fn from_attr(attr: &str) -> Option<Self> {
+        match attr {
+            "sendrecv" => Some(Self::Sendrecv),
+            "sendonly" => Some(Self::Sendonly),
+            "recvonly" => Some(Self::Recvonly),
+            "inactive" => Some(Self::Inactive),
+            _ => None,
+        }
+    }
+
+    /// What both `self` and `other` allow.
+    pub(crate) fn and(self, other: Self) -> Self {
+        match (
+            self.sends() && other.sends(),
+            self.receives() && other.receives(),
+        ) {
+            (true, true) => Self::Sendrecv,
+            (true, false) => Self::Sendonly,
+            (false, true) => Self::Recvonly,
+            (false, false) => Self::Inactive,
         }
     }
 

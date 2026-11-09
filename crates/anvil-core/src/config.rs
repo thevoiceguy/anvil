@@ -170,5 +170,9 @@ pub struct AnvilConfig {
     pub account: AccountConfig,
     pub media: MediaConfig,
     pub audio: Box<dyn AudioHost>,
+    /// The platform's video (FCP's `docs/SOFTPHONE_VIDEO.md` §2.3); `None`,
+    /// calls are audio only: no video is offered and offered video is
+    /// declined.
+    pub video: Option<Box<dyn crate::video::host::VideoHost>>,
     pub brand: BrandConfig,
 }

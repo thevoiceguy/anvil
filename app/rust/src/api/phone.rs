@@ -447,6 +447,7 @@ pub async fn start_phone(session_path: String) -> anyhow::Result<()> {
                 account,
                 media: config.media_config(),
                 audio: Box::new(audio),
+                video: None,
                 brand,
             },
             fcp: Some(client),
