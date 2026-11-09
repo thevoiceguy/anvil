@@ -277,6 +277,15 @@ pub(crate) mod looped {
         /// Drop every n-th RTP packet (0: none).
         drop_every: AtomicU32,
         sent: AtomicU32,
+        /// A bottleneck's rate (0: none) and when it is next free: a
+        /// packet waits its turn, and is dropped when the queue holds more
+        /// than [`QUEUE_LIMIT`] of waiting.
+        limit_kbps: AtomicU32,
+        free_at: Mutex<Option<Instant>>,
+        /// The bottleneck's queue, drained in order by one task: RTP, and
+        /// RTCP behind it as on a real path (never dropped, so the round
+        /// trip includes the queue).
+        queue: mpsc::UnboundedSender<(Instant, Inbound)>,
         /// RTP packets sent, by sequence number, and RTCP packets.
         pub(crate) rtp_log: Mutex<Vec<u16>>,
         pub(crate) rtcp_log: Mutex<Vec<Bytes>>,
@@ -284,10 +293,28 @@ pub(crate) mod looped {
 
     impl LoopTransport {
         pub(crate) fn new(peer: mpsc::Sender<Inbound>) -> Arc<Self> {
+            let (queue, mut queued) = mpsc::unbounded_channel::<(Instant, Inbound)>();
+            let out = peer.clone();
+            tokio::spawn(async move {
+                while let Some((depart, inbound)) = queued.recv().await {
+                    tokio::time::sleep_until(depart.into()).await;
+                    let inbound = match inbound {
+                        Inbound::Rtp { packet, .. } => Inbound::Rtp {
+                            packet,
+                            at: Instant::now(),
+                        },
+                        rtcp => rtcp,
+                    };
+                    let _ = out.send(inbound).await;
+                }
+            });
             Arc::new(Self {
                 peer,
+                queue,
                 drop_every: AtomicU32::new(0),
                 sent: AtomicU32::new(0),
+                limit_kbps: AtomicU32::new(0),
+                free_at: Mutex::new(None),
                 rtp_log: Mutex::default(),
                 rtcp_log: Mutex::default(),
             })
@@ -296,7 +323,30 @@ pub(crate) mod looped {
         pub(crate) fn drop_every(&self, n: u32) {
             self.drop_every.store(n, Ordering::Relaxed);
         }
+
+        /// When `bytes` leave a bottleneck of `kbps`; `None` when a full
+        /// queue drops them (only what `droppable`).
+        fn enqueue(&self, bytes: usize, kbps: u32, droppable: bool) -> Option<Instant> {
+            let now = Instant::now();
+            let mut free = self.free_at.lock();
+            let start = free.filter(|f| *f > now).unwrap_or(now);
+            if droppable && start.saturating_duration_since(now) > QUEUE_LIMIT {
+                return None;
+            }
+            let bits = bytes as u64 * 8;
+            let depart = start + std::time::Duration::from_micros(bits * 1000 / u64::from(kbps));
+            *free = Some(depart);
+            Some(depart)
+        }
+
+        /// Carry RTP and RTCP through a bottleneck of `kbps` (0: none).
+        pub(crate) fn limit_kbps(&self, kbps: u32) {
+            self.limit_kbps.store(kbps, Ordering::Relaxed);
+        }
     }
+
+    /// The most a bottleneck's queue holds, in time to drain it.
+    const QUEUE_LIMIT: std::time::Duration = std::time::Duration::from_millis(300);
 
     #[async_trait]
     impl MediaTransport for LoopTransport {
@@ -310,15 +360,34 @@ pub(crate) mod looped {
             if every != 0 && n.is_multiple_of(every) {
                 return;
             }
-            let _ = self.peer.try_send(Inbound::Rtp {
-                packet,
-                at: Instant::now(),
-            });
+            let kbps = self.limit_kbps.load(Ordering::Relaxed);
+            if kbps == 0 {
+                let _ = self.peer.try_send(Inbound::Rtp {
+                    packet,
+                    at: Instant::now(),
+                });
+                return;
+            }
+            let bytes = packet.payload.len() + 40;
+            if let Some(depart) = self.enqueue(bytes, kbps, true) {
+                let _ = self.queue.send((
+                    depart,
+                    Inbound::Rtp {
+                        packet,
+                        at: Instant::now(),
+                    },
+                ));
+            }
         }
 
         async fn send_rtcp(&self, packet: Bytes) {
             self.rtcp_log.lock().push(packet.clone());
-            let _ = self.peer.send(Inbound::Rtcp { packet }).await;
+            let kbps = self.limit_kbps.load(Ordering::Relaxed);
+            if kbps == 0 {
+                let _ = self.peer.send(Inbound::Rtcp { packet }).await;
+            } else if let Some(depart) = self.enqueue(packet.len() + 28, kbps, false) {
+                let _ = self.queue.send((depart, Inbound::Rtcp { packet }));
+            }
         }
     }
 }

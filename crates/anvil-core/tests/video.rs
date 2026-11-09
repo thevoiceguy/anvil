@@ -11,7 +11,7 @@ use std::time::Duration;
 use anvil_core::config::{MediaConfig, SrtpMode};
 use anvil_core::video::host::{StreamId, VideoKind};
 use anvil_core::video::synthetic::{ReceivedStream, SyntheticVideoHost};
-use anvil_core::video::VideoStreamDirection;
+use anvil_core::video::{VideoStreamDirection, VideoStreamStats};
 use anvil_core::{Anvil, CallId, CallMedia, Event, EventStream};
 use common::*;
 
@@ -333,6 +333,88 @@ async fn hold_stops_video_both_ways_and_resuming_brings_it_back() {
             assert_eq!(s.lost, 0, "a hold is not a loss");
         }
     }
+
+    alice.hangup(out).await.expect("BYE");
+    hung_up_by_the_other_side(&mut bob_events, incoming).await;
+    alice.shutdown().await.unwrap();
+    bob.shutdown().await.unwrap();
+}
+
+/// The next stats of `call` for a stream going `direction` that `ok`
+/// accepts.
+async fn stats_until(
+    events: &mut EventStream,
+    call: CallId,
+    direction: VideoStreamDirection,
+    ok: impl Fn(&VideoStreamStats) -> bool,
+) -> VideoStreamStats {
+    expect(events, Duration::from_secs(10), |e| match e {
+        Event::VideoStats { call: c, stats, .. }
+            if *c == call && stats.direction == direction && ok(stats) =>
+        {
+            Some(*stats)
+        }
+        _ => None,
+    })
+    .await
+    .unwrap_or_else(|| panic!("no {direction:?} stats as wanted"))
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_video_call_reports_its_streams_and_keeps_the_picture_with_the_sound() {
+    let (a_host, b_host) = (host(), host());
+    let (alice, mut alice_events) = phone(
+        "alice",
+        "127.0.1.11",
+        SrtpMode::Required,
+        Some(a_host.clone()),
+    )
+    .await;
+    let (bob, mut bob_events) = phone(
+        "bob",
+        "127.0.1.12",
+        SrtpMode::Required,
+        Some(b_host.clone()),
+    )
+    .await;
+    let (out, incoming, _, _) = video_call(
+        &alice,
+        &mut alice_events,
+        &bob,
+        &mut bob_events,
+        CallMedia::VIDEO,
+    )
+    .await;
+
+    // Alice's camera, as she sends it and as Bob's reports say it went.
+    let sent = stats_until(
+        &mut alice_events,
+        out,
+        VideoStreamDirection::Outgoing,
+        |s| s.rtt_ms.is_some(),
+    )
+    .await;
+    assert_eq!(sent.loss_pct, Some(0.0), "{sent:?}");
+    assert_eq!(sent.target_kbps, Some(1500), "a clear path: {sent:?}");
+    assert!(sent.fps > 40.0, "{sent:?}");
+
+    // Bob's view of it: its rate, the estimate he sends back, and the
+    // picture against Alice's voice once her audio's and her video's
+    // sender reports tie them to her clock.
+    let seen = stats_until(
+        &mut bob_events,
+        incoming,
+        VideoStreamDirection::Incoming,
+        |s| s.av_offset_ms.is_some() && s.estimate_kbps.is_some(),
+    )
+    .await;
+    assert!(seen.fps > 40.0 && seen.kbps > 1000.0, "{seen:?}");
+    assert!(seen.estimate_kbps.unwrap() >= 1500, "{seen:?}");
+    // The video's delay against the audio's playback: within a frame
+    // or two.
+    let offset = seen.av_offset_ms.unwrap();
+    assert!(offset.abs() < 50.0, "in sync: {seen:?}");
+    in_order(&receives(&b_host, 100).await);
 
     alice.hangup(out).await.expect("BYE");
     hung_up_by_the_other_side(&mut bob_events, incoming).await;

@@ -539,7 +539,12 @@ pub(crate) async fn send_answer_and_start_media(
         entry.pipeline = pipeline;
         entry.negotiated_codec = Some(codec);
         entry.inbound = None; // no longer pending
+        let audio = entry
+            .pipeline
+            .as_ref()
+            .map(|p| Arc::clone(&p.rtcp) as Arc<dyn crate::video::playout::AudioClock>);
         if let Some(v) = entry.video.as_mut() {
+            v.set_audio(audio);
             v.start(Some(crate::video::VideoEvents {
                 call,
                 tx: events.clone(),

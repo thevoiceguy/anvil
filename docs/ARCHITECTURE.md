@@ -292,11 +292,38 @@ Three layers, so a second transport adds itself and rewrites nothing:
   answer and re-INVITEs into plans. A WebRTC transport (ICE, DTLS-SRTP, BUNDLE) is
   to sit beside it for rooms that forward each participant's stream.
 
+Within a session:
+
+- **Bandwidth both ways.** What arrives feeds a `BandwidthEstimator`; today's is
+  `RembEstimator`, receive-side and GCC-shaped (a delay trend for queues building,
+  loss on first arrival, AIMD), sent to the far end as REMB each second and at once
+  when it falls. A REMB from the far end sets the encoder's target through
+  `VideoSource::set_target`, within what the call was set up to send, with the
+  resolution stepped down the ladder (720p from 1 Mb/s, 360p from 450 kb/s, 180p
+  below). Send-side estimation (transport-cc) is to sit behind the same interface.
+- **Reports.** Every second, an SR (or RR) with a block on each incoming stream, the
+  call's audio CNAME (so the far end pairs our video with our voice) and the REMB.
+  The far end's reports give the round trip and its loss on ours.
+- **Playout and lip sync** (`playout`). A frame is shown at its RTP time, carried
+  across on the quickest recent trip, plus 60–150 ms grown on jitter. Once sender
+  reports tie the stream's clock and the call's audio to the far end's NTP clock,
+  video waits (up to 500 ms) to be shown when its audio is heard. The sink is given
+  the moment to show each frame.
+- **Loss.** A gap is asked for by NACK, each packet at most three times, retried
+  and given up on the round trip's scale (400 ms to 1.5 s; 50 ms without NACK),
+  after which the stream waits for a keyframe. A burst of more than 64 packets goes
+  straight to a keyframe request. The sender resends a packet at most once a round
+  trip, spends at most half its target on resends, and makes at most one requested
+  keyframe each 500 ms — on a congested path, resends and keyframes on demand are
+  what keep it congested.
+
 On a call: `place_call_with_media(target, CallMedia::VIDEO)` offers a camera section;
 `IncomingCall { video }` says an offer has video this softphone can take;
 `answer_with_media(call, CallMedia::AUDIO)` declines it (port 0). Hold stops video
-both ways (`inactive`) and resuming starts on a keyframe. `VideoStarted` and
-`VideoStopped` report each stream. `SyntheticVideoHost` sends numbered frames and
+both ways (`inactive`) and resuming starts on a keyframe. `VideoStarted`,
+`VideoStats` (each second: rate, frame rate, loss, NACKs and keyframe requests, the
+target or the estimate, jitter, playout delay, the offset from the audio, the round
+trip) and `VideoStopped` report each stream. `SyntheticVideoHost` sends numbered frames and
 records what arrives, so the core, the CLI and CI need no camera.
 
 ---

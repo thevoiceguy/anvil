@@ -2096,7 +2096,12 @@ async fn drive_outgoing_call(
             if let Some(mut entry) = calls.get_mut(&call_id) {
                 entry.negotiated_codec = Some(codec);
                 entry.pipeline = pipeline;
+                let audio = entry
+                    .pipeline
+                    .as_ref()
+                    .map(|p| Arc::clone(&p.rtcp) as Arc<dyn video::playout::AudioClock>);
                 if let Some(v) = entry.video.as_mut() {
+                    v.set_audio(audio);
                     v.answered(
                         body_slice,
                         Some(video::VideoEvents {
