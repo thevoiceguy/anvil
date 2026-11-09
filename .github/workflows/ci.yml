@@ -23,8 +23,8 @@ jobs:
       - uses: dtolnay/rust-toolchain@1.97.1
         with:
           components: rustfmt, clippy
-      - name: Audio headers for cpal
-        run: sudo apt-get update && sudo apt-get install -y libasound2-dev
+      - name: Audio and video headers (cpal, libvpx, bindgen's libclang)
+        run: sudo apt-get update && sudo apt-get install -y libasound2-dev libvpx-dev libclang-dev
       - uses: Swatinem/rust-cache@v2
       - run: cargo fmt --all -- --check
       - run: cargo clippy --workspace --all-targets -- -D warnings
@@ -36,8 +36,16 @@ jobs:
     steps:
       - uses: actions/checkout@v5
       - uses: dtolnay/rust-toolchain@stable
-      - name: Audio headers for cpal
-        run: sudo apt-get update && sudo apt-get install -y libasound2-dev
+      - name: Audio and video headers (cpal, libvpx, bindgen's libclang)
+        run: sudo apt-get update && sudo apt-get install -y libasound2-dev libvpx-dev libclang-dev
+      # Cisco's OpenH264, as the app fetches it at first use, so the H.264
+      # tests run here (anvil-video checks it against Cisco's hash).
+      - name: Cisco's OpenH264
+        run: |
+          mkdir -p "$RUNNER_TEMP/openh264"
+          curl -sSfL https://ciscobinary.openh264.org/libopenh264-2.6.0-linux64.8.so.bz2 \
+            | bunzip2 > "$RUNNER_TEMP/openh264/libopenh264-2.6.0-linux64.8.so"
+          echo "ANVIL_OPENH264_DIR=$RUNNER_TEMP/openh264" >> "$GITHUB_ENV"
       - uses: Swatinem/rust-cache@v2
       - run: cargo test --workspace
 

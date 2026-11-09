@@ -28,6 +28,7 @@ anvil/
 ├── crates/
 │   ├── anvil-core    # softphone logic, SIP↔media orchestration, public API
 │   ├── anvil-audio   # cpal I/O + AEC/NS/AGC + device enumeration
+│   ├── anvil-video   # the desktop's video host: cameras, codecs, tiles
 │   ├── anvil-brand   # FCP brand provisioning (HTTP fetch, fs cache)
 │   ├── anvil-codec   # Opus (forge-media already provides G.711, G.722)
 │   └── anvil-ffi     # C ABI for mobile / UI hosts
@@ -52,8 +53,8 @@ anvil/
 ```
 
 `anvil-core` depends on the siphon-rs and forge-media crates directly. It does **not**
-depend on `anvil-audio`, `anvil-brand`, or `anvil-codec`. Instead it defines traits
-(`AudioHost`, `BrandProvider`, `BrandCache`, and codec types) and those crates
+depend on `anvil-audio`, `anvil-video`, `anvil-brand`, or `anvil-codec`. Instead it defines traits
+(`AudioHost`, `VideoHost`, `BrandProvider`, `BrandCache`, and codec types) and those crates
 supply implementations. This lets the core stay testable without real devices or
 network access, and lets mobile hosts drop in their own audio pipeline
 (AVAudioEngine on iOS, Oboe on Android) and HTTP stack (URLSession, OkHttp) when
@@ -337,6 +338,27 @@ the synthetic host and prints what arrived. `VideoStarted`,
 target or the estimate, jitter, playout delay, the offset from the audio, the round
 trip) and `VideoStopped` report each stream. `SyntheticVideoHost` sends numbered frames and
 records what arrives, so the core, the CLI and CI need no camera.
+
+**The desktop's host** is `anvil-video`'s `DesktopVideoHost` (A2). A source captures
+on a thread of its own, fits each picture to the size the ladder allows, encodes it
+and hands it to the core; dropping it closes the camera. A sink decodes each
+incoming stream on a thread of its own and shows each picture at the moment the core
+gives, in the stream's tile (`Tiles`: each stream's last picture and the self-view,
+which the app attaches a renderer to; stream ids are unique in the process, so
+several calls' tiles do not collide). On Linux: V4L2 cameras (YUYV, NV12, or MJPEG
+with the standard Huffman tables put back), VP8 through libvpx, and H.264 through
+Cisco's OpenH264 binary, fetched from Cisco at first use into the user's data
+directory and checked against Cisco's SHA-256 (only Cisco's binary carries Cisco's
+patent licence; an app using it shows `openh264_fetch::NOTICE`); until it is there,
+calls offer VP8. macOS and Windows bring their hardware codecs next. `anvil-cli
+--video camera` films with the computer's camera, `--video pattern` a moving test
+pattern through the same codecs, and `--video-snapshot` writes the last picture
+received as a PNG. The ladder steps the picture down only when the network is the
+limit: a far end's estimate follows what it receives (at most 1.5× it), so while the
+encoder sends well under its target (a still picture codes small) the picture keeps
+its size. A new or resumed incoming stream reaches its sink only from its first
+keyframe, and asks for one if that keyframe never came (a relay drops a stream's first
+packets until it has latched).
 
 ---
 

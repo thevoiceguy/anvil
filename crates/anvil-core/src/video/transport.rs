@@ -276,6 +276,9 @@ pub(crate) mod looped {
         peer: mpsc::Sender<Inbound>,
         /// Drop every n-th RTP packet (0: none).
         drop_every: AtomicU32,
+        /// The first this many RTP packets are lost (a relay that has not
+        /// latched yet).
+        drop_first: AtomicU32,
         sent: AtomicU32,
         /// A bottleneck's rate (0: none) and when it is next free: a
         /// packet waits its turn, and is dropped when the queue holds more
@@ -312,6 +315,7 @@ pub(crate) mod looped {
                 peer,
                 queue,
                 drop_every: AtomicU32::new(0),
+                drop_first: AtomicU32::new(0),
                 sent: AtomicU32::new(0),
                 limit_kbps: AtomicU32::new(0),
                 free_at: Mutex::new(None),
@@ -322,6 +326,10 @@ pub(crate) mod looped {
 
         pub(crate) fn drop_every(&self, n: u32) {
             self.drop_every.store(n, Ordering::Relaxed);
+        }
+
+        pub(crate) fn drop_first(&self, n: u32) {
+            self.drop_first.store(n, Ordering::Relaxed);
         }
 
         /// When `bytes` leave a bottleneck of `kbps`; `None` when a full
@@ -357,6 +365,9 @@ pub(crate) mod looped {
                 return;
             };
             self.rtp_log.lock().push(packet.header.sequence_number);
+            if n <= self.drop_first.load(Ordering::Relaxed) {
+                return;
+            }
             if every != 0 && n.is_multiple_of(every) {
                 return;
             }

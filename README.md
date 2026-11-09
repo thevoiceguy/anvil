@@ -144,6 +144,7 @@ call events only when its admin and call manager share an events server
 |---------------|---------------------------------------------------------------|
 | `anvil-core`  | Softphone state machine; orchestrates SIP + media             |
 | `anvil-audio` | Cross-platform mic/speaker via `cpal`, plus AEC/NS/AGC        |
+| `anvil-video` | The desktop's video: cameras, codecs (VP8, H.264 via Cisco's OpenH264), tiles |
 | `anvil-brand` | FCP tenant branding — HTTP fetch + filesystem cache           |
 | `anvil-codec` | Opus wrapper (forge-media already provides G.711/G.722)       |
 | `anvil-fcp`   | FCP's client: discovery, sign-in, the app session, settings, the user's data and events |

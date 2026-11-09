@@ -364,6 +364,23 @@ impl Drop for VideoSession {
     }
 }
 
+/// A target this far above what the encoder sends means the sender is
+/// application-limited (a still picture codes small).
+const APP_LIMITED: f64 = 1.3;
+
+/// The rate the ladder steps by. A far end's estimate tracks what it
+/// receives (at most 1.5× it, as GCC caps it), so while the encoder sends
+/// well under the target a falling estimate says only that the picture is
+/// cheap, not that the network is short: the picture keeps its size, and
+/// may still grow. Once the target falls to near what is sent, the
+/// network is the limit and the ladder follows it down.
+pub(crate) fn ladder_kbps(target: u32, sent_kbps: Option<u32>, previous: u32) -> u32 {
+    match sent_kbps {
+        Some(sent) if f64::from(target) >= APP_LIMITED * f64::from(sent) => previous.max(target),
+        _ => target,
+    }
+}
+
 /// The picture an encoder aims for at `kbps`: 720p from a megabit, 360p
 /// from 450 kb/s, 180p below; never above `max`. Under 150 kb/s, at most
 /// 15 frames a second.
@@ -417,6 +434,11 @@ async fn send_loop(mut s: SendLoop) {
     let ours = s.cfg.encodings.first().copied().unwrap_or(EncodingId(0));
     let mut target = s.cfg.kbps;
     let mut target_changed = false;
+    // The rate the picture's size was chosen for, and what the encoder
+    // actually sent over the last second.
+    let mut rung_kbps = s.cfg.kbps;
+    let mut sent_kbps: Option<u32> = None;
+    let mut sent_window = (Instant::now(), 0u64);
     let mut last_forced: Option<Instant> = None;
     let mut resent: HashMap<u16, Instant> = HashMap::new();
     let mut budget = ResendBudget::new();
@@ -440,7 +462,7 @@ async fn send_loop(mut s: SendLoop) {
                 Ok(src) => {
                     // A new source starts on a keyframe, as encoders do.
                     if target != s.cfg.kbps {
-                        let (max, fps) = ladder(target, s.cfg.max, s.cfg.fps);
+                        let (max, fps) = ladder(rung_kbps, s.cfg.max, s.cfg.fps);
                         src.set_target(target, max, fps);
                     }
                     source = Some(src);
@@ -470,9 +492,11 @@ async fn send_loop(mut s: SendLoop) {
             }
             if target_changed {
                 target_changed = false;
-                let (max, fps) = ladder(target, s.cfg.max, s.cfg.fps);
+                rung_kbps = ladder_kbps(target, sent_kbps, rung_kbps);
+                let (max, fps) = ladder(rung_kbps, s.cfg.max, s.cfg.fps);
                 tracing::debug!(
                     kbps = target,
+                    sent_kbps,
                     ?max,
                     fps,
                     "video: the far end's estimate moved the target"
@@ -563,6 +587,12 @@ async fn send_loop(mut s: SendLoop) {
                     s.transport.send_rtp(packet).await;
                     seq = seq.wrapping_add(1);
                 }
+                sent_window.1 += sent.2 as u64;
+                let window = sent_window.0.elapsed();
+                if window >= Duration::from_secs(1) {
+                    sent_kbps = Some((sent_window.1 * 8 / window.as_millis().max(1) as u64) as u32);
+                    sent_window = (Instant::now(), 0);
+                }
                 let mut o = s.outgoing.lock();
                 o.packets = o.packets.wrapping_add(sent.0);
                 o.octets = o.octets.wrapping_add(sent.1 as u32);
@@ -591,6 +621,11 @@ struct Incoming {
     started: Instant,
     /// Whether the picture is broken (the sink told so) until a keyframe.
     broken: bool,
+    /// A keyframe has arrived since the stream (re)started: until one
+    /// does, nothing reaches the sink (a decoder makes garbage of a
+    /// picture without its keyframe, as when a relay drops a stream's
+    /// first packets before it has latched).
+    keyed: bool,
     stats: SourceStats,
     playout: Playout,
     /// The highest sequence number, for loss on first arrival.
@@ -667,6 +702,7 @@ async fn recv_loop(mut r: RecvLoop) {
                             s.playout.reset();
                             s.highest = None;
                             s.started = at;
+                            s.keyed = false;
                             r.estimator.forget(*ssrc);
                         }
                     }
@@ -729,6 +765,7 @@ impl RecvLoop {
                     last_packet: at,
                     started: at,
                     broken: false,
+                    keyed: false,
                     stats: SourceStats::new(ssrc, CLOCK as u32),
                     playout: Playout::new(CLOCK as u32),
                     highest: None,
@@ -758,6 +795,10 @@ impl RecvLoop {
         for event in s.assembler.push(packet) {
             match event {
                 AssemblerEvent::Frame(f) => {
+                    if !(f.keyframe || s.keyed) {
+                        continue;
+                    }
+                    s.keyed = true;
                     s.broken = false;
                     s.frames += 1;
                     s.playout.set_jitter(s.stats.jitter_ms());
@@ -834,7 +875,7 @@ impl RecvLoop {
             }
         }
         let waited = s.broken || at.saturating_duration_since(s.started) >= FIRST_KEYFRAME_GRACE;
-        if s.assembler.needs_keyframe() && waited && s.gate.allow() {
+        if (s.assembler.needs_keyframe() || !s.keyed) && waited && s.gate.allow() {
             s.keyframe_requests += 1;
             out.push(keyframe_request(fb, self.ssrc, ssrc, s));
         }
@@ -1231,6 +1272,51 @@ mod tests {
                 assert_eq!(s.unreadable, 0);
             }
         }
+    }
+
+    #[tokio::test]
+    async fn a_stream_whose_first_keyframe_is_lost_shows_nothing_until_it_asks_for_one() {
+        // a's sessions start before b's receives: as when a relay drops a
+        // stream's first packets, its first keyframe never arrives.
+        let a_host = SyntheticVideoHost::new(&[VideoCodec::H264]).with_fps(50);
+        let b_host = SyntheticVideoHost::new(&[VideoCodec::H264]).with_fps(50);
+        let (a_tx, a_rx) = mpsc::channel(super::super::transport::INBOUND_QUEUE);
+        let (b_tx, b_rx) = mpsc::channel(super::super::transport::INBOUND_QUEUE);
+        let a_out = LoopTransport::new(b_tx);
+        a_out.drop_first(12);
+        let _a = VideoSession::start(
+            plan(VideoCodec::H264, true, ALL),
+            Arc::new(a_host.clone()),
+            a_out.clone(),
+            a_rx,
+            SessionLinks::default(),
+        );
+        let _b = VideoSession::start(
+            plan(VideoCodec::H264, false, ALL),
+            Arc::new(b_host.clone()),
+            LoopTransport::new(a_tx),
+            b_rx,
+            SessionLinks::default(),
+        );
+        until("frames arrive at b", || {
+            b_host
+                .record()
+                .received
+                .values()
+                .next()
+                .is_some_and(|s| s.frames.len() >= 20)
+        })
+        .await;
+        let s = b_host.record().received.values().next().unwrap().clone();
+        assert!(
+            s.frames[0].1,
+            "the picture starts on a keyframe: {:?}",
+            s.frames
+        );
+        assert!(
+            a_host.record().sent[0].keyframe_requests >= 1,
+            "b asked for one"
+        );
     }
 
     #[tokio::test]
@@ -1704,5 +1790,18 @@ mod tests {
             height: 240,
         };
         assert_eq!(ladder(1500, small, 30).0, small, "never above the max");
+    }
+
+    #[test]
+    fn a_cheap_picture_keeps_its_size_and_a_short_network_takes_it_down() {
+        // Sending 95 kb/s of a still picture; the far end allows 1.5× that.
+        assert_eq!(ladder_kbps(176, Some(95), 1500), 1500);
+        // Allowed more: it may grow from a lower rung.
+        assert_eq!(ladder_kbps(1200, Some(300), 600), 1200);
+        // The estimate under what is sent: the network is the limit.
+        assert_eq!(ladder_kbps(400, Some(900), 1500), 400);
+        assert_eq!(ladder_kbps(1000, Some(900), 1500), 1000);
+        // Nothing measured yet: the estimate as it is.
+        assert_eq!(ladder_kbps(300, None, 1500), 300);
     }
 }

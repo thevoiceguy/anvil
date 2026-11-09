@@ -147,8 +147,10 @@ struct Cli {
     #[arg(long)]
     agc: bool,
 
-    /// Video: `synthetic` sends numbered frames and checks those that
-    /// arrive, for headless tests (the platform hosts come with the app).
+    /// Video: `camera` films with this computer's camera (Linux: V4L2,
+    /// VP8, and H.264 once Cisco's OpenH264 is fetched); `pattern` films
+    /// a moving test pattern through the same codecs; `synthetic` sends
+    /// numbered frames and checks those that arrive, for headless tests.
     /// `--call` then offers video, `--auto-answer` takes it, and the far
     /// end asking to see us turns our camera on. A summary prints at
     /// hangup.
@@ -159,11 +161,47 @@ struct Cli {
     /// on this many seconds after it is answered (a re-INVITE).
     #[arg(long, value_name = "SECS")]
     video_at: Option<u64>,
+
+    /// With `--video camera` or `pattern`: at hangup, write the last
+    /// picture received to this file (PNG).
+    #[arg(long, value_name = "PATH")]
+    video_snapshot: Option<std::path::PathBuf>,
+
+    /// With `--video camera` or `pattern`: do not fetch Cisco's OpenH264
+    /// (calls then offer VP8 only).
+    #[arg(long)]
+    no_openh264: bool,
 }
 
 #[derive(clap::ValueEnum, Clone, Copy, Debug)]
 enum VideoArg {
+    Camera,
+    Pattern,
     Synthetic,
+}
+
+/// The video host the CLI runs with, kept for its summary at hangup.
+#[derive(Clone)]
+enum CliVideo {
+    Synthetic(anvil_core::video::synthetic::SyntheticVideoHost),
+    Desktop(anvil_video::DesktopVideoHost),
+}
+
+impl CliVideo {
+    fn host(&self) -> Box<dyn anvil_core::video::host::VideoHost> {
+        match self {
+            CliVideo::Synthetic(h) => Box::new(h.clone()),
+            CliVideo::Desktop(h) => Box::new(h.clone()),
+        }
+    }
+}
+
+/// Where Cisco's OpenH264 is kept: the user's data directory.
+fn openh264_dir() -> std::path::PathBuf {
+    dirs::data_local_dir()
+        .unwrap_or_else(std::env::temp_dir)
+        .join("anvil")
+        .join("openh264")
 }
 
 #[derive(clap::ValueEnum, Clone, Copy, Debug)]
@@ -1094,7 +1132,7 @@ async fn phone_config(
     AnvilConfig,
     Option<Arc<ToneStats>>,
     Option<Arc<anvil_fcp::FcpClient>>,
-    Option<anvil_core::video::synthetic::SyntheticVideoHost>,
+    Option<CliVideo>,
 )> {
     let tls_extra_ca_pem = if let Some(path) = cli.tls_ca.as_ref() {
         Some(std::fs::read(path).map_err(|e| anyhow::anyhow!("read --tls-ca: {e}"))?)
@@ -1142,9 +1180,38 @@ async fn phone_config(
         ),
         };
 
-    let synthetic_video = cli
-        .video
-        .map(|VideoArg::Synthetic| anvil_core::video::synthetic::SyntheticVideoHost::default());
+    let video = match cli.video {
+        None => None,
+        Some(VideoArg::Synthetic) => Some(CliVideo::Synthetic(
+            anvil_core::video::synthetic::SyntheticVideoHost::default(),
+        )),
+        Some(kind) => {
+            let dir = openh264_dir();
+            let host = if matches!(kind, VideoArg::Pattern) {
+                anvil_video::DesktopVideoHost::with_cameras(
+                    anvil_video::PatternCamera::default(),
+                    &dir,
+                )
+            } else {
+                anvil_video::DesktopVideoHost::platform(&dir)
+            };
+            if !cli.no_openh264 {
+                match host.fetch_openh264(&dir).await {
+                    Ok(_) => println!("[video] {}", anvil_video::openh264_fetch::NOTICE),
+                    Err(e) => println!("[video] no H.264 ({e}); offering VP8"),
+                }
+            }
+            use anvil_core::video::host::VideoHost as _;
+            for c in host.cameras() {
+                println!("[video] camera {}: {}", c.id, c.name);
+            }
+            println!(
+                "[video] codecs: {:?}",
+                host.codecs().iter().map(|c| c.codec).collect::<Vec<_>>()
+            );
+            Some(CliVideo::Desktop(host))
+        }
+    };
     let (audio, tone_stats): (
         Box<dyn anvil_core::audio::AudioHost>,
         Option<Arc<ToneStats>>,
@@ -1168,20 +1235,18 @@ async fn phone_config(
         account,
         media,
         audio,
-        video: synthetic_video
-            .clone()
-            .map(|h| Box::new(h) as Box<dyn anvil_core::video::host::VideoHost>),
+        video: video.as_ref().map(CliVideo::host),
         brand,
     };
 
-    Ok((cfg, tone_stats, fcp, synthetic_video))
+    Ok((cfg, tone_stats, fcp, video))
 }
 
 async fn run(
     cli: Cli,
     cfg: AnvilConfig,
     tone_stats: Option<Arc<ToneStats>>,
-    video: Option<anvil_core::video::synthetic::SyntheticVideoHost>,
+    video: Option<CliVideo>,
 ) -> Result<()> {
     tracing::info!("starting Anvil");
     let (anvil, mut events) = Anvil::start(cfg).await?;
@@ -1438,7 +1503,36 @@ async fn run(
         );
     }
 
-    if let Some(video) = video.as_ref() {
+    if let Some(CliVideo::Desktop(host)) = video.as_ref() {
+        // What was shown: each tile's pictures, and the last one received
+        // written out if asked.
+        let tiles = host.tiles();
+        for key in tiles.keys() {
+            if let Some(st) = tiles.stats(key) {
+                println!(
+                    "[video] {key:?}: {} pictures shown, last {}x{}",
+                    st.presented, st.width, st.height
+                );
+            }
+        }
+        if let Some(path) = cli.video_snapshot.as_ref() {
+            let last = tiles
+                .keys()
+                .into_iter()
+                .filter(|k| matches!(k, anvil_video::TileKey::Stream(_)))
+                .find_map(|k| tiles.last(k));
+            match last {
+                Some(p) => match anvil_video::png::write(path, &p) {
+                    Ok(()) => {
+                        println!("[video] the last picture received is in {}", path.display())
+                    }
+                    Err(e) => println!("[video] {}: {e}", path.display()),
+                },
+                None => println!("[video] no picture received to write"),
+            }
+        }
+    }
+    if let Some(CliVideo::Synthetic(video)) = video.as_ref() {
         // What the synthetic camera sent, and what arrived: in order from a
         // keyframe, or not.
         let record = video.record();
