@@ -398,8 +398,7 @@ pub(crate) struct MfDecoder {
 
 #[derive(Debug, Clone, Copy)]
 struct Format {
-    /// The buffer's size (the coded size: a height of 360 decodes into 368).
-    width: u32,
+    /// The buffer's height (the coded height: 360 lines decode into 368).
     height: u32,
     stride: u32,
     /// The picture in it.
@@ -477,7 +476,6 @@ fn format(ty: &IMFMediaType) -> Option<Format> {
             _ => (0, 0, width, height),
         };
         Some(Format {
-            width,
             height,
             stride,
             show,
