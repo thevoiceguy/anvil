@@ -285,17 +285,10 @@ impl MfEncoder {
 
     fn make(&self, width: u32, height: u32) -> Result<IMFTransform, String> {
         let t = make(&CLSID_MSH264EncoderMFT)?;
-        // SAFETY: the encoder's documented set-up: output type, then input
-        // type, then its codec API.
+        // SAFETY: the encoder's documented set-up: its codec API first (low
+        // latency is taken only before the media types), then the output
+        // type, then the input type.
         unsafe {
-            let out = video_type(&MFVideoFormat_H264, width, height, self.fps)?;
-            out.SetUINT32(&MF_MT_AVG_BITRATE, self.kbps * 1000)
-                .map_err(err("type"))?;
-            out.SetUINT32(&MF_MT_MPEG2_PROFILE, eAVEncH264VProfile_Base.0 as u32)
-                .map_err(err("type"))?;
-            t.SetOutputType(0, &out, 0).map_err(err("output type"))?;
-            let input = video_type(&MFVideoFormat_NV12, width, height, self.fps)?;
-            t.SetInputType(0, &input, 0).map_err(err("input type"))?;
             if let Ok(attributes) = t.GetAttributes() {
                 let _ = attributes.SetUINT32(&MF_LOW_LATENCY, 1);
             }
@@ -305,11 +298,22 @@ impl MfEncoder {
                     &CODECAPI_AVEncCommonRateControlMode,
                     &variant_u32(eAVEncCommonRateControlMode_CBR.0 as u32),
                 );
+                let _ = api.SetValue(
+                    &CODECAPI_AVEncCommonMeanBitRate,
+                    &variant_u32(self.kbps * 1000),
+                );
                 // Keyframes when the far end asks; one a minute regardless.
                 let _ = api.SetValue(&CODECAPI_AVEncMPVGOPSize, &variant_u32(60 * self.fps));
             }
+            let out = video_type(&MFVideoFormat_H264, width, height, self.fps)?;
+            out.SetUINT32(&MF_MT_AVG_BITRATE, self.kbps * 1000)
+                .map_err(err("type"))?;
+            out.SetUINT32(&MF_MT_MPEG2_PROFILE, eAVEncH264VProfile_Base.0 as u32)
+                .map_err(err("type"))?;
+            t.SetOutputType(0, &out, 0).map_err(err("output type"))?;
+            let input = video_type(&MFVideoFormat_NV12, width, height, self.fps)?;
+            t.SetInputType(0, &input, 0).map_err(err("input type"))?;
         }
-        Self::rate(&t, self.kbps);
         Ok(t)
     }
 
