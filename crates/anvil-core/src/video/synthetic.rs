@@ -149,7 +149,10 @@ impl VideoHost for SyntheticVideoHost {
             record.sent.len() - 1
         };
         let mut tick = tokio::time::interval(Duration::from_millis(1000 / u64::from(self.fps)));
-        tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+        // Ticks keep to the schedule (a late wake does not push the rest
+        // back), so the rate is the one asked for wherever timers are
+        // coarse: Windows wakes a timer on its 15.6 ms tick.
+        tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Burst);
         Ok(Box::new(SyntheticSource {
             codec: cfg.codec,
             encoding: cfg.encodings.first().copied().unwrap_or(EncodingId(0)),
