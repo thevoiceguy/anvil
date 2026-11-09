@@ -11,7 +11,9 @@
 //!   for a socket pair and SDES keys per section, and [`CallVideo`] here,
 //!   which turns a call's offer and answer into plans.
 
+pub(crate) mod bwe;
 pub mod host;
+pub(crate) mod playout;
 pub(crate) mod sdp;
 pub(crate) mod session;
 pub mod synthetic;
@@ -24,8 +26,9 @@ use std::sync::Arc;
 use tokio::sync::mpsc;
 
 use self::host::{EncodingId, Resolution, SendConfig, StreamId, VideoCodec, VideoHost, VideoKind};
+use self::playout::AudioClock;
 use self::sdp::{LocalSection, RemoteSection};
-use self::session::VideoSession;
+use self::session::{SessionLinks, VideoSession};
 use self::transport::SdesTransport;
 use crate::call::MediaSockets;
 use crate::config::SrtpMode;
@@ -51,6 +54,41 @@ impl CallMedia {
 pub enum VideoStreamDirection {
     Incoming,
     Outgoing,
+}
+
+/// One video stream's last second ([`Event::VideoStats`]).
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct VideoStreamStats {
+    pub direction: VideoStreamDirection,
+    pub kind: VideoKind,
+    pub codec: VideoCodec,
+    /// On the wire, headers included.
+    pub kbps: f32,
+    pub fps: f32,
+    /// Incoming: packets the network lost, before any were sent again.
+    /// Outgoing: the share of ours the far end last reported lost. `None`
+    /// until there is something to say.
+    pub loss_pct: Option<f32>,
+    /// Incoming: packets we asked for again; outgoing: those asked of us.
+    pub nacks: u32,
+    /// Incoming: keyframes we asked for; outgoing: those asked of us.
+    pub keyframe_requests: u32,
+    /// Outgoing: what the encoder aims for (the far end's REMB, within
+    /// what the call was set up to send).
+    pub target_kbps: Option<u32>,
+    /// Incoming: what we tell the far end it may send (REMB), for all of
+    /// the section's incoming streams together.
+    pub estimate_kbps: Option<u32>,
+    /// Incoming: RFC 3550's interarrival jitter, in ms.
+    pub jitter_ms: Option<f32>,
+    /// Incoming: how long a frame waits before it is shown.
+    pub playout_delay_ms: Option<f32>,
+    /// Incoming: how far the picture is behind its audio, in ms, once
+    /// sender reports tie the two (+: late; within a frame or two when
+    /// the call is in sync).
+    pub av_offset_ms: Option<f32>,
+    /// Outgoing: the round trip, from the far end's reports.
+    pub rtt_ms: Option<f32>,
 }
 
 /// What the far end takes of RTCP feedback (RFC 4585, RFC 5104, REMB).
@@ -99,6 +137,14 @@ impl VideoEvents {
         });
     }
 
+    pub(crate) fn stats(&self, stream: StreamId, stats: VideoStreamStats) {
+        let _ = self.tx.try_send(Event::VideoStats {
+            call: self.call,
+            stream,
+            stats,
+        });
+    }
+
     pub(crate) fn stopped(&self, stream: StreamId) {
         let _ = self.tx.try_send(Event::VideoStopped {
             call: self.call,
@@ -140,6 +186,8 @@ pub(crate) struct CallVideo {
     /// Numbers the call's streams.
     streams: Arc<AtomicU32>,
     capture: crate::capture::CaptureSlot,
+    /// The call's audio, once its pipeline runs: lip sync and the CNAME.
+    audio: Option<Arc<dyn AudioClock>>,
 }
 
 impl CallVideo {
@@ -183,6 +231,7 @@ impl CallVideo {
             host,
             streams: Arc::default(),
             capture,
+            audio: None,
         })
     }
 
@@ -242,6 +291,7 @@ impl CallVideo {
             host,
             streams: Arc::default(),
             capture,
+            audio: None,
         })
     }
 
@@ -266,6 +316,11 @@ impl CallVideo {
             (_, false) => (None, None),
         };
         Some((codec, keys))
+    }
+
+    /// The call's audio is running: video keeps time with it.
+    pub(crate) fn set_audio(&mut self, audio: Option<Arc<dyn AudioClock>>) {
+        self.audio = audio;
     }
 
     /// Whether any section is (to be) carried.
@@ -340,9 +395,12 @@ impl CallVideo {
                         &codec,
                         direction,
                         &self.host,
-                        &self.streams,
+                        SessionLinks {
+                            streams: Arc::clone(&self.streams),
+                            events: events.clone(),
+                            audio: self.audio.clone(),
+                        },
                         &self.capture,
-                        events.clone(),
                     );
                 }
                 _ => {
@@ -369,9 +427,12 @@ impl CallVideo {
                 &codec,
                 direction,
                 &self.host,
-                &self.streams,
+                SessionLinks {
+                    streams: Arc::clone(&self.streams),
+                    events: events.clone(),
+                    audio: self.audio.clone(),
+                },
                 &self.capture,
-                events.clone(),
             );
         }
     }
@@ -381,9 +442,8 @@ impl CallVideo {
         codec: &sdp::SectionCodec,
         direction: MediaDirection,
         host: &Arc<dyn VideoHost>,
-        streams: &Arc<AtomicU32>,
+        links: SessionLinks,
         capture: &crate::capture::CaptureSlot,
-        events: Option<VideoEvents>,
     ) {
         let (Some(sockets), Some(remote)) = (s.sockets.clone(), s.remote.as_ref()) else {
             s.stop();
@@ -439,8 +499,7 @@ impl CallVideo {
             Arc::clone(host),
             t.clone(),
             rx,
-            Arc::clone(streams),
-            events,
+            links,
         ));
         s.transport = Some(t);
     }

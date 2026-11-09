@@ -277,6 +277,13 @@ pub(crate) mod looped {
         /// Drop every n-th RTP packet (0: none).
         drop_every: AtomicU32,
         sent: AtomicU32,
+        /// A bottleneck's rate (0: none) and when it is next free: a
+        /// packet waits its turn, and is dropped when the queue holds more
+        /// than [`QUEUE_LIMIT`] of waiting.
+        limit_kbps: AtomicU32,
+        free_at: Mutex<Option<Instant>>,
+        /// The bottleneck's queue, drained in order by one task.
+        queue: mpsc::UnboundedSender<(Instant, RtpPacket)>,
         /// RTP packets sent, by sequence number, and RTCP packets.
         pub(crate) rtp_log: Mutex<Vec<u16>>,
         pub(crate) rtcp_log: Mutex<Vec<Bytes>>,
@@ -284,10 +291,24 @@ pub(crate) mod looped {
 
     impl LoopTransport {
         pub(crate) fn new(peer: mpsc::Sender<Inbound>) -> Arc<Self> {
+            let (queue, mut queued) = mpsc::unbounded_channel::<(Instant, RtpPacket)>();
+            let out = peer.clone();
+            tokio::spawn(async move {
+                while let Some((depart, packet)) = queued.recv().await {
+                    tokio::time::sleep_until(depart.into()).await;
+                    let _ = out.try_send(Inbound::Rtp {
+                        packet,
+                        at: Instant::now(),
+                    });
+                }
+            });
             Arc::new(Self {
                 peer,
+                queue,
                 drop_every: AtomicU32::new(0),
                 sent: AtomicU32::new(0),
+                limit_kbps: AtomicU32::new(0),
+                free_at: Mutex::new(None),
                 rtp_log: Mutex::default(),
                 rtcp_log: Mutex::default(),
             })
@@ -296,7 +317,15 @@ pub(crate) mod looped {
         pub(crate) fn drop_every(&self, n: u32) {
             self.drop_every.store(n, Ordering::Relaxed);
         }
+
+        /// Carry RTP through a bottleneck of `kbps` (0: none).
+        pub(crate) fn limit_kbps(&self, kbps: u32) {
+            self.limit_kbps.store(kbps, Ordering::Relaxed);
+        }
     }
+
+    /// The most a bottleneck's queue holds, in time to drain it.
+    const QUEUE_LIMIT: std::time::Duration = std::time::Duration::from_millis(300);
 
     #[async_trait]
     impl MediaTransport for LoopTransport {
@@ -310,10 +339,28 @@ pub(crate) mod looped {
             if every != 0 && n.is_multiple_of(every) {
                 return;
             }
-            let _ = self.peer.try_send(Inbound::Rtp {
-                packet,
-                at: Instant::now(),
-            });
+            let kbps = self.limit_kbps.load(Ordering::Relaxed);
+            if kbps == 0 {
+                let _ = self.peer.try_send(Inbound::Rtp {
+                    packet,
+                    at: Instant::now(),
+                });
+                return;
+            }
+            let now = Instant::now();
+            let bits = (packet.payload.len() as u64 + 40) * 8;
+            let depart = {
+                let mut free = self.free_at.lock();
+                let start = free.filter(|f| *f > now).unwrap_or(now);
+                if start.saturating_duration_since(now) > QUEUE_LIMIT {
+                    return;
+                }
+                let depart =
+                    start + std::time::Duration::from_micros(bits * 1000 / u64::from(kbps));
+                *free = Some(depart);
+                depart
+            };
+            let _ = self.queue.send((depart, packet));
         }
 
         async fn send_rtcp(&self, packet: Bytes) {

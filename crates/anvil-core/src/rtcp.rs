@@ -62,7 +62,20 @@ pub(crate) struct RtcpState {
     /// Where the far end's RTCP comes from: where ours goes (symmetric,
     /// past a NAT that moved the port).
     latched: Option<SocketAddr>,
+    /// The far end's last sender report: (its NTP time in µs, its RTP
+    /// timestamp), tying its audio clock to its wall clock.
+    their_report: Option<(i64, u32)>,
+    /// From capture (their NTP) to arrival (ours), in µs, smoothed: what
+    /// video waits on for lip sync.
+    transit_us: Option<f64>,
 }
+
+/// The playback device's latency, until hosts report their own: a
+/// typical output buffer.
+pub(crate) const OUTPUT_LATENCY: Duration = Duration::from_millis(40);
+
+/// How much of each new transit sample the smoothed one takes.
+const TRANSIT_GAIN: f64 = 1.0 / 16.0;
 
 impl RtcpState {
     pub(crate) fn new(ssrc: u32, clock_rate: u32, cname: String) -> Arc<Mutex<Self>> {
@@ -77,6 +90,8 @@ impl RtcpState {
             reports_sent: 0,
             reports_received: 0,
             latched: None,
+            their_report: None,
+            transit_us: None,
         }))
     }
 
@@ -89,9 +104,26 @@ impl RtcpState {
     pub(crate) fn on_received(&mut self, ssrc: u32, seq: u16, rtp_timestamp: u32, now: Instant) {
         if self.theirs.as_ref().map(SourceStats::ssrc) != Some(ssrc) {
             self.theirs = Some(SourceStats::new(ssrc, self.clock_rate));
+            self.their_report = None;
+            self.transit_us = None;
         }
         if let Some(theirs) = self.theirs.as_mut() {
             theirs.on_packet(seq, rtp_timestamp, now);
+        }
+        if let Some((ntp, rtp)) = self.their_report {
+            let captured = ntp
+                + i64::from(rtp_timestamp.wrapping_sub(rtp) as i32) * 1_000_000
+                    / i64::from(self.clock_rate);
+            let arrived = crate::video::playout::instant_ntp_us(
+                now,
+                Instant::now(),
+                crate::video::playout::ntp_now_us(),
+            );
+            let sample = (arrived - captured) as f64;
+            self.transit_us = Some(match self.transit_us {
+                None => sample,
+                Some(t) => t + TRANSIT_GAIN * (sample - t),
+            });
         }
     }
 
@@ -154,6 +186,15 @@ impl RtcpState {
                 RtcpPacket::SenderReport(sr) => {
                     if let Some(theirs) = self.theirs.as_mut() {
                         theirs.on_sender_report(sr.ntp_timestamp_msw, sr.ntp_timestamp_lsw, now);
+                        if theirs.ssrc() == sr.ssrc {
+                            self.their_report = Some((
+                                crate::video::playout::ntp_us(
+                                    (u64::from(sr.ntp_timestamp_msw) << 32)
+                                        | u64::from(sr.ntp_timestamp_lsw),
+                                ),
+                                sr.rtp_timestamp,
+                            ));
+                        }
                     }
                     sr.report_blocks
                 }
@@ -185,6 +226,20 @@ impl RtcpState {
                 [only] => Some(only),
                 _ => None,
             })
+    }
+}
+
+impl crate::video::playout::AudioClock for Mutex<RtcpState> {
+    fn transit_us(&self) -> Option<i64> {
+        self.lock().transit_us.map(|t| t as i64)
+    }
+
+    fn output_latency(&self) -> Duration {
+        OUTPUT_LATENCY
+    }
+
+    fn cname(&self) -> String {
+        self.lock().cname.clone()
     }
 }
 

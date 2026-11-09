@@ -261,6 +261,12 @@ pub enum Event {
         kind: crate::video::host::VideoKind,
         codec: crate::video::host::VideoCodec,
     },
+    /// A video stream's last second, each second while it runs.
+    VideoStats {
+        call: CallId,
+        stream: crate::video::host::StreamId,
+        stats: crate::video::VideoStreamStats,
+    },
     /// A video stream of `call` ended (an incoming one fell silent, or the
     /// section was dropped). The end of a call ends its streams unsaid.
     VideoStopped {

@@ -28,8 +28,8 @@ use crate::error::AnvilError;
 pub struct SyntheticVideoHost {
     codecs: Vec<VideoCodec>,
     fps: u32,
-    keyframe_bytes: usize,
-    frame_bytes: usize,
+    /// Fixed sizes; `None`, sized by the target as an encoder would.
+    sizes: Option<(usize, usize)>,
     record: Arc<Mutex<SyntheticRecord>>,
 }
 
@@ -59,6 +59,9 @@ pub struct ReceivedStream {
     pub config: ReceiveConfig,
     /// Each frame's number and whether it was a keyframe, as shown.
     pub frames: Vec<(u32, bool)>,
+    /// For each frame, how long after it was handed over it was to be
+    /// shown, in ms (playout delay and lip sync).
+    pub waits_ms: Vec<f32>,
     /// Frames that were not ours (not numbered as this host numbers).
     pub unreadable: u32,
     /// Times the core said the picture was lost.
@@ -81,13 +84,14 @@ impl Default for SyntheticVideoHost {
 }
 
 impl SyntheticVideoHost {
-    /// A host that encodes and decodes `codecs`, at 30 frames a second.
+    /// A host that encodes and decodes `codecs`, at 30 frames a second,
+    /// each frame sized to the target bit rate (a keyframe four times
+    /// the rest), as an encoder's rate control would.
     pub fn new(codecs: &[VideoCodec]) -> Self {
         Self {
             codecs: codecs.to_vec(),
             fps: 30,
-            keyframe_bytes: 4000,
-            frame_bytes: 900,
+            sizes: None,
             record: Arc::default(),
         }
     }
@@ -97,10 +101,10 @@ impl SyntheticVideoHost {
         self
     }
 
-    /// The size of a keyframe and of any other frame, in bytes.
+    /// The size of a keyframe and of any other frame, in bytes, whatever
+    /// the target.
     pub fn with_frame_sizes(mut self, keyframe: usize, frame: usize) -> Self {
-        self.keyframe_bytes = keyframe.max(32);
-        self.frame_bytes = frame.max(32);
+        self.sizes = Some((keyframe.max(32), frame.max(32)));
         self
     }
 
@@ -152,8 +156,9 @@ impl VideoHost for SyntheticVideoHost {
             tick,
             next: 0,
             keyframe: Arc::new(AtomicBool::new(true)),
-            keyframe_bytes: self.keyframe_bytes,
-            frame_bytes: self.frame_bytes,
+            fps: self.fps,
+            sizes: self.sizes,
+            target_kbps: Arc::new(AtomicU32::new(cfg.kbps.max(1))),
             record: Arc::clone(&self.record),
             index,
             requests: Arc::new(AtomicU32::new(0)),
@@ -173,6 +178,7 @@ impl VideoHost for SyntheticVideoHost {
             ReceivedStream {
                 config: cfg,
                 frames: Vec::new(),
+                waits_ms: Vec::new(),
                 unreadable: 0,
                 lost: 0,
                 stopped: false,
@@ -192,8 +198,9 @@ struct SyntheticSource {
     tick: tokio::time::Interval,
     next: u32,
     keyframe: Arc<AtomicBool>,
-    keyframe_bytes: usize,
-    frame_bytes: usize,
+    fps: u32,
+    sizes: Option<(usize, usize)>,
+    target_kbps: Arc<AtomicU32>,
     record: Arc<Mutex<SyntheticRecord>>,
     index: usize,
     requests: Arc<AtomicU32>,
@@ -210,11 +217,14 @@ impl VideoSource for SyntheticSource {
         self.next += 1;
         let keyframe =
             self.keyframe.swap(false, Ordering::Relaxed) || number.is_multiple_of(KEYFRAME_EVERY);
-        let size = if keyframe {
-            self.keyframe_bytes
-        } else {
-            self.frame_bytes
-        };
+        let (key_bytes, frame_bytes) = self.sizes.unwrap_or_else(|| {
+            // A second's bytes over a GOP of one keyframe at four times
+            // the others' size, spread across the frames.
+            let per_frame =
+                self.target_kbps.load(Ordering::Relaxed) as usize * 125 / self.fps.max(1) as usize;
+            (per_frame * 4, per_frame.max(64))
+        });
+        let size = if keyframe { key_bytes } else { frame_bytes };
         let data = frame(self.codec, number, keyframe, size);
         if let Some(s) = self.record.lock().sent.get_mut(self.index) {
             s.frames += 1;
@@ -239,6 +249,7 @@ impl VideoSource for SyntheticSource {
     }
 
     fn set_target(&self, kbps: u32, max: Resolution, fps: u32) {
+        self.target_kbps.store(kbps.max(1), Ordering::Relaxed);
         if let Some(s) = self.record.lock().sent.get_mut(self.index) {
             s.targets.push((kbps, max, fps));
         }
@@ -260,14 +271,23 @@ struct SyntheticSink {
 }
 
 impl VideoSink for SyntheticSink {
-    fn frame(&mut self, frame: CodedFrame, _at: Instant) {
+    fn frame(&mut self, frame: CodedFrame, at: Instant) {
+        let now = Instant::now();
+        let wait = if at >= now {
+            at.duration_since(now).as_secs_f32()
+        } else {
+            -now.duration_since(at).as_secs_f32()
+        };
         let number = number_of(self.codec, &frame.data);
         let mut record = self.record.lock();
         let Some(s) = record.received.get_mut(&self.stream) else {
             return;
         };
         match number {
-            Some(n) => s.frames.push((n, frame.keyframe)),
+            Some(n) => {
+                s.frames.push((n, frame.keyframe));
+                s.waits_ms.push(wait * 1000.0);
+            }
             None => s.unreadable += 1,
         }
     }
