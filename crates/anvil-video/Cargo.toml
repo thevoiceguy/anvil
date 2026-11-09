@@ -32,12 +32,17 @@ v4l            = "0.14"
 zune-jpeg      = "0.5"
 
 # macOS: H.264 through VideoToolbox (the system's codec, in hardware where
-# the Mac has it).
+# the Mac has it); cameras through AVFoundation.
 [target.'cfg(target_os = "macos")'.dependencies]
 objc2-core-foundation = "0.3"
 objc2-core-media      = "0.3"
 objc2-core-video      = "0.3"
 objc2-video-toolbox   = "0.3"
+objc2                 = "0.6"
+objc2-foundation      = "0.3"
+objc2-av-foundation   = "0.3"
+dispatch2             = "0.3"
+block2                = "0.6"
 
 [build-dependencies]
 bindgen    = "0.72"

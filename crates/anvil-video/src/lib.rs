@@ -16,11 +16,13 @@
 //!   those on its screen. Pictures never cross into Dart.
 //!
 //! **Linux**: V4L2 cameras; VP8 through libvpx; H.264 through Cisco's
-//! OpenH264, fetched at first use ([`openh264_fetch`]). **macOS**: H.264
-//! through VideoToolbox (cameras through AVFoundation next). Windows
+//! OpenH264, fetched at first use ([`openh264_fetch`]). **macOS**:
+//! AVFoundation cameras; H.264 through VideoToolbox. Windows
 //! brings Media Foundation's later; until then its host has no codecs, and
 //! calls there stay audio.
 
+#[cfg(target_os = "macos")]
+pub mod avf;
 pub mod camera;
 pub mod codec;
 mod h264;
@@ -147,7 +149,9 @@ impl DesktopVideoHost {
 pub fn platform_cameras() -> Box<dyn Cameras> {
     #[cfg(target_os = "linux")]
     let cameras = Box::new(v4l2::V4l2Cameras);
-    #[cfg(not(target_os = "linux"))]
+    #[cfg(target_os = "macos")]
+    let cameras = Box::new(avf::AvfCameras);
+    #[cfg(not(any(target_os = "linux", target_os = "macos")))]
     let cameras = Box::new(NoCameras);
     cameras
 }
