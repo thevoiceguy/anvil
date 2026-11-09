@@ -62,6 +62,61 @@ pub struct State {
     /// is kept on this device.
     #[serde(default)]
     pub capture: crate::CaptureState,
+    /// Video calls: whether there are any here, the cameras, the codecs.
+    #[serde(default)]
+    pub video: VideoState,
+}
+
+/// Video calls on this device.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct VideoState {
+    /// Calls can carry video here: a video host with a codec.
+    pub available: bool,
+    /// The cameras there are.
+    pub cameras: Vec<CameraView>,
+    /// The camera chosen; `None` is the system's first.
+    pub camera: Option<String>,
+    /// Cisco's OpenH264, where Anvil fetches it from Cisco (Linux);
+    /// `None` elsewhere.
+    pub h264: Option<H264View>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct CameraView {
+    pub id: String,
+    pub name: String,
+}
+
+/// H.264 from Cisco's OpenH264.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct H264View {
+    /// The user allows it (on unless turned off).
+    pub allowed: bool,
+    /// It is here and offered.
+    pub ready: bool,
+    /// What must be shown about it (Cisco's terms).
+    pub notice: String,
+}
+
+/// A call's video.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct CallVideoView {
+    /// Ringing in, the call offers video.
+    #[serde(default)]
+    pub offered: bool,
+    /// Our camera is on in the call (asked for; it is closed on hold).
+    #[serde(default)]
+    pub camera: bool,
+    /// Our camera's stream while it runs: what the self-view shows.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub sending: Option<u32>,
+    /// The streams coming in, each a tile, oldest first.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub streams: Vec<u32>,
+    /// The far end added video and would see our camera: ours stays off
+    /// until the user turns it on.
+    #[serde(default)]
+    pub requested: bool,
 }
 
 /// A test of this device's audio, under way.
@@ -236,6 +291,7 @@ impl State {
             presence: None,
             audio_test: None,
             capture: crate::CaptureState::default(),
+            video: VideoState::default(),
         }
     }
 
@@ -338,6 +394,8 @@ pub struct CallView {
     /// The call is being captured.
     #[serde(default)]
     pub capturing: bool,
+    #[serde(default)]
+    pub video: CallVideoView,
 }
 
 impl CallView {
@@ -360,6 +418,7 @@ impl CallView {
             line: None,
             silent: false,
             capturing: false,
+            video: CallVideoView::default(),
         }
     }
 }
@@ -778,5 +837,9 @@ pub enum Change {
     /// An audio test moved on (or, `None`, ended).
     AudioTest {
         test: Option<AudioTest>,
+    },
+    /// The cameras, the one chosen, or H.264 changed.
+    Video {
+        video: VideoState,
     },
 }

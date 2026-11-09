@@ -737,6 +737,19 @@ impl Anvil {
             .is_some_and(|h| !video::host::usable_codecs(h.as_ref()).is_empty())
     }
 
+    /// The cameras the video host can open (none without one).
+    pub fn cameras(&self) -> Vec<video::host::CameraInfo> {
+        self.video.as_ref().map(|h| h.cameras()).unwrap_or_default()
+    }
+
+    /// The camera video calls use (`None`, the host's default): one
+    /// already sending switches to it.
+    pub fn set_camera(&self, camera: Option<&str>) {
+        if let Some(h) = &self.video {
+            h.set_camera(camera);
+        }
+    }
+
     /// Place an outgoing call from one of the account's lines: the INVITE's
     /// `From` is the line's address (`None`, the account's own).
     pub async fn place_call_from(
@@ -746,6 +759,16 @@ impl Anvil {
     ) -> Result<CallId, AnvilError> {
         self.place_call_with(target, line, None, CallMedia::AUDIO)
             .await
+    }
+
+    /// [`place_call_from`](Self::place_call_from) carrying `media`.
+    pub async fn place_call_from_with_media(
+        &self,
+        target: &str,
+        line: Option<&str>,
+        media: CallMedia,
+    ) -> Result<CallId, AnvilError> {
+        self.place_call_with(target, line, None, media).await
     }
 
     /// Take appearance `index` of the shared line `line` (its address):
@@ -1362,6 +1385,14 @@ impl Anvil {
         self.calls
             .get(&call)
             .and_then(|e| e.pipeline.as_ref().map(media::MediaPipeline::stats))
+    }
+
+    /// Whether our camera is on in `call`: a camera section, live, that
+    /// the user lets send (it is closed on hold all the same).
+    pub fn camera_on(&self, call: CallId) -> bool {
+        self.calls
+            .get(&call)
+            .is_some_and(|e| e.video.as_ref().is_some_and(|v| v.camera_on()))
     }
 
     /// Whether a call's media is encrypted: SRTP keyed both ways.

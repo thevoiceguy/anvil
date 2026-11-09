@@ -125,6 +125,7 @@ async fn phone_with(fcp: Arc<FcpClient>, ip: &str, settings_path: Option<PathBuf
         settings_path,
         ring: false,
         fallback_brand: None,
+        openh264: None,
     })
     .await
     .expect("the phone starts and registers")
@@ -185,6 +186,7 @@ async fn the_running_phone_calls_through_fcp_and_sets_do_not_disturb() {
         .request(&Command::Call {
             target: bob.clone(),
             line: None,
+            video: false,
         })
         .await
         .unwrap();
@@ -196,7 +198,10 @@ async fn the_running_phone_calls_through_fcp_and_sets_do_not_disturb() {
     .await;
     assert!(
         bob_phone
-            .execute(Command::Answer { call: None })
+            .execute(Command::Answer {
+                call: None,
+                video: None
+            })
             .await
             .unwrap()
             .ok
@@ -363,6 +368,7 @@ async fn the_phone_keeps_the_users_data() {
         .execute(Command::Call {
             target: bob.clone(),
             line: None,
+            video: false,
         })
         .await
         .unwrap()
@@ -374,7 +380,10 @@ async fn the_phone_keeps_the_users_data() {
     .await;
     assert!(
         bob_phone
-            .execute(Command::Answer { call: None })
+            .execute(Command::Answer {
+                call: None,
+                video: None
+            })
             .await
             .unwrap()
             .ok
@@ -421,6 +430,7 @@ async fn the_phone_keeps_the_users_data() {
         .execute(Command::Call {
             target: bob.clone(),
             line: None,
+            video: false,
         })
         .await
         .unwrap()
@@ -432,7 +442,10 @@ async fn the_phone_keeps_the_users_data() {
     .await;
     assert!(
         bob_phone
-            .execute(Command::Answer { call: None })
+            .execute(Command::Answer {
+                call: None,
+                video: None
+            })
             .await
             .unwrap()
             .ok
@@ -666,6 +679,7 @@ async fn a_user_records_a_call_they_placed_when_fcp_lets_them() {
         .execute(Command::Call {
             target: bob,
             line: None,
+            video: false,
         })
         .await
         .unwrap();
@@ -676,7 +690,10 @@ async fn a_user_records_a_call_they_placed_when_fcp_lets_them() {
     .await;
     assert!(
         bob_phone
-            .execute(Command::Answer { call: None })
+            .execute(Command::Answer {
+                call: None,
+                video: None
+            })
             .await
             .unwrap()
             .ok
@@ -1150,6 +1167,7 @@ async fn the_app_carries_its_lines_from_fcp() {
         .execute(Command::Call {
             target: extra.clone(),
             line: None,
+            video: false,
         })
         .await
         .unwrap();
@@ -1171,6 +1189,7 @@ async fn the_app_carries_its_lines_from_fcp() {
         .execute(Command::Call {
             target: alice.clone(),
             line: Some(ext_line.clone()),
+            video: false,
         })
         .await
         .unwrap();
@@ -1345,6 +1364,7 @@ async fn a_shared_line_shows_its_appearances_and_any_app_picks_up_a_held_call() 
         .execute(Command::Call {
             target: e164.clone(),
             line: None,
+            video: false,
         })
         .await
         .unwrap();
@@ -1362,7 +1382,10 @@ async fn a_shared_line_shows_its_appearances_and_any_app_picks_up_a_held_call() 
     .await;
 
     bob_phone
-        .execute(Command::Answer { call: None })
+        .execute(Command::Answer {
+            call: None,
+            video: None,
+        })
         .await
         .unwrap();
     until(&carol_phone, "Carol sees Bob's call active", |s| {
@@ -1475,6 +1498,7 @@ async fn each_app_reports_how_a_call_went_when_it_ends() {
         .execute(Command::Call {
             target: bob,
             line: None,
+            video: false,
         })
         .await
         .unwrap()
@@ -1486,7 +1510,10 @@ async fn each_app_reports_how_a_call_went_when_it_ends() {
     .await;
     assert!(
         bob_phone
-            .execute(Command::Answer { call: None })
+            .execute(Command::Answer {
+                call: None,
+                video: None
+            })
             .await
             .unwrap()
             .ok
@@ -1627,6 +1654,7 @@ async fn an_allowed_app_captures_the_next_call_and_uploads_it() {
         .execute(Command::Call {
             target: bob,
             line: None,
+            video: false,
         })
         .await
         .unwrap()
@@ -1647,7 +1675,10 @@ async fn an_allowed_app_captures_the_next_call_and_uploads_it() {
     .await;
     assert!(
         bob_phone
-            .execute(Command::Answer { call: None })
+            .execute(Command::Answer {
+                call: None,
+                video: None
+            })
             .await
             .unwrap()
             .ok

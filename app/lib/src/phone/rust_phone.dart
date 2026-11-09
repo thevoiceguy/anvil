@@ -6,7 +6,9 @@ import 'dart:io';
 import 'package:path_provider/path_provider.dart';
 
 import '../rust/api/phone.dart' as rust;
+import '../rust/api/video.dart' as rust_video;
 import 'phone_api.dart';
+import 'video_tiles.dart';
 
 class RustPhone implements PhoneApi {
   String? _sessionPath;
@@ -282,6 +284,16 @@ class RustPhone implements PhoneApi {
         savedBytes: s.capture.savedBytes.toInt(),
         folder: s.capture.folder,
       ),
+      video: VideoSettings(
+        available: s.video.available,
+        cameras: [
+          for (final c in s.video.cameras) CameraDevice(id: c.id, name: c.name),
+        ],
+        camera: s.video.camera,
+        h264Allowed: s.video.h264Allowed,
+        h264Ready: s.video.h264Ready,
+        h264Notice: s.video.h264Notice,
+      ),
       directoryListed: s.directoryListed,
       mayChangeDirectoryListing: s.mayChangeDirectoryListing,
       presence: switch (s.presence) {
@@ -379,6 +391,11 @@ class RustPhone implements PhoneApi {
       line: c.line,
       silent: c.silent,
       capturing: c.capturing,
+      videoOffered: c.videoOffered,
+      camera: c.camera,
+      sending: c.sending,
+      streams: c.streams,
+      videoRequested: c.videoRequested,
     );
   }
 
@@ -393,8 +410,8 @@ class RustPhone implements PhoneApi {
   );
 
   @override
-  Future<int> call(String target, {String? line}) async =>
-      (await rust.placeCall(target: target, line: line)).toInt();
+  Future<int> call(String target, {String? line, bool video = false}) async =>
+      (await rust.placeCall(target: target, line: line, video: video)).toInt();
 
   @override
   Future<int> takeAppearance(String line, int index) async =>
@@ -405,7 +422,21 @@ class RustPhone implements PhoneApi {
       rust.renameLine(line: line, label: label);
 
   @override
-  Future<void> answer([int? call]) => rust.answer(call: _id(call));
+  Future<void> answer([int? call, bool? video]) =>
+      rust.answer(call: _id(call), video: video);
+
+  @override
+  Future<void> setVideo(int call, bool on) =>
+      rust_video.setVideo(call: _id(call), on_: on);
+
+  @override
+  Future<void> chooseCamera(String? id) => rust_video.chooseCamera(camera: id);
+
+  @override
+  Future<void> allowH264(bool on) => rust_video.allowH264(on_: on);
+
+  @override
+  final VideoTiles videoTiles = TextureTiles();
 
   @override
   Future<void> decline([int? call]) => rust.decline(call: _id(call));

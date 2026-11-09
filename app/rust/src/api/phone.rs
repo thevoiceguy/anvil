@@ -430,6 +430,8 @@ pub async fn start_phone(session_path: String) -> anyhow::Result<()> {
     let settings_path = std::path::Path::new(&session_path).with_file_name("settings.json");
     // Where the platform wakes this install, when it has said (`system.rs`).
     let push = crate::system::load_push(std::path::Path::new(&session_path));
+    #[cfg(not(any(target_os = "android", target_os = "ios")))]
+    let session_path_for_video = session_path.clone();
     let phone = on_runtime(async move {
         let store = Arc::new(FileTokenStore::new(session_path));
         let session = store
@@ -442,12 +444,25 @@ pub async fn start_phone(session_path: String) -> anyhow::Result<()> {
         let brand = anvil_fcp::brand_config(Arc::clone(&client), None)?;
         let audio =
             anvil_audio::CpalHost::new().map_err(|e| anyhow::anyhow!("no audio devices: {e}"))?;
+        // A desktop's cameras and codecs; a phone's come with A3.
+        #[cfg(not(any(target_os = "android", target_os = "ios")))]
+        let (video, openh264) = {
+            let dir = super::video::desktop::openh264_dir(&session_path_for_video);
+            let host = super::video::desktop::host(&dir);
+            let openh264 = super::video::desktop::openh264(host.clone(), dir);
+            (
+                Some(Box::new(host) as Box<dyn anvil_core::video::host::VideoHost>),
+                openh264,
+            )
+        };
+        #[cfg(any(target_os = "android", target_os = "ios"))]
+        let (video, openh264) = (None, None);
         let phone = Phone::start(PhoneConfig {
             anvil: anvil_core::AnvilConfig {
                 account,
                 media: config.media_config(),
                 audio: Box::new(audio),
-                video: None,
+                video,
                 brand,
             },
             fcp: Some(client),
@@ -456,6 +471,7 @@ pub async fn start_phone(session_path: String) -> anyhow::Result<()> {
             // A phone's system rings for it (CallKit, ConnectionService).
             ring: !cfg!(any(target_os = "android", target_os = "ios")),
             fallback_brand: managed().brand.clone(),
+            openh264,
         })
         .await?;
         // The control socket is the desktop's (`anvil call 1002` from a
@@ -567,6 +583,36 @@ pub struct Call {
     pub silent: bool,
     /// The call is being captured.
     pub capturing: bool,
+    /// Ringing in, it offers video.
+    pub video_offered: bool,
+    /// Our camera is on in it.
+    pub camera: bool,
+    /// Our camera's stream while it runs (the self-view shows it).
+    pub sending: Option<u32>,
+    /// The streams coming in, each a tile, oldest first.
+    pub streams: Vec<u32>,
+    /// The far end added video: ours stays off until turned on.
+    pub video_requested: bool,
+}
+
+/// Video calls on this device.
+pub struct VideoInfo {
+    /// Calls can carry video here.
+    pub available: bool,
+    pub cameras: Vec<Camera>,
+    /// The camera chosen; `None` is the system's first.
+    pub camera: Option<String>,
+    /// H.264 from Cisco's OpenH264, where Anvil fetches it: whether the
+    /// user allows it (`None` where it is not fetched), whether it is
+    /// here, and what must be shown about it.
+    pub h264_allowed: Option<bool>,
+    pub h264_ready: bool,
+    pub h264_notice: Option<String>,
+}
+
+pub struct Camera {
+    pub id: String,
+    pub name: String,
 }
 
 /// Capturing calls (FCP's `docs/CALL_DIAGNOSTICS.md` §3).
@@ -888,6 +934,7 @@ pub struct PhoneState {
     pub audio_test_level: u8,
     /// Capturing calls.
     pub capture: CaptureInfo,
+    pub video: VideoInfo,
 }
 
 /// A ringtone to choose: `anvil`, `classic`, `brand:` and its name, or
@@ -1030,6 +1077,11 @@ pub fn phone_state() -> anyhow::Result<PhoneState> {
                 line: c.line,
                 silent: c.silent,
                 capturing: c.capturing,
+                video_offered: c.video.offered,
+                camera: c.video.camera,
+                sending: c.video.sending,
+                streams: c.video.streams,
+                video_requested: c.video.requested,
             })
             .collect(),
         voicemail_new: s.message_waiting.map(|m| m.new).unwrap_or(0),
@@ -1121,6 +1173,22 @@ pub fn phone_state() -> anyhow::Result<PhoneState> {
             saved: s.capture.saved,
             saved_bytes: s.capture.saved_bytes,
             folder: s.capture.folder.clone(),
+        },
+        video: VideoInfo {
+            available: s.video.available,
+            cameras: s
+                .video
+                .cameras
+                .iter()
+                .map(|c| Camera {
+                    id: c.id.clone(),
+                    name: c.name.clone(),
+                })
+                .collect(),
+            camera: s.video.camera.clone(),
+            h264_allowed: s.video.h264.as_ref().map(|h| h.allowed),
+            h264_ready: s.video.h264.as_ref().is_some_and(|h| h.ready),
+            h264_notice: s.video.h264.as_ref().map(|h| h.notice.clone()),
         },
         directory_listed: s.directory.map(|d| d.listed),
         may_change_directory_listing: s.directory.is_some_and(|d| d.may_change),
@@ -1243,6 +1311,7 @@ pub fn phone_changes(sink: StreamSink<PhoneChange>) -> anyhow::Result<()> {
                 C::Directory { .. } => kind_only("directory"),
                 C::Presence { .. } => kind_only("presence"),
                 C::AudioTest { .. } => kind_only("audio_test"),
+                C::Video { .. } => kind_only("video"),
             };
             if sink.add(out).is_err() {
                 return;
@@ -1294,6 +1363,12 @@ pub(crate) async fn act(json: String) -> anyhow::Result<()> {
     on_runtime(async move { crate::system::act(&phone, &json).await }).await
 }
 
+/// [`execute`] for the other API modules.
+#[frb(ignore)]
+pub(crate) async fn run_command(command: Command) -> anyhow::Result<Option<u64>> {
+    execute(command).await
+}
+
 /// Carry out a command on the running phone; the call a `call` placed.
 async fn execute(command: Command) -> anyhow::Result<Option<u64>> {
     let phone = phone()?;
@@ -1305,11 +1380,16 @@ async fn execute(command: Command) -> anyhow::Result<Option<u64>> {
 }
 
 /// Dial a number, an extension, a name or an address, from one of the
-/// lines by key (`None`: the account's own); the new call's id.
-pub async fn place_call(target: String, line: Option<String>) -> anyhow::Result<u64> {
-    execute(Command::Call { target, line })
-        .await?
-        .ok_or_else(|| anyhow::anyhow!("no call was placed"))
+/// lines by key (`None`: the account's own), with video or not; the new
+/// call's id.
+pub async fn place_call(target: String, line: Option<String>, video: bool) -> anyhow::Result<u64> {
+    execute(Command::Call {
+        target,
+        line,
+        video,
+    })
+    .await?
+    .ok_or_else(|| anyhow::anyhow!("no call was placed"))
 }
 
 /// Take appearance `index` of a shared line (by key): pick up the call
@@ -1329,8 +1409,10 @@ pub async fn rename_line(line: String, label: String) -> anyhow::Result<()> {
         .map(|_| ())
 }
 
-pub async fn answer(call: Option<u64>) -> anyhow::Result<()> {
-    execute(Command::Answer { call }).await.map(|_| ())
+/// Answer; `video` false answers a video call with audio only (`None`:
+/// with video when it offers some).
+pub async fn answer(call: Option<u64>, video: Option<bool>) -> anyhow::Result<()> {
+    execute(Command::Answer { call, video }).await.map(|_| ())
 }
 
 pub async fn decline(call: Option<u64>) -> anyhow::Result<()> {

@@ -42,6 +42,7 @@ use anvil_core::video::host::{
     CameraInfo, ReceiveConfig, Resolution, SendConfig, StreamId, VideoCodecCaps, VideoHost,
     VideoKind, VideoSink, VideoSource,
 };
+use parking_lot::Mutex;
 
 pub use camera::{Cameras, Capture, NoCameras, PatternCamera};
 pub use codec::{Codecs, Decoder, Encoded, Encoder, SoftwareCodecs};
@@ -55,6 +56,10 @@ pub struct DesktopVideoHost {
     codecs: Arc<dyn Codecs>,
     software: Option<SoftwareCodecs>,
     tiles: Tiles,
+    /// The camera a send without one opens.
+    camera: Arc<Mutex<Option<String>>>,
+    /// The sources running, to switch cameras.
+    live: Arc<Mutex<Vec<source::Switch>>>,
 }
 
 impl DesktopVideoHost {
@@ -65,6 +70,8 @@ impl DesktopVideoHost {
             codecs: Arc::new(codecs),
             software: None,
             tiles: Tiles::default(),
+            camera: Arc::default(),
+            live: Arc::default(),
         }
     }
 
@@ -83,6 +90,8 @@ impl DesktopVideoHost {
             codecs: Arc::new(software.clone()),
             software: Some(software),
             tiles: Tiles::default(),
+            camera: Arc::default(),
+            live: Arc::default(),
         }
     }
 
@@ -94,8 +103,24 @@ impl DesktopVideoHost {
             .as_ref()
             .ok_or("this host's codecs are not software")?;
         let path = openh264_fetch::fetch(dir).await?;
-        software.set_openh264(path.clone());
+        software.set_openh264(Some(path.clone()));
         Ok(path)
+    }
+
+    /// Stop offering H.264 from OpenH264 (the user turned it off); calls
+    /// already using it keep it.
+    pub fn drop_openh264(&self) {
+        if let Some(software) = &self.software {
+            software.set_openh264(None);
+        }
+    }
+
+    /// Whether H.264 is offered.
+    pub fn has_h264(&self) -> bool {
+        self.codecs
+            .caps()
+            .iter()
+            .any(|c| c.codec == anvil_core::video::host::VideoCodec::H264)
     }
 
     /// Where pictures are shown.
@@ -136,6 +161,11 @@ impl VideoHost for DesktopVideoHost {
         self.cameras.list()
     }
 
+    fn set_camera(&self, camera: Option<&str>) {
+        *self.camera.lock() = camera.map(str::to_owned);
+        self.live.lock().retain(|s| s.to(camera));
+    }
+
     fn start_send(&self, cfg: SendConfig) -> Result<Box<dyn VideoSource>, AnvilError> {
         if cfg.kind == VideoKind::Content {
             return Err(AnvilError::Codec(
@@ -148,16 +178,28 @@ impl VideoHost for DesktopVideoHost {
             .map_err(AnvilError::Codec)?;
         // Opened here so a camera that cannot be opened is an error now,
         // not a stream that never starts. It takes a moment.
+        let id = cfg.camera.clone().or_else(|| self.camera.lock().clone());
         let capture = self
             .cameras
-            .open(cfg.camera.as_deref(), cfg.max, cfg.fps)
+            .open(id.as_deref(), cfg.max, cfg.fps)
             .map_err(AnvilError::Codec)?;
-        Ok(Box::new(source::CameraSource::start(
+        let camera = source::Camera {
+            cameras: Arc::clone(&self.cameras),
+            id,
             capture,
+            want: cfg.max,
+            fps: cfg.fps,
+        };
+        let source = source::CameraSource::start(
+            camera,
             encoder,
             (cfg.kbps, cfg.max, cfg.fps),
             self.tiles.clone(),
-        )))
+        );
+        let mut live = self.live.lock();
+        live.retain(source::Switch::alive);
+        live.push(source.switch());
+        Ok(Box::new(source))
     }
 
     fn start_receive(
@@ -171,5 +213,105 @@ impl VideoHost for DesktopVideoHost {
             decoder,
             self.tiles.clone(),
         )))
+    }
+}
+
+#[cfg(all(test, target_os = "linux"))]
+mod tests {
+    use super::*;
+    use anvil_core::video::host::{EncodingId, VideoCodec};
+
+    /// Two pattern cameras, each opening recorded; one open at a time.
+    #[derive(Clone, Default)]
+    struct TwoCameras {
+        opened: Arc<Mutex<Vec<Option<String>>>>,
+    }
+
+    impl Cameras for TwoCameras {
+        fn list(&self) -> Vec<CameraInfo> {
+            ["front", "side"]
+                .map(|id| CameraInfo {
+                    id: id.into(),
+                    name: id.into(),
+                })
+                .to_vec()
+        }
+        fn open(
+            &self,
+            id: Option<&str>,
+            want: Resolution,
+            fps: u32,
+        ) -> Result<Box<dyn Capture>, String> {
+            if id == Some("broken") {
+                return Err("busy".into());
+            }
+            self.opened.lock().push(id.map(str::to_owned));
+            PatternCamera::new(Resolution {
+                width: 160,
+                height: 90,
+            })
+            .open(id, want, fps)
+        }
+    }
+
+    fn send_config() -> SendConfig {
+        SendConfig {
+            codec: VideoCodec::Vp8,
+            kind: VideoKind::Camera,
+            camera: None,
+            max: Resolution::P720,
+            kbps: 300,
+            fps: 30,
+            encodings: vec![EncodingId(0)],
+        }
+    }
+
+    #[tokio::test]
+    async fn the_camera_chosen_is_opened_and_one_sending_switches_to_it_on_a_keyframe() {
+        let cameras = TwoCameras::default();
+        let host = DesktopVideoHost::new(cameras.clone(), SoftwareCodecs::default());
+        host.set_camera(Some("front"));
+        let mut source = host.start_send(send_config()).unwrap();
+        let (_, first) = source.next_frame().await.unwrap();
+        assert!(first.keyframe);
+        assert_eq!(*cameras.opened.lock(), [Some("front".to_string())]);
+
+        // Switched while sending: the side camera, from a keyframe.
+        for _ in 0..5 {
+            source.next_frame().await.unwrap();
+        }
+        host.set_camera(Some("side"));
+        let mut keyed = false;
+        for _ in 0..30 {
+            let (_, f) = source.next_frame().await.unwrap();
+            if f.keyframe {
+                keyed = true;
+                break;
+            }
+        }
+        assert!(keyed, "a keyframe after the switch");
+        assert_eq!(
+            *cameras.opened.lock(),
+            [Some("front".to_string()), Some("side".to_string())]
+        );
+
+        // One that will not open leaves the one there was.
+        host.set_camera(Some("broken"));
+        for _ in 0..10 {
+            source.next_frame().await.unwrap();
+        }
+        assert_eq!(
+            cameras.opened.lock().last().cloned().flatten().as_deref(),
+            Some("side")
+        );
+        drop(source);
+        // A new send opens the camera chosen last.
+        host.set_camera(Some("front"));
+        let mut again = host.start_send(send_config()).unwrap();
+        again.next_frame().await.unwrap();
+        assert_eq!(
+            cameras.opened.lock().last().cloned().flatten().as_deref(),
+            Some("front")
+        );
     }
 }

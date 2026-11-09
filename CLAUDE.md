@@ -121,8 +121,10 @@ cargo build -p anvil-ffi --target aarch64-linux-android --release
 
 Install once: `cargo install cargo-ndk` (Android) and the usual `rustup target add`s.
 On Linux, cpal needs the ALSA headers (`libasound2-dev`), and `anvil-video` needs
-libvpx's (`libvpx-dev`) and libclang (`libclang-dev`) for its bindings. Its H.264
-tests run when `ANVIL_OPENH264_DIR` holds Cisco's OpenH264 (CI fetches it).
+libvpx's (`libvpx-dev`) and libclang (`libclang-dev`) for its bindings; libvpx is
+linked statically where `libvpx.a` is installed (Ubuntu's `libvpx-dev` has it), else
+dynamically. Its H.264 tests run when `ANVIL_OPENH264_DIR` holds Cisco's OpenH264
+(CI fetches it).
 
 To move to a new siphon-rs or forge-media release, change the tags in the root
 `Cargo.toml` (every crate of one repo on the same tag).

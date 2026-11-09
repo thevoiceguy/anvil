@@ -40,6 +40,8 @@ pub struct SyntheticRecord {
     pub sent: Vec<SentSource>,
     /// Each incoming stream, by id.
     pub received: BTreeMap<StreamId, ReceivedStream>,
+    /// The camera chosen (`set_camera`).
+    pub camera: Option<String>,
 }
 
 #[derive(Debug, Clone)]
@@ -131,6 +133,10 @@ impl VideoHost for SyntheticVideoHost {
             id: "synthetic".into(),
             name: "Synthetic camera".into(),
         }]
+    }
+
+    fn set_camera(&self, camera: Option<&str>) {
+        self.record.lock().camera = camera.map(str::to_owned);
     }
 
     fn start_send(&self, cfg: SendConfig) -> Result<Box<dyn VideoSource>, AnvilError> {

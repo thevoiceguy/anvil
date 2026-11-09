@@ -7,7 +7,7 @@ import '../frb_generated.dart';
 
 import 'package:flutter_rust_bridge/flutter_rust_bridge_for_generated.dart';
 
-// These functions are ignored because they are not marked as `pub`: `act`, `capture_mode_name`, `devices`, `direction`, `execute`, `kind_only`, `managed`, `on_runtime_pub`, `on_runtime`, `phone`, `place_of`, `registration`, `remember`, `runtime`, `set_push`, `this_install`, `wake`
+// These functions are ignored because they are not marked as `pub`: `act`, `capture_mode_name`, `devices`, `direction`, `execute`, `kind_only`, `managed`, `on_runtime_pub`, `on_runtime`, `phone`, `place_of`, `registration`, `remember`, `run_command`, `runtime`, `set_push`, `this_install`, `wake`
 
 /// This install's managed settings; an ordinary install's are all open.
 ManagedSettings managedSettings() =>
@@ -124,9 +124,17 @@ Stream<PhoneChange> phoneChanges() =>
     RustLib.instance.api.crateApiPhonePhoneChanges();
 
 /// Dial a number, an extension, a name or an address, from one of the
-/// lines by key (`None`: the account's own); the new call's id.
-Future<BigInt> placeCall({required String target, String? line}) =>
-    RustLib.instance.api.crateApiPhonePlaceCall(target: target, line: line);
+/// lines by key (`None`: the account's own), with video or not; the new
+/// call's id.
+Future<BigInt> placeCall({
+  required String target,
+  String? line,
+  required bool video,
+}) => RustLib.instance.api.crateApiPhonePlaceCall(
+  target: target,
+  line: line,
+  video: video,
+);
 
 /// Take appearance `index` of a shared line (by key): pick up the call
 /// held there, or join the one up where the line allows barging in; the
@@ -139,8 +147,10 @@ Future<BigInt> takeAppearance({required String line, required int index}) =>
 Future<void> renameLine({required String line, required String label}) =>
     RustLib.instance.api.crateApiPhoneRenameLine(line: line, label: label);
 
-Future<void> answer({BigInt? call}) =>
-    RustLib.instance.api.crateApiPhoneAnswer(call: call);
+/// Answer; `video` false answers a video call with audio only (`None`:
+/// with video when it offers some).
+Future<void> answer({BigInt? call, bool? video}) =>
+    RustLib.instance.api.crateApiPhoneAnswer(call: call, video: video);
 
 Future<void> decline({BigInt? call}) =>
     RustLib.instance.api.crateApiPhoneDecline(call: call);
@@ -463,6 +473,21 @@ class Call {
   /// The call is being captured.
   final bool capturing;
 
+  /// Ringing in, it offers video.
+  final bool videoOffered;
+
+  /// Our camera is on in it.
+  final bool camera;
+
+  /// Our camera's stream while it runs (the self-view shows it).
+  final int? sending;
+
+  /// The streams coming in, each a tile, oldest first.
+  final Uint32List streams;
+
+  /// The far end added video: ours stays off until turned on.
+  final bool videoRequested;
+
   const Call({
     required this.id,
     required this.direction,
@@ -479,6 +504,11 @@ class Call {
     this.line,
     required this.silent,
     required this.capturing,
+    required this.videoOffered,
+    required this.camera,
+    this.sending,
+    required this.streams,
+    required this.videoRequested,
   });
 
   @override
@@ -497,7 +527,12 @@ class Call {
       recording.hashCode ^
       line.hashCode ^
       silent.hashCode ^
-      capturing.hashCode;
+      capturing.hashCode ^
+      videoOffered.hashCode ^
+      camera.hashCode ^
+      sending.hashCode ^
+      streams.hashCode ^
+      videoRequested.hashCode;
 
   @override
   bool operator ==(Object other) =>
@@ -518,7 +553,12 @@ class Call {
           recording == other.recording &&
           line == other.line &&
           silent == other.silent &&
-          capturing == other.capturing;
+          capturing == other.capturing &&
+          videoOffered == other.videoOffered &&
+          camera == other.camera &&
+          sending == other.sending &&
+          streams == other.streams &&
+          videoRequested == other.videoRequested;
 }
 
 /// Where a call is.
@@ -607,6 +647,24 @@ class CallingSettings {
           forwardNoAnswer == other.forwardNoAnswer &&
           forwardUnreachable == other.forwardUnreachable &&
           noAnswerSecs == other.noAnswerSecs;
+}
+
+class Camera {
+  final String id;
+  final String name;
+
+  const Camera({required this.id, required this.name});
+
+  @override
+  int get hashCode => id.hashCode ^ name.hashCode;
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is Camera &&
+          runtimeType == other.runtimeType &&
+          id == other.id &&
+          name == other.name;
 }
 
 /// Capturing calls (FCP's `docs/CALL_DIAGNOSTICS.md` §3).
@@ -1190,6 +1248,7 @@ class PhoneState {
 
   /// Capturing calls.
   final CaptureInfo capture;
+  final VideoInfo video;
 
   const PhoneState({
     required this.aor,
@@ -1227,6 +1286,7 @@ class PhoneState {
     this.audioTest,
     required this.audioTestLevel,
     required this.capture,
+    required this.video,
   });
 
   @override
@@ -1265,7 +1325,8 @@ class PhoneState {
       presence.hashCode ^
       audioTest.hashCode ^
       audioTestLevel.hashCode ^
-      capture.hashCode;
+      capture.hashCode ^
+      video.hashCode;
 
   @override
   bool operator ==(Object other) =>
@@ -1306,7 +1367,8 @@ class PhoneState {
           presence == other.presence &&
           audioTest == other.audioTest &&
           audioTestLevel == other.audioTestLevel &&
-          capture == other.capture;
+          capture == other.capture &&
+          video == other.video;
 }
 
 /// A connected call's media, as last measured.
@@ -1674,6 +1736,53 @@ class TrayIcon {
           runtimeType == other.runtimeType &&
           state == other.state &&
           path == other.path;
+}
+
+/// Video calls on this device.
+class VideoInfo {
+  /// Calls can carry video here.
+  final bool available;
+  final List<Camera> cameras;
+
+  /// The camera chosen; `None` is the system's first.
+  final String? camera;
+
+  /// H.264 from Cisco's OpenH264, where Anvil fetches it: whether the
+  /// user allows it (`None` where it is not fetched), whether it is
+  /// here, and what must be shown about it.
+  final bool? h264Allowed;
+  final bool h264Ready;
+  final String? h264Notice;
+
+  const VideoInfo({
+    required this.available,
+    required this.cameras,
+    this.camera,
+    this.h264Allowed,
+    required this.h264Ready,
+    this.h264Notice,
+  });
+
+  @override
+  int get hashCode =>
+      available.hashCode ^
+      cameras.hashCode ^
+      camera.hashCode ^
+      h264Allowed.hashCode ^
+      h264Ready.hashCode ^
+      h264Notice.hashCode;
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is VideoInfo &&
+          runtimeType == other.runtimeType &&
+          available == other.available &&
+          cameras == other.cameras &&
+          camera == other.camera &&
+          h264Allowed == other.h264Allowed &&
+          h264Ready == other.h264Ready &&
+          h264Notice == other.h264Notice;
 }
 
 /// One voicemail message.

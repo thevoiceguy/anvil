@@ -2017,6 +2017,126 @@ abstract class Strings {
   /// In en, this message translates to:
   /// **'Heard'**
   String get voicemailHeard;
+
+  /// No description provided for @videoCallButton.
+  ///
+  /// In en, this message translates to:
+  /// **'Video call'**
+  String get videoCallButton;
+
+  /// No description provided for @incomingVideoCall.
+  ///
+  /// In en, this message translates to:
+  /// **'Incoming video call'**
+  String get incomingVideoCall;
+
+  /// No description provided for @answerVideoButton.
+  ///
+  /// In en, this message translates to:
+  /// **'Video'**
+  String get answerVideoButton;
+
+  /// No description provided for @answerAudioButton.
+  ///
+  /// In en, this message translates to:
+  /// **'Audio only'**
+  String get answerAudioButton;
+
+  /// No description provided for @startVideoButton.
+  ///
+  /// In en, this message translates to:
+  /// **'Start video'**
+  String get startVideoButton;
+
+  /// No description provided for @stopVideoButton.
+  ///
+  /// In en, this message translates to:
+  /// **'Stop video'**
+  String get stopVideoButton;
+
+  /// No description provided for @cameraButton.
+  ///
+  /// In en, this message translates to:
+  /// **'Camera'**
+  String get cameraButton;
+
+  /// No description provided for @cameraDefault.
+  ///
+  /// In en, this message translates to:
+  /// **'System default'**
+  String get cameraDefault;
+
+  /// No description provided for @videoAsked.
+  ///
+  /// In en, this message translates to:
+  /// **'{name} turned on video. Start yours?'**
+  String videoAsked(String name);
+
+  /// No description provided for @videoOff.
+  ///
+  /// In en, this message translates to:
+  /// **'Camera off'**
+  String get videoOff;
+
+  /// No description provided for @videoFrozen.
+  ///
+  /// In en, this message translates to:
+  /// **'The picture is catching up'**
+  String get videoFrozen;
+
+  /// No description provided for @selfView.
+  ///
+  /// In en, this message translates to:
+  /// **'You'**
+  String get selfView;
+
+  /// No description provided for @settingsVideo.
+  ///
+  /// In en, this message translates to:
+  /// **'Video'**
+  String get settingsVideo;
+
+  /// No description provided for @cameraSetting.
+  ///
+  /// In en, this message translates to:
+  /// **'Camera'**
+  String get cameraSetting;
+
+  /// No description provided for @noCameras.
+  ///
+  /// In en, this message translates to:
+  /// **'No camera found'**
+  String get noCameras;
+
+  /// No description provided for @videoUnavailable.
+  ///
+  /// In en, this message translates to:
+  /// **'Video calls are not available on this device yet'**
+  String get videoUnavailable;
+
+  /// No description provided for @h264Setting.
+  ///
+  /// In en, this message translates to:
+  /// **'H.264'**
+  String get h264Setting;
+
+  /// No description provided for @h264Ready.
+  ///
+  /// In en, this message translates to:
+  /// **'In use; downloaded from Cisco'**
+  String get h264Ready;
+
+  /// No description provided for @h264Fetching.
+  ///
+  /// In en, this message translates to:
+  /// **'Downloading from Cisco…'**
+  String get h264Fetching;
+
+  /// No description provided for @h264Off.
+  ///
+  /// In en, this message translates to:
+  /// **'Off; video calls use VP8'**
+  String get h264Off;
 }
 
 class _StringsDelegate extends LocalizationsDelegate<Strings> {

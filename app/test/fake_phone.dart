@@ -41,7 +41,13 @@ class FakePhone implements PhoneApi {
   /// The tenant's brand is taken away.
   void unbrand() => set(state.copyWith(clearBrand: true), 'brand');
 
-  void ring(String from, {String? name, String? line, bool silent = false}) {
+  void ring(
+    String from, {
+    String? name,
+    String? line,
+    bool silent = false,
+    bool video = false,
+  }) {
     final id = _next++;
     set(
       state.copyWith(
@@ -55,6 +61,7 @@ class FakePhone implements PhoneApi {
             state: CallState.ringing,
             line: line,
             silent: silent,
+            videoOffered: video,
           ),
         ],
       ),
@@ -62,6 +69,20 @@ class FakePhone implements PhoneApi {
       call: id,
     );
   }
+
+  /// A picture comes in on `call` (the far end's camera on).
+  void streamIn(int call, int stream) =>
+      _replace(call, (c) => c.copyWith(streams: [...c.streams, stream]));
+
+  /// The far end turns its camera off.
+  void streamOut(int call, int stream) => _replace(
+    call,
+    (c) => c.copyWith(streams: [...c.streams.where((s) => s != stream)]),
+  );
+
+  /// The far end added video and would see our camera.
+  void videoAsked(int call) =>
+      _replace(call, (c) => c.copyWith(videoRequested: true));
 
   PhoneCall callOf(int id) => state.calls.firstWhere((c) => c.id == id);
 
@@ -203,10 +224,13 @@ class FakePhone implements PhoneApi {
   Stream<PhoneEvent> events() => _events.stream;
 
   @override
-  Future<int> call(String target, {String? line}) async {
+  Future<int> call(String target, {String? line, bool video = false}) async {
     _refuse();
-    log.add(line == null ? 'call $target' : 'call $target on $line');
+    log.add(
+      '${video ? 'video call' : 'call'} $target${line == null ? '' : ' on $line'}',
+    );
     final id = _next++;
+    final camera = video && state.video.available;
     set(
       state.copyWith(
         calls: [
@@ -217,6 +241,8 @@ class FakePhone implements PhoneApi {
             remote: target.contains(':') ? target : 'sip:$target@x',
             state: CallState.dialing,
             line: line,
+            camera: camera,
+            sending: camera ? 100 + id : null,
           ),
         ],
       ),
@@ -271,11 +297,79 @@ class FakePhone implements PhoneApi {
   }
 
   @override
-  Future<void> answer([int? call]) async {
-    log.add('answer $call');
+  Future<void> answer([int? call, bool? video]) async {
+    log.add(video == null ? 'answer $call' : 'answer $call video=$video');
     state = state.copyWith(calls: _othersHeld(call));
-    _replace(call!, (c) => c.copyWith(state: CallState.connected));
+    final camera =
+        (video ?? callOf(call!).videoOffered) &&
+        callOf(call!).videoOffered &&
+        state.video.available;
+    _replace(
+      call!,
+      (c) => c.copyWith(
+        state: CallState.connected,
+        camera: camera,
+        sending: camera ? 100 + call : null,
+      ),
+    );
   }
+
+  @override
+  Future<void> setVideo(int call, bool on) async {
+    _refuse();
+    log.add('video $call ${on ? 'on' : 'off'}');
+    _replace(
+      call,
+      (c) => c.copyWith(
+        camera: on,
+        sending: on ? 100 + call : null,
+        clearSending: !on,
+        videoRequested: on ? false : null,
+      ),
+    );
+  }
+
+  @override
+  Future<void> chooseCamera(String? id) async {
+    log.add('camera ${id ?? 'default'}');
+    set(
+      state.copyWith(
+        video: VideoSettings(
+          available: state.video.available,
+          cameras: state.video.cameras,
+          camera: id,
+          h264Allowed: state.video.h264Allowed,
+          h264Ready: state.video.h264Ready,
+          h264Notice: state.video.h264Notice,
+        ),
+      ),
+      'video',
+    );
+  }
+
+  @override
+  Future<void> allowH264(bool on) async {
+    log.add('h264 ${on ? 'on' : 'off'}');
+    set(
+      state.copyWith(
+        video: VideoSettings(
+          available: state.video.available,
+          cameras: state.video.cameras,
+          camera: state.video.camera,
+          h264Allowed: on,
+          h264Ready: on,
+          h264Notice: state.video.h264Notice,
+        ),
+      ),
+      'video',
+    );
+  }
+
+  /// The tiles the screens asked for, open and closed.
+  final tiles = FakeTiles();
+
+  @override
+  VideoTiles get videoTiles => tiles;
 
   @override
   Future<void> decline([int? call]) async {
@@ -812,4 +906,39 @@ class FakePhone implements PhoneApi {
 /// A saved session, for tests that start signed in.
 class SignedInAccountFake extends SignedInAccount {
   const SignedInAccountFake() : super('alice', 'pbx.example.com');
+}
+
+/// Textures for tiles, each numbered; what was shown and closed is kept.
+class FakeTiles implements VideoTiles {
+  final open = <int?>[];
+  final closed = <int?>[];
+  final sizes = <int?, TileInfo>{};
+  int _next = 1;
+
+  @override
+  Future<VideoTexture?> show(int? stream) async {
+    open.add(stream);
+    return _FakeTexture(_next++, () {
+      open.remove(stream);
+      closed.add(stream);
+    });
+  }
+
+  @override
+  TileInfo? info(int? stream) => sizes[stream];
+}
+
+class _FakeTexture implements VideoTexture {
+  _FakeTexture(this.textureId, this._closed);
+  @override
+  final int textureId;
+  final void Function() _closed;
+  bool _done = false;
+
+  @override
+  Future<void> close() async {
+    if (_done) return;
+    _done = true;
+    _closed();
+  }
 }

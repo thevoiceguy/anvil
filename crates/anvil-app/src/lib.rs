@@ -28,6 +28,7 @@ pub mod system_brand;
 #[cfg(windows)]
 #[allow(unsafe_code)]
 mod user_only;
+mod video;
 
 use std::collections::BTreeMap;
 use std::path::PathBuf;
@@ -44,10 +45,11 @@ pub use clip::{decode_wav, Clip};
 pub use command::{AudioKind, Command, Imported, Response};
 pub use state::{
     AppearanceView, AudioDevice, AudioDevices, AudioProcessing, AudioTest, AudioTestStage,
-    AudioVolume, Brand, CallState, CallView, Change, Contact, ContactNumber, Direction,
-    DirectoryListing, LineView, MessageWaiting, MyPresence, OwnStatus, Person, Push, Quality,
-    Recent, Registration, Ringtone, State, Voicemail,
+    AudioVolume, Brand, CallState, CallVideoView, CallView, CameraView, Change, Contact,
+    ContactNumber, Direction, DirectoryListing, H264View, LineView, MessageWaiting, MyPresence,
+    OwnStatus, Person, Push, Quality, Recent, Registration, Ringtone, State, VideoState, Voicemail,
 };
+pub use video::OpenH264;
 
 use settings::LocalSettings;
 
@@ -81,6 +83,8 @@ pub struct PhoneConfig {
     /// The brand while FCP has none: the installed profile's
     /// ([`managed::Managed::brand`]).
     pub fallback_brand: Option<anvil_core::brand::BrandProfile>,
+    /// Cisco's OpenH264, where the platform fetches it (Linux).
+    pub openh264: Option<Arc<dyn OpenH264>>,
 }
 
 /// The phone: cheap to clone, every clone the same phone.
@@ -128,6 +132,7 @@ struct Inner {
     /// The app's device on FCP, as `/me/softphone` names it: what a
     /// capture is uploaded under.
     device_id: Mutex<Option<String>>,
+    openh264: Option<Arc<dyn OpenH264>>,
 }
 
 impl Phone {
@@ -225,6 +230,7 @@ impl Phone {
             audio_test: Mutex::new(None),
             fallback_brand: cfg.fallback_brand,
             device_id: Mutex::new(None),
+            openh264: cfg.openh264,
         });
         if let Some(fallback) = &inner.fallback_brand {
             inner.set_brand(fallback);
@@ -233,6 +239,7 @@ impl Phone {
         *inner.events.lock() = Some(follower);
         let phone = Self { inner };
         phone.read_audio_devices().await;
+        phone.start_video().await;
 
         if cfg.register {
             phone.anvil().await?.register().await?;
@@ -277,7 +284,11 @@ impl Phone {
     /// Carry out a command.
     pub async fn execute(&self, command: Command) -> Result<Response, PhoneError> {
         match command {
-            Command::Call { target, line } => {
+            Command::Call {
+                target,
+                line,
+                video,
+            } => {
                 let target = self.dial_target(&target);
                 // From one of the lines, by its key: its address is the
                 // INVITE's From. The account's own line is the account.
@@ -296,16 +307,18 @@ impl Phone {
                 };
                 self.hold_the_others(None).await?;
                 let to = target.clone();
+                let media = self.media_for(video).await?;
                 let call = self
                     .anvil()
                     .await?
-                    .place_call_from(&to, from.as_deref())
+                    .place_call_from_with_media(&to, from.as_deref(), media)
                     .await?;
                 self.update_call(
                     call.0,
                     |c| {
                         c.remote = target.clone();
                         c.line = line.clone();
+                        c.video.camera = media.video;
                     },
                     || CallView {
                         line: line.clone(),
@@ -317,14 +330,23 @@ impl Phone {
                     ..Response::ok()
                 })
             }
-            Command::Answer { call } => {
+            Command::Answer { call, video } => {
                 let id = self.pick(call, "no call to answer", |c| {
                     c.direction == Direction::Incoming && c.state == CallState::Ringing
                 })?;
+                let media = self.answer_media(id, video).await?;
                 // Quiet at once, not when the call is set up.
                 self.inner.stop_sound();
                 self.hold_the_others(Some(id)).await?;
-                let answered = self.anvil().await?.answer(CallId(id)).await.map(|_| ());
+                let answered = self
+                    .anvil()
+                    .await?
+                    .answer_with_media(CallId(id), media)
+                    .await
+                    .map(|_| ());
+                if answered.is_ok() {
+                    self.update_call(id, |c| c.video.camera = media.video, || outgoing(id));
+                }
                 self.inner.sound().await;
                 answered?;
                 Ok(Response::ok())
@@ -1013,9 +1035,22 @@ impl Phone {
                 Ok(Response::ok())
             }
             Command::Refresh => {
+                self.read_video().await;
                 let fcp = Arc::clone(self.fcp("the user's data")?);
                 data::refresh_all(&self.inner, &fcp).await;
                 self.read_audio_devices().await;
+                Ok(Response::ok())
+            }
+            Command::Video { call, on } => {
+                self.set_video(call, on).await?;
+                Ok(Response::ok())
+            }
+            Command::Camera { camera } => {
+                self.choose_camera(camera).await?;
+                Ok(Response::ok())
+            }
+            Command::H264 { on } => {
+                self.allow_h264(on).await?;
                 Ok(Response::ok())
             }
             Command::Status => Ok(Response {
@@ -1965,6 +2000,9 @@ fn finished_capture(
 async fn follow(inner: std::sync::Weak<Inner>, mut events: EventStream) {
     while let Some(event) = events.recv().await {
         let Some(inner) = inner.upgrade() else { return };
+        if video::on_event(&inner, &event) {
+            continue;
+        }
         match event {
             Event::RegistrationChanged { state, reason } => {
                 let state = Registration::from(state);
@@ -1984,6 +2022,7 @@ async fn follow(inner: std::sync::Weak<Inner>, mut events: EventStream) {
                 display_name,
                 server_call,
                 line,
+                video,
                 ..
             } => {
                 // A line that does not ring this app shows its call, quietly.
@@ -1995,13 +2034,14 @@ async fn follow(inner: std::sync::Weak<Inner>, mut events: EventStream) {
                         .iter()
                         .any(|l| l.line == key && !l.ring)
                 });
-                let view = CallView {
+                let mut view = CallView {
                     display_name,
                     server_call,
                     line,
                     silent,
                     ..CallView::new(call.0, Direction::Incoming, &from, CallState::Ringing)
                 };
+                view.video.offered = video;
                 let v = view.clone();
                 update_call(&inner, call.0, |_| {}, move || v);
             }
@@ -2012,9 +2052,13 @@ async fn follow(inner: std::sync::Weak<Inner>, mut events: EventStream) {
                 || outgoing(call.0),
             ),
             Event::CallEstablished { call, codec } => {
-                let (encrypted, server_call) = match inner.anvil.read().await.as_ref() {
-                    Some(anvil) => (anvil.is_encrypted(call), anvil.server_call_id(call)),
-                    None => (false, None),
+                let (encrypted, server_call, camera) = match inner.anvil.read().await.as_ref() {
+                    Some(anvil) => (
+                        anvil.is_encrypted(call),
+                        anvil.server_call_id(call),
+                        anvil.camera_on(call),
+                    ),
+                    None => (false, None, false),
                 };
                 update_call(
                     &inner,
@@ -2024,6 +2068,8 @@ async fn follow(inner: std::sync::Weak<Inner>, mut events: EventStream) {
                         c.connected_at.get_or_insert_with(unix_now);
                         c.codec = Some(format!("{codec:?}").to_ascii_lowercase());
                         c.encrypted = encrypted;
+                        // Video declined by the far end: our camera is off.
+                        c.video.camera = camera;
                         // A call placed is named by the server's answer.
                         if c.server_call.is_none() {
                             c.server_call = server_call;

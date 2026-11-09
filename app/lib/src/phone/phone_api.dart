@@ -163,6 +163,11 @@ class PhoneCall {
     this.line,
     this.silent = false,
     this.capturing = false,
+    this.videoOffered = false,
+    this.camera = false,
+    this.sending,
+    this.streams = const [],
+    this.videoRequested = false,
   });
 
   final int id;
@@ -192,6 +197,25 @@ class PhoneCall {
   /// The call is being captured.
   final bool capturing;
 
+  /// Ringing in, it offers video.
+  final bool videoOffered;
+
+  /// Our camera is on in it.
+  final bool camera;
+
+  /// Our camera's stream while it runs: the self-view shows it.
+  final int? sending;
+
+  /// The pictures coming in, each a tile, oldest first.
+  final List<int> streams;
+
+  /// The far end added video and would see our camera: ours stays off
+  /// until the user turns it on.
+  final bool videoRequested;
+
+  /// The call shows pictures: ours, theirs or both.
+  bool get hasVideo => camera || streams.isNotEmpty;
+
   /// Who the call is with, as a person reads it.
   String get who => displayName ?? shortAddress(remote);
 
@@ -209,6 +233,11 @@ class PhoneCall {
     CallQuality? quality,
     DateTime? connectedAt,
     bool? recording,
+    bool? camera,
+    int? sending,
+    bool clearSending = false,
+    List<int>? streams,
+    bool? videoRequested,
   }) => PhoneCall(
     id: id,
     direction: direction,
@@ -225,7 +254,75 @@ class PhoneCall {
     line: line,
     silent: silent,
     capturing: capturing,
+    videoOffered: videoOffered,
+    camera: camera ?? this.camera,
+    sending: clearSending ? null : sending ?? this.sending,
+    streams: streams ?? this.streams,
+    videoRequested: videoRequested ?? this.videoRequested,
   );
+}
+
+/// A camera to choose.
+class CameraDevice {
+  const CameraDevice({required this.id, required this.name});
+  final String id;
+  final String name;
+}
+
+/// Video calls on this device.
+class VideoSettings {
+  const VideoSettings({
+    this.available = false,
+    this.cameras = const [],
+    this.camera,
+    this.h264Allowed,
+    this.h264Ready = false,
+    this.h264Notice,
+  });
+
+  /// Calls can carry video here.
+  final bool available;
+  final List<CameraDevice> cameras;
+
+  /// The camera chosen; null is the system's first.
+  final String? camera;
+
+  /// H.264 from Cisco's OpenH264, where Anvil fetches it: whether the user
+  /// allows it (null where it is not fetched), whether it is here, and
+  /// what must be shown about it.
+  final bool? h264Allowed;
+  final bool h264Ready;
+  final String? h264Notice;
+}
+
+/// A tile's picture: its size, and whether it is frozen (broken until the
+/// next keyframe).
+typedef TileInfo = ({int width, int height, bool frozen});
+
+/// A texture a tile is shown on, until closed.
+abstract class VideoTexture {
+  int get textureId;
+  Future<void> close();
+}
+
+/// Where a call's pictures are shown: each tile on a texture of its own.
+/// Pictures never cross into Dart; the platform puts them on the texture.
+abstract class VideoTiles {
+  /// A texture showing an incoming stream, or (null) the self-view; null
+  /// where pictures cannot be shown here.
+  Future<VideoTexture?> show(int? stream);
+
+  /// The tile's picture, once it has one.
+  TileInfo? info(int? stream);
+}
+
+/// No pictures: a platform without textures, and tests.
+class NoVideoTiles implements VideoTiles {
+  const NoVideoTiles();
+  @override
+  Future<VideoTexture?> show(int? stream) async => null;
+  @override
+  TileInfo? info(int? stream) => null;
 }
 
 /// Which calls the user captures.
@@ -769,6 +866,7 @@ class PhoneSnapshot {
     this.audioTest,
     this.audioTestLevel = 0,
     this.capture = const CaptureInfo(),
+    this.video = const VideoSettings(),
   });
 
   final String aor;
@@ -852,6 +950,9 @@ class PhoneSnapshot {
 
   /// Capturing calls.
   final CaptureInfo capture;
+
+  /// Video calls: whether there are any here, the cameras, H.264.
+  final VideoSettings video;
 
   /// Signed in to FCP, so a contact can be kept on the account.
   bool get hasAccount => calling != null;
@@ -943,6 +1044,7 @@ class PhoneSnapshot {
     bool clearAudioTest = false,
     int? audioTestLevel,
     CaptureInfo? capture,
+    VideoSettings? video,
   }) => PhoneSnapshot(
     aor: aor,
     registration: registration ?? this.registration,
@@ -980,6 +1082,7 @@ class PhoneSnapshot {
     audioTest: clearAudioTest ? null : audioTest ?? this.audioTest,
     audioTestLevel: audioTestLevel ?? this.audioTestLevel,
     capture: capture ?? this.capture,
+    video: video ?? this.video,
   );
 
   static const empty = PhoneSnapshot(
@@ -1146,8 +1249,9 @@ abstract class PhoneApi {
   PhoneSnapshot snapshot();
   Stream<PhoneEvent> events();
 
-  /// Dial from one of the lines by key; null is the account's own.
-  Future<int> call(String target, {String? line});
+  /// Dial from one of the lines by key; null is the account's own. With
+  /// `video`, a video call where this device has video.
+  Future<int> call(String target, {String? line, bool video = false});
 
   /// Name one of the lines, where the tenant allows it; empty gives it
   /// back its administrator's label.
@@ -1156,7 +1260,23 @@ abstract class PhoneApi {
   /// Take appearance `index` of a shared line: pick up the call held
   /// there, or join the one up where the line allows barging in.
   Future<int> takeAppearance(String line, int index);
-  Future<void> answer([int? call]);
+
+  /// Answer; `video` false answers a video call with audio only (null:
+  /// with video when it offers some).
+  Future<void> answer([int? call, bool? video]);
+
+  /// Our camera on or off in `call`: on, an audio call becomes a video
+  /// call.
+  Future<void> setVideo(int call, bool on);
+
+  /// The camera video calls use, by id; null is the system's first.
+  Future<void> chooseCamera(String? id);
+
+  /// Allow H.264 from Cisco's OpenH264 (fetched now if need be), or not.
+  Future<void> allowH264(bool on);
+
+  /// Where a call's pictures are shown.
+  VideoTiles get videoTiles;
   Future<void> decline([int? call]);
   Future<void> hangup([int? call]);
   Future<void> hold(int call, bool on);

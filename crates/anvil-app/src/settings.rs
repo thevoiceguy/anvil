@@ -47,6 +47,13 @@ pub(crate) struct LocalSettings {
     /// Which calls the user captures, while FCP allows it.
     #[serde(default, skip_serializing_if = "is_off")]
     pub capture_calls: crate::CaptureMode,
+    /// The camera chosen; `None` is the system's first.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub camera: Option<String>,
+    /// H.264 from Cisco's OpenH264, where it is fetched; on unless turned
+    /// off.
+    #[serde(default = "on", skip_serializing_if = "is_on")]
+    pub h264: bool,
 }
 
 fn is_off(mode: &crate::CaptureMode) -> bool {
@@ -69,6 +76,8 @@ impl Default for LocalSettings {
             hidden_recents: BTreeSet::new(),
             contacts: Vec::new(),
             capture_calls: crate::CaptureMode::Off,
+            camera: None,
+            h264: true,
         }
     }
 }
@@ -189,6 +198,8 @@ mod tests {
                 ringtone: Some("classic".into()),
             }],
             capture_calls: crate::CaptureMode::EveryCall,
+            camera: Some("/dev/video2".into()),
+            h264: false,
         };
         saved.save(&path).unwrap();
         assert_eq!(LocalSettings::load(&path), saved);
