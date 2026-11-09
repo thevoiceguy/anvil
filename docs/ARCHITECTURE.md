@@ -354,7 +354,12 @@ calls offer VP8. On macOS, H.264 goes through VideoToolbox (the system's codec, 
 hardware where the Mac has it): constrained baseline, real time, no reordering,
 keyframes when asked; it speaks AVCC and the core Annex B, so `vt.rs` moves the
 parameter sets between the format description and the stream each way, and nothing
-is fetched. Windows brings Media Foundation's next. `anvil-cli
+is fetched. Its cameras come through AVFoundation (`avf.rs`): listed by unique id,
+captured as NV12 on a dispatch queue of their own by an Objective-C delegate defined
+in Rust, a picture the source is not ready for dropped. Opening only checks that
+access is not refused: the session starts, and the system asks for access the first
+time, on the source's thread at its first picture, so a call goes on while the user
+answers. Windows brings Media Foundation's next. `anvil-cli
 --video camera` films with the computer's camera, `--video pattern` a moving test
 pattern through the same codecs, and `--video-snapshot` writes the last picture
 received as a PNG. The ladder steps the picture down only when the network is the
