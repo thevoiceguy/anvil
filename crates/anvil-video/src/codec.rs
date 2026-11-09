@@ -129,7 +129,7 @@ mod tests {
     /// Frames of the test pattern through `codec` and back: each decoded
     /// picture close to what was sent; keyframes when asked; a new size a
     /// new keyframe.
-    fn round_trip(codecs: &SoftwareCodecs, codec: VideoCodec) {
+    pub(crate) fn round_trip(codecs: &dyn Codecs, codec: VideoCodec) {
         let mut enc = codecs.encoder(codec, 1200, 30).unwrap();
         let mut dec = codecs.decoder(codec).unwrap();
         let mut keyframes = Vec::new();
@@ -176,6 +176,28 @@ mod tests {
             .unwrap();
         let types: Vec<u8> = openh264::nal_units(&e.data)
             .map(|nal| nal[nal.iter().position(|&b| b == 1).unwrap() + 1] & 0x1F)
+            .collect();
+        assert!(
+            types.starts_with(&[7, 8]) && types.contains(&5),
+            "{types:?}"
+        );
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn h264_round_trips_the_pattern_through_videotoolbox() {
+        round_trip(&crate::vt::VtCodecs, VideoCodec::H264);
+        // Each IDR carries its parameter sets (the core needs them).
+        let mut enc = crate::vt::VtCodecs
+            .encoder(VideoCodec::H264, 800, 30)
+            .unwrap();
+        let e = enc
+            .encode(&Picture::pattern(320, 180, 0), true)
+            .unwrap()
+            .unwrap();
+        let types: Vec<u8> = crate::vt::nal_units(&e.data)
+            .iter()
+            .map(|nal| nal[0] & 0x1F)
             .collect();
         assert!(
             types.starts_with(&[7, 8]) && types.contains(&5),

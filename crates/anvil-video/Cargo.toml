@@ -31,6 +31,14 @@ sha2    = "0.10"
 v4l            = "0.14"
 zune-jpeg      = "0.5"
 
+# macOS: H.264 through VideoToolbox (the system's codec, in hardware where
+# the Mac has it).
+[target.'cfg(target_os = "macos")'.dependencies]
+objc2-core-foundation = "0.3"
+objc2-core-media      = "0.3"
+objc2-core-video      = "0.3"
+objc2-video-toolbox   = "0.3"
+
 [build-dependencies]
 bindgen    = "0.72"
 pkg-config = "0.3"
