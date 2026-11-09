@@ -30,6 +30,7 @@ bool FlutterWindow::OnCreate() {
     return false;
   }
   RegisterPlugins(flutter_controller_->engine());
+  video_ = std::make_unique<VideoTextures>(flutter_controller_->engine());
   SetChildContent(flutter_controller_->view()->GetNativeWindow());
 
   instance_ = std::make_unique<flutter::MethodChannel<flutter::EncodableValue>>(
@@ -55,6 +56,7 @@ bool FlutterWindow::OnCreate() {
 void FlutterWindow::OnDestroy() {
   ::RemovePropW(GetHandle(), single_instance::kWindowProp);
   instance_ = nullptr;
+  video_ = nullptr;
   if (flutter_controller_) {
     flutter_controller_ = nullptr;
   }

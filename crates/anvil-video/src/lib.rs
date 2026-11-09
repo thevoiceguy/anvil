@@ -17,15 +17,16 @@
 //!
 //! **Linux**: V4L2 cameras; VP8 through libvpx; H.264 through Cisco's
 //! OpenH264, fetched at first use ([`openh264_fetch`]). **macOS**:
-//! AVFoundation cameras; H.264 through VideoToolbox. Windows
-//! brings Media Foundation's later; until then its host has no codecs, and
-//! calls there stay audio.
+//! AVFoundation cameras; H.264 through VideoToolbox. **Windows**: H.264
+//! through Media Foundation (cameras next).
 
 #[cfg(target_os = "macos")]
 pub mod avf;
 pub mod camera;
 pub mod codec;
 mod h264;
+#[cfg(windows)]
+mod mf;
 pub mod openh264_fetch;
 pub mod picture;
 pub mod png;
@@ -96,7 +97,13 @@ impl DesktopVideoHost {
             let _ = openh264_dir;
             (Arc::new(vt::VtCodecs), None)
         };
-        #[cfg(not(target_os = "macos"))]
+        // Windows: Media Foundation's H.264, which Windows' licence covers.
+        #[cfg(windows)]
+        let (codecs, software): (Arc<dyn Codecs>, _) = {
+            let _ = openh264_dir;
+            (Arc::new(mf::MfCodecs), None)
+        };
+        #[cfg(not(any(target_os = "macos", windows)))]
         let (codecs, software): (Arc<dyn Codecs>, _) = {
             let software = SoftwareCodecs::with_openh264(openh264_fetch::installed(openh264_dir));
             (Arc::new(software.clone()), Some(software))

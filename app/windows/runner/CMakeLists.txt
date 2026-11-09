@@ -11,6 +11,7 @@ add_executable(${BINARY_NAME} WIN32
   "instance.cpp"
   "main.cpp"
   "utils.cpp"
+  "video_texture.cpp"
   "win32_window.cpp"
   "${FLUTTER_MANAGED_DIR}/generated_plugin_registrant.cc"
   "Runner.rc"

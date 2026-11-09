@@ -752,7 +752,7 @@ FCP's `docs/CALL_DIAGNOSTICS.md` phase 5 (FCP v0.25.491 takes them):
 
 ### Video calls (softphone video A2b)
 FCP's `docs/SOFTPHONE_VIDEO.md` §2.5, on the desktop (Linux and macOS;
-Windows with its video host, A2d). On a Mac the system asks for the camera
+Windows from A2d1, its cameras in A2d2). On a Mac the system asks for the camera
 the first time a call sends video; the call goes on meanwhile, and a camera
 refused leaves it receiving only:
 - **Placing.** The keypad has **Video call** beside **Call** where the
