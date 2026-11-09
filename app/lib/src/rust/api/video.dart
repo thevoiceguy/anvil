@@ -22,7 +22,7 @@ Future<void> allowH264({required bool on_}) =>
 /// Show a tile on a texture: an incoming stream by id, or (`None`) the
 /// self-view. `present` is the texture plugin's
 /// `void present(void* texture, const uint8_t* rgba, uint32_t width,
-/// uint32_t height)` and `texture` its argument; it is called on the
+/// uint32_t height)` (BGRA on macOS) and `texture` its argument; it is called on the
 /// video host's threads, never after [`detach_tile`] returns. The
 /// attachment's id.
 BigInt attachTile({

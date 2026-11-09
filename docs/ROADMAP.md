@@ -197,7 +197,12 @@ every recommendation:
           video calls from the keypad, a video call answered with or without
           video, the camera toggle and picker, the far end's ask, and
           Settings' camera and H.264 with Cisco's notice; libvpx linked in
-    - [ ] **A2c** macOS: AVFoundation and VideoToolbox
+    - [ ] **A2c** macOS
+      - [x] **A2c1** H.264 through VideoToolbox (AVCC and Annex B each
+            way, keyframes when asked), the runner's texture plugin (BGRA
+            pixel buffers), and macOS in CI
+      - [ ] **A2c2** Cameras through AVFoundation, with the camera
+            permission and entitlement
     - [ ] **A2d** Windows: Media Foundation
   - [ ] **A3** Mobile video
   - [ ] **A4** Anvil in FCP's rooms

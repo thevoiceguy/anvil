@@ -6,7 +6,8 @@
 //! `linux/runner/video_texture.cc`) makes a texture and hands Dart its id
 //! with a C function and its argument; Dart hands those here
 //! ([`attach_tile`]), and the video host's threads call the function with
-//! each picture, as RGBA, at the moment it is to be seen.
+//! each picture, as RGBA (BGRA on macOS: `macos/Runner`), at the moment it
+//! is to be seen.
 
 use anvil_app::Command;
 use flutter_rust_bridge::frb;
@@ -31,7 +32,7 @@ pub async fn allow_h264(on: bool) -> anyhow::Result<()> {
 /// Show a tile on a texture: an incoming stream by id, or (`None`) the
 /// self-view. `present` is the texture plugin's
 /// `void present(void* texture, const uint8_t* rgba, uint32_t width,
-/// uint32_t height)` and `texture` its argument; it is called on the
+/// uint32_t height)` (BGRA on macOS) and `texture` its argument; it is called on the
 /// video host's threads, never after [`detach_tile`] returns. The
 /// attachment's id.
 #[frb(sync)]
@@ -147,6 +148,10 @@ pub(crate) mod desktop {
             let Some(rgba) = buffer.as_mut() else {
                 return;
             };
+            // Core Video's order on macOS, the pixel buffer's elsewhere.
+            #[cfg(target_os = "macos")]
+            picture.write_bgra(rgba);
+            #[cfg(not(target_os = "macos"))]
             picture.write_rgba(rgba);
             // SAFETY: the plugin's function, with the texture it gave for
             // it, called only until it is detached (the texture plugin

@@ -350,7 +350,11 @@ with the standard Huffman tables put back), VP8 through libvpx, and H.264 throug
 Cisco's OpenH264 binary, fetched from Cisco at first use into the user's data
 directory and checked against Cisco's SHA-256 (only Cisco's binary carries Cisco's
 patent licence; an app using it shows `openh264_fetch::NOTICE`); until it is there,
-calls offer VP8. macOS and Windows bring their hardware codecs next. `anvil-cli
+calls offer VP8. On macOS, H.264 goes through VideoToolbox (the system's codec, in
+hardware where the Mac has it): constrained baseline, real time, no reordering,
+keyframes when asked; it speaks AVCC and the core Annex B, so `vt.rs` moves the
+parameter sets between the format description and the stream each way, and nothing
+is fetched. Windows brings Media Foundation's next. `anvil-cli
 --video camera` films with the computer's camera, `--video pattern` a moving test
 pattern through the same codecs, and `--video-snapshot` writes the last picture
 received as a PNG. The ladder steps the picture down only when the network is the
@@ -361,10 +365,11 @@ keyframe, and asks for one if that keyframe never came (a relay drops a stream's
 packets until it has latched).
 
 **The app** shows video on Flutter textures, and pictures never cross into Dart. The
-runner's texture plugin (`linux/runner/video_texture.cc`, over `anvil/video`) makes a
-pixel-buffer texture and hands Dart its id, the C function that fills it and the
+runner's texture plugin (`linux/runner/video_texture.cc`, or `VideoTextures` in
+`macos/Runner/MainFlutterWindow.swift`, over `anvil/video`) makes a pixel-buffer
+texture and hands Dart its id, the C function that fills it and the
 texture's address; Dart hands those to the bridge (`attach_tile`), whose `Renderer`
-converts each picture to RGBA and calls the function on the host's thread. Detaching
+converts each picture to RGBA (BGRA, Core Video's order, on macOS) and calls the function on the host's thread. Detaching
 takes the renderer's lock, so the function is never called once `detach_tile`
 returns, and only then is the texture disposed of. `anvil-app` keeps each call's
 video (offered, our camera, our stream, the streams coming in, the far end asking)

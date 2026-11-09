@@ -66,6 +66,22 @@ jobs:
       - run: cargo build --workspace --all-targets
       - run: cargo test --workspace
 
+  # The workspace on macOS: its lints (VideoToolbox is linted nowhere
+  # else), and anvil-video's tests — H.264 through VideoToolbox, a call's
+  # pictures each way.
+  macos:
+    name: macOS
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v5
+      # The lint job's toolchain: a new clippy's lints land on purpose.
+      - uses: dtolnay/rust-toolchain@1.97.1
+        with:
+          components: clippy
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo clippy --workspace --all-targets -- -D warnings
+      - run: cargo test -p anvil-video
+
   # Anvil against FCP: FCP's compose stack from its nightly images, and
   # the tests against it (users made through the admin API, calls through
   # the call manager). FCP's repository and images are private: the

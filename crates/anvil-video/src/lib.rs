@@ -15,10 +15,11 @@
 //!   self-view; the app attaches a [`Renderer`] (a Flutter texture) to
 //!   those on its screen. Pictures never cross into Dart.
 //!
-//! **Linux** (this release): V4L2 cameras; VP8 through libvpx; H.264
-//! through Cisco's OpenH264, fetched at first use ([`openh264_fetch`]).
-//! macOS and Windows bring their hardware codecs next; until then their
-//! host has no codecs, and calls there stay audio.
+//! **Linux**: V4L2 cameras; VP8 through libvpx; H.264 through Cisco's
+//! OpenH264, fetched at first use ([`openh264_fetch`]). **macOS**: H.264
+//! through VideoToolbox (cameras through AVFoundation next). Windows
+//! brings Media Foundation's later; until then its host has no codecs, and
+//! calls there stay audio.
 
 pub mod camera;
 pub mod codec;
@@ -33,6 +34,8 @@ pub mod tiles;
 pub mod v4l2;
 #[cfg(target_os = "linux")]
 mod vpx;
+#[cfg(target_os = "macos")]
+mod vt;
 
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -84,11 +87,22 @@ impl DesktopVideoHost {
 
     /// The platform's codecs with other cameras (a test pattern).
     pub fn with_cameras(cameras: impl Cameras + 'static, openh264_dir: &Path) -> Self {
-        let software = SoftwareCodecs::with_openh264(openh264_fetch::installed(openh264_dir));
+        // macOS: the system's own H.264 (VideoToolbox, in hardware where
+        // the Mac has it), so nothing is fetched.
+        #[cfg(target_os = "macos")]
+        let (codecs, software): (Arc<dyn Codecs>, _) = {
+            let _ = openh264_dir;
+            (Arc::new(vt::VtCodecs), None)
+        };
+        #[cfg(not(target_os = "macos"))]
+        let (codecs, software): (Arc<dyn Codecs>, _) = {
+            let software = SoftwareCodecs::with_openh264(openh264_fetch::installed(openh264_dir));
+            (Arc::new(software.clone()), Some(software))
+        };
         Self {
             cameras: Arc::new(cameras),
-            codecs: Arc::new(software.clone()),
-            software: Some(software),
+            codecs,
+            software,
             tiles: Tiles::default(),
             camera: Arc::default(),
             live: Arc::default(),

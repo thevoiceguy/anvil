@@ -751,8 +751,9 @@ FCP's `docs/CALL_DIAGNOSTICS.md` phase 5 (FCP v0.25.491 takes them):
     screen's badge.
 
 ### Video calls (softphone video A2b)
-FCP's `docs/SOFTPHONE_VIDEO.md` §2.5, on the desktop (Linux first; macOS and
-Windows with their video hosts, A2c and A2d):
+FCP's `docs/SOFTPHONE_VIDEO.md` §2.5, on the desktop (Linux; macOS with
+VideoToolbox from A2c1, its cameras in A2c2; Windows with its video host,
+A2d):
 - **Placing.** The keypad has **Video call** beside **Call** where the
   device has video (a camera need not be there: the far end's picture
   shows all the same).
