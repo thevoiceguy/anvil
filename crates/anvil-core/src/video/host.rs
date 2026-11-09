@@ -77,7 +77,8 @@ pub enum VideoKind {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct EncodingId(pub u8);
 
-/// One incoming stream within a call, unique for the call's life.
+/// One incoming stream, unique within the process (a host can show
+/// several calls' streams at once).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct StreamId(pub u32);
 

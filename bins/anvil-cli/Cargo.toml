@@ -14,6 +14,7 @@ anvil-core  = { workspace = true }
 anvil-app   = { workspace = true }
 anvil-fcp   = { workspace = true }
 anvil-audio = { workspace = true, features = ["cpal-default", "tone"] }
+anvil-video = { workspace = true }
 
 tokio              = { workspace = true }
 anyhow             = { workspace = true }

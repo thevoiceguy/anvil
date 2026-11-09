@@ -3,6 +3,7 @@ resolver = "2"
 members = [
     "crates/anvil-core",
     "crates/anvil-audio",
+    "crates/anvil-video",
     "crates/anvil-brand",
     "crates/anvil-codec",
     "crates/anvil-ffi",
@@ -14,7 +15,7 @@ members = [
 ]
 
 [workspace.package]
-version = "0.2.40"
+version = "0.2.42"
 edition = "2021"
 rust-version = "1.97"
 license = "MIT OR Apache-2.0"
@@ -73,6 +74,7 @@ forge-resampler = { git = "https://github.com/thevoiceguy/forge-media", tag = "v
 # Internal
 anvil-core  = { path = "crates/anvil-core"  }
 anvil-audio = { path = "crates/anvil-audio" }
+anvil-video = { path = "crates/anvil-video" }
 anvil-brand = { path = "crates/anvil-brand" }
 anvil-codec = { path = "crates/anvil-codec" }
 anvil-fcp   = { path = "crates/anvil-fcp"   }

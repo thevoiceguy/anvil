@@ -213,11 +213,15 @@ pub(crate) struct SectionSetup {
     pub srtp: SrtpMode,
 }
 
+/// Every call's streams are numbered from here.
+static STREAMS: std::sync::LazyLock<Arc<AtomicU32>> = std::sync::LazyLock::new(Arc::default);
+
 /// A call's video over SIP: its sections, in SDP order after the audio.
 pub(crate) struct CallVideo {
     sections: Vec<CallSection>,
     host: Arc<dyn VideoHost>,
-    /// Numbers the call's streams.
+    /// Numbers the call's streams: one counter for the process, so a
+    /// host showing several calls' streams can tell them apart.
     streams: Arc<AtomicU32>,
     capture: crate::capture::CaptureSlot,
     /// The call's audio, once its pipeline runs: lip sync and the CNAME.
@@ -237,7 +241,7 @@ impl CallVideo {
         Self {
             sections: Vec::new(),
             host,
-            streams: Arc::default(),
+            streams: Arc::clone(&STREAMS),
             capture,
             audio: None,
             held: false,

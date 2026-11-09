@@ -1,0 +1,41 @@
+[package]
+name = "anvil-video"
+description = "The desktop's camera, codecs and screen for Anvil's video calls."
+version.workspace      = true
+edition.workspace      = true
+rust-version.workspace = true
+license.workspace      = true
+authors.workspace      = true
+repository.workspace   = true
+homepage.workspace     = true
+
+[dependencies]
+anvil-core  = { workspace = true }
+tokio       = { workspace = true }
+async-trait = { workspace = true }
+tracing     = { workspace = true }
+parking_lot = { workspace = true }
+bytes       = { workspace = true }
+# H.264 through Cisco's OpenH264 binary, loaded at run time: only Cisco's
+# binary carries Cisco's patent licence, so it is downloaded at first use
+# (as Firefox does) and never built from source here (no `source`).
+openh264      = { version = "0.9", default-features = false, features = ["libloading"] }
+openh264-sys2 = { version = "0.9", default-features = false, features = ["libloading"] }
+bzip2   = "0.6"
+reqwest = { version = "0.12", default-features = false, features = ["rustls-tls-native-roots"] }
+sha2    = "0.10"
+
+# Linux: V4L2 cameras, VP8 through libvpx (BSD, no royalties), its
+# bindings made by build.rs from the installed headers.
+[target.'cfg(target_os = "linux")'.dependencies]
+v4l            = "0.14"
+zune-jpeg      = "0.5"
+
+[build-dependencies]
+bindgen    = "0.72"
+pkg-config = "0.3"
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["test-util"] }
+anvil-audio = { workspace = true, features = ["tone"] }
+tracing-subscriber = { workspace = true }

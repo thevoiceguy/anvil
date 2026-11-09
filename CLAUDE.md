@@ -20,6 +20,7 @@ anvil/
 ├── crates/
 │   ├── anvil-core    # call state machine; orchestrates siphon-rs + forge-media
 │   ├── anvil-audio   # cpal mic/speaker I/O, AEC/NS/AGC, device routing
+│   ├── anvil-video   # the desktop's video host: cameras, codecs, tiles
 │   ├── anvil-brand   # FCP brand provisioning (HTTP + filesystem cache)
 │   ├── anvil-codec   # Opus wrapper (forge provides G.711/G.722)
 │   ├── anvil-fcp     # FCP: discovery, sign-in, the app session, the softphone's settings
@@ -39,13 +40,14 @@ workspace so Rust builds stay hermetic. See `docs/ARCHITECTURE.md`.
 anvil-cli → anvil-fcp → anvil-core (FCP's client; anvil-core never depends on it)
 anvil-cli → anvil-core → {siphon-rs crates, forge-media crates}
                        ↘ anvil-audio → cpal
+                       ↘ anvil-video → V4L2, libvpx, OpenH264 (fetched)
                        ↘ anvil-brand → reqwest
                        ↘ anvil-codec → opus
 anvil-ffi → anvil-core (re-exports a C ABI)
 ```
 
-`anvil-core` never depends on `anvil-audio`, `anvil-brand`, or `anvil-codec`
-directly — it declares traits (`AudioHost`, `BrandProvider`, `BrandCache`, codec
+`anvil-core` never depends on `anvil-audio`, `anvil-video`, `anvil-brand`, or
+`anvil-codec` directly — it declares traits (`AudioHost`, `VideoHost`, `BrandProvider`, `BrandCache`, codec
 types) that the platform layer supplies. This keeps the core testable without
 devices and lets mobile hosts inject their own audio pipeline (AVAudioEngine,
 Oboe) and their own HTTP stack (URLSession, OkHttp) when the host OS owns those
@@ -54,7 +56,7 @@ concerns.
 ### Platform gating
 
 - Anvil core must compile on all five targets. No `cfg(target_os = ...)` in core logic.
-- Platform code lives in `anvil-audio` behind cfg gates, or in FFI consumers.
+- Platform code lives in `anvil-audio` and `anvil-video` behind cfg gates, or in FFI consumers.
 - Avoid forge-media's Linux-only crates (`forge-kernel`, `forge-kernel-ebpf`). The
   features we use (`forge-engine`, `forge-rtp`, `forge-codecs`, `forge-dtmf`,
   `forge-sdp`, `forge-injection`) are portable.
@@ -118,7 +120,9 @@ cargo build -p anvil-ffi --target aarch64-linux-android --release
 ```
 
 Install once: `cargo install cargo-ndk` (Android) and the usual `rustup target add`s.
-On Linux, cpal needs the ALSA headers (`libasound2-dev`).
+On Linux, cpal needs the ALSA headers (`libasound2-dev`), and `anvil-video` needs
+libvpx's (`libvpx-dev`) and libclang (`libclang-dev`) for its bindings. Its H.264
+tests run when `ANVIL_OPENH264_DIR` holds Cisco's OpenH264 (CI fetches it).
 
 To move to a new siphon-rs or forge-media release, change the tags in the root
 `Cargo.toml` (every crate of one repo on the same tag).

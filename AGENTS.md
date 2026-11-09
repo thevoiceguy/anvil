@@ -7,15 +7,15 @@ this repo. Human-facing design lives in `docs/`; human contributor guidance is i
 ## Ground rules
 
 1. **Read `CLAUDE.md` first.** It defines crate boundaries and dependency direction.
-2. **`anvil-core` has no dependency on `anvil-audio`, `anvil-brand`, or
-   `anvil-codec`.** If a change makes it depend on any of them, it's wrong — add
+2. **`anvil-core` has no dependency on `anvil-audio`, `anvil-video`,
+   `anvil-brand`, or `anvil-codec`.** If a change makes it depend on any of them, it's wrong — add
    a trait in `anvil-core::audio`, `anvil-core::brand`, etc. and supply the
    implementation from the platform crate.
 3. **Upstream workspaces.** siphon-rs and forge-media are git dependencies pinned to
    release tags. Don't patch them from here: change them in their own repos, release a
    tag, and move the tag in the root `Cargo.toml`.
-4. **Platform code is gated.** `#[cfg(target_os = ...)]` lives in `anvil-audio` or
-   the FFI consumers, never in `anvil-core`.
+4. **Platform code is gated.** `#[cfg(target_os = ...)]` lives in `anvil-audio`,
+   `anvil-video` or the FFI consumers, never in `anvil-core`.
 5. **Async runtime.** Tokio only. No `async-std`, no custom executors.
 6. **Errors.** Library crates use `thiserror` with a local `Error` enum. Binaries
    use `anyhow`. Never re-export siphon-rs or forge-media error types from Anvil's

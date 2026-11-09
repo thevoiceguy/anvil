@@ -180,6 +180,25 @@ every recommendation:
         simulator with pushes handed in as PushKit would
   - [ ] Delivery on devices: TestFlight and a Play test track, with the
         publisher's Apple Developer and Firebase accounts
+- [ ] **V** Video calls and FCP's rooms (FCP's `docs/SOFTPHONE_VIDEO.md`)
+  - [x] **A1** Video in the core: `VideoHost`, the SDP, sending and
+        receiving with NACK, RTX and PLI, REMB both ways, playout and lip
+        sync, `set_video` and upgrades, independent of the transport, the
+        synthetic host, the C interface and the CLI; proved Anvil to Anvil
+        and through FCP
+  - [ ] **A2** Desktop video
+    - [x] **A2a** `anvil-video` on Linux: V4L2 cameras, VP8 (libvpx), H.264
+          through Cisco's OpenH264 fetched at first use, decoding and
+          showing each stream on time in its tile; the CLI's `--video
+          camera` and `pattern`; real pictures proved both ways and through
+          FCP
+    - [ ] **A2b** The app: Flutter textures, the call screen, self-view,
+          camera picker and video toggle
+    - [ ] **A2c** macOS: AVFoundation and VideoToolbox
+    - [ ] **A2d** Windows: Media Foundation
+  - [ ] **A3** Mobile video
+  - [ ] **A4** Anvil in FCP's rooms
+  - [ ] **A5** Mobile screen share
 - [ ] **U6** Accessibility, localisation, store listings
 - [ ] **W** The Windows client, finished (the 2026-10-12 survey)
   - [x] **W1** One app: a second start hands its arguments to the running
