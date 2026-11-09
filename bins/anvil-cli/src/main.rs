@@ -146,6 +146,24 @@ struct Cli {
     /// encoding. Off by default; turn on for noisy / quiet mics.
     #[arg(long)]
     agc: bool,
+
+    /// Video: `synthetic` sends numbered frames and checks those that
+    /// arrive, for headless tests (the platform hosts come with the app).
+    /// `--call` then offers video, `--auto-answer` takes it, and the far
+    /// end asking to see us turns our camera on. A summary prints at
+    /// hangup.
+    #[arg(long, value_enum)]
+    video: Option<VideoArg>,
+
+    /// With `--video`: place `--call` as an audio call and turn the camera
+    /// on this many seconds after it is answered (a re-INVITE).
+    #[arg(long, value_name = "SECS")]
+    video_at: Option<u64>,
+}
+
+#[derive(clap::ValueEnum, Clone, Copy, Debug)]
+enum VideoArg {
+    Synthetic,
 }
 
 #[derive(clap::ValueEnum, Clone, Copy, Debug)]
@@ -700,7 +718,7 @@ fn print_change(change: &anvil_app::Change) {
 /// `anvil-cli run`: the phone, its control socket and a prompt.
 async fn run_phone(cli: &Cli) -> Result<()> {
     use tokio::io::AsyncBufReadExt;
-    let (anvil, _tone, fcp) = phone_config(cli).await?;
+    let (anvil, _tone, fcp, _) = phone_config(cli).await?;
     let phone = anvil_app::Phone::start(anvil_app::PhoneConfig {
         anvil,
         fcp,
@@ -1042,8 +1060,8 @@ async fn main() -> Result<()> {
         None => {}
     }
 
-    let (cfg, tone_stats, _) = phone_config(&cli).await?;
-    run(cli, cfg, tone_stats).await
+    let (cfg, tone_stats, _, video) = phone_config(&cli).await?;
+    run(cli, cfg, tone_stats, video).await
 }
 
 /// `--push`: `<provider>:<param>:<token>`.
@@ -1076,6 +1094,7 @@ async fn phone_config(
     AnvilConfig,
     Option<Arc<ToneStats>>,
     Option<Arc<anvil_fcp::FcpClient>>,
+    Option<anvil_core::video::synthetic::SyntheticVideoHost>,
 )> {
     let tls_extra_ca_pem = if let Some(path) = cli.tls_ca.as_ref() {
         Some(std::fs::read(path).map_err(|e| anyhow::anyhow!("read --tls-ca: {e}"))?)
@@ -1123,6 +1142,9 @@ async fn phone_config(
         ),
         };
 
+    let synthetic_video = cli
+        .video
+        .map(|VideoArg::Synthetic| anvil_core::video::synthetic::SyntheticVideoHost::default());
     let (audio, tone_stats): (
         Box<dyn anvil_core::audio::AudioHost>,
         Option<Arc<ToneStats>>,
@@ -1146,14 +1168,21 @@ async fn phone_config(
         account,
         media,
         audio,
-        video: None,
+        video: synthetic_video
+            .clone()
+            .map(|h| Box::new(h) as Box<dyn anvil_core::video::host::VideoHost>),
         brand,
     };
 
-    Ok((cfg, tone_stats, fcp))
+    Ok((cfg, tone_stats, fcp, synthetic_video))
 }
 
-async fn run(cli: Cli, cfg: AnvilConfig, tone_stats: Option<Arc<ToneStats>>) -> Result<()> {
+async fn run(
+    cli: Cli,
+    cfg: AnvilConfig,
+    tone_stats: Option<Arc<ToneStats>>,
+    video: Option<anvil_core::video::synthetic::SyntheticVideoHost>,
+) -> Result<()> {
     tracing::info!("starting Anvil");
     let (anvil, mut events) = Anvil::start(cfg).await?;
 
@@ -1179,7 +1208,10 @@ async fn run(cli: Cli, cfg: AnvilConfig, tone_stats: Option<Arc<ToneStats>>) -> 
     // loop until the call ends / hold timer fires / Ctrl+C.
     let outbound_id = if let Some(target) = cli.call.clone() {
         tracing::info!(%target, "placing call");
-        match anvil.place_call(&target).await {
+        let media = anvil_core::CallMedia {
+            video: video.is_some() && cli.video_at.is_none(),
+        };
+        match anvil.place_call_with_media(&target, media).await {
             Ok(id) => {
                 tracing::info!(call_id = ?id, "call placed");
                 Some(id)
@@ -1217,7 +1249,8 @@ async fn run(cli: Cli, cfg: AnvilConfig, tone_stats: Option<Arc<ToneStats>>) -> 
                         println!("[event] IncomingCall from {label}");
                         if cli.auto_answer && active_call.is_none() {
                             tracing::info!(?call, "auto-answering");
-                            if let Err(e) = anvil.answer(call).await {
+                            let media = anvil_core::CallMedia { video: video.is_some() };
+                            if let Err(e) = anvil.answer_with_media(call, media).await {
                                 tracing::warn!(%e, "answer failed");
                             } else {
                                 active_call = Some(call);
@@ -1252,6 +1285,13 @@ async fn run(cli: Cli, cfg: AnvilConfig, tone_stats: Option<Arc<ToneStats>>) -> 
                             match anvil.hold(call, false).await {
                                 Ok(()) => println!("[hold] off"),
                                 Err(e) => tracing::warn!(%e, "hold off failed"),
+                            }
+                        }
+                        if let (Some(secs), true) = (cli.video_at, video.is_some()) {
+                            tokio::time::sleep(Duration::from_secs(secs)).await;
+                            match anvil.set_video(call, true).await {
+                                Ok(()) => println!("[video] camera on"),
+                                Err(e) => tracing::warn!(%e, "camera on failed"),
                             }
                         }
                         if let Some(target) = &cli.transfer_to {
@@ -1331,6 +1371,40 @@ async fn run(cli: Cli, cfg: AnvilConfig, tone_stats: Option<Arc<ToneStats>>) -> 
                         summary.old,
                         if summary.waiting { " (waiting)" } else { "" }
                     ),
+                    Event::VideoRequested { call } => {
+                        println!("[video] call={call:?}: the far end asks to see us");
+                        if video.is_some() {
+                            match anvil.set_video(call, true).await {
+                                Ok(()) => println!("[video] camera on"),
+                                Err(e) => tracing::warn!(%e, "camera on failed"),
+                            }
+                        }
+                    }
+                    Event::VideoStarted { call, stream, direction, kind, codec } => println!(
+                        "[video] call={call:?} stream {} started: {direction:?} {kind:?} {codec:?}",
+                        stream.0
+                    ),
+                    Event::VideoStopped { call, stream } => {
+                        println!("[video] call={call:?} stream {} stopped", stream.0)
+                    }
+                    Event::VideoStats { call, stream, stats: v } => println!(
+                        "[video-stats] call={call:?} stream={} {:?} {:.0}kbps {:.1}fps loss={:?}% \
+                         nacks={} keyframes={} target={:?} estimate={:?} jitter={:?}ms \
+                         delay={:?}ms av={:?}ms rtt={:?}ms",
+                        stream.0,
+                        v.direction,
+                        v.kbps,
+                        v.fps,
+                        v.loss_pct,
+                        v.nacks,
+                        v.keyframe_requests,
+                        v.target_kbps,
+                        v.estimate_kbps,
+                        v.jitter_ms.map(|x| x.round()),
+                        v.playout_delay_ms.map(|x| x.round()),
+                        v.av_offset_ms.map(|x| x.round()),
+                        v.rtt_ms.map(|x| x.round()),
+                    ),
                     other => println!("[event] {other:?}"),
                 }
             }
@@ -1362,6 +1436,34 @@ async fn run(cli: Cli, cfg: AnvilConfig, tone_stats: Option<Arc<ToneStats>>) -> 
             stats.last_rms(),
             stats.peak_rms()
         );
+    }
+
+    if let Some(video) = video.as_ref() {
+        // What the synthetic camera sent, and what arrived: in order from a
+        // keyframe, or not.
+        let record = video.record();
+        for s in &record.sent {
+            println!(
+                "[video] sent {:?}: {} frames, {} keyframes asked for, targets {:?}",
+                s.config.codec,
+                s.frames,
+                s.keyframe_requests,
+                s.targets.iter().map(|t| t.0).collect::<Vec<_>>()
+            );
+        }
+        for (id, r) in &record.received {
+            let n = r.numbers();
+            let in_order = n.windows(2).all(|w| w[1] == w[0] + 1);
+            println!(
+                "[video] received stream {}: {} frames, first a keyframe {}, in order {in_order}, \
+                 unreadable {}, picture lost {}",
+                id.0,
+                r.frames.len(),
+                r.frames.first().is_some_and(|f| f.1),
+                r.unreadable,
+                r.lost
+            );
+        }
     }
 
     tracing::info!("unregistering...");

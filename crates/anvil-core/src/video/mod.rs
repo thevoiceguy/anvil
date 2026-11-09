@@ -157,6 +157,13 @@ impl VideoEvents {
 const DEFAULT_KBPS: u32 = 1500;
 const DEFAULT_FPS: u32 = 30;
 
+/// Whether incoming tiles stay while a section does not receive: a hold
+/// (ours, or theirs: `inactive`) freezes them; the far end receiving only
+/// (its camera off) removes them.
+fn keeps_tiles(remote: &RemoteSection, held: bool) -> bool {
+    held || remote.direction == MediaDirection::Inactive
+}
+
 /// One video section of a call over SIP.
 struct CallSection {
     /// What we last said of it.
@@ -168,15 +175,42 @@ struct CallSection {
     theirs: Option<Crypto>,
     transport: Option<Arc<SdesTransport>>,
     session: Option<VideoSession>,
+    /// What the user allows of it: `Sendrecv` with the camera on,
+    /// `Recvonly` for a section the far end added that the user has not
+    /// joined. Hold and the far end's offers never go past it.
+    want: MediaDirection,
 }
 
 impl CallSection {
+    fn new(local: LocalSection, want: MediaDirection) -> Self {
+        Self {
+            local,
+            remote: None,
+            sockets: None,
+            theirs: None,
+            transport: None,
+            session: None,
+            want,
+        }
+    }
+
     fn stop(&mut self) {
         self.session = None;
         self.transport = None;
         self.sockets = None;
         self.local.port = 0;
     }
+
+    fn live(&self) -> bool {
+        self.local.port != 0
+    }
+}
+
+/// Where a call's new sections get their sockets and keys.
+#[derive(Clone, Copy)]
+pub(crate) struct SectionSetup {
+    pub media_ip: IpAddr,
+    pub srtp: SrtpMode,
 }
 
 /// A call's video over SIP: its sections, in SDP order after the audio.
@@ -188,9 +222,55 @@ pub(crate) struct CallVideo {
     capture: crate::capture::CaptureSlot,
     /// The call's audio, once its pipeline runs: lip sync and the CNAME.
     audio: Option<Arc<dyn AudioClock>>,
+    /// We hold the call: every section is offered `inactive`.
+    held: bool,
+    /// The call before an offer of ours that is not answered yet: how
+    /// many sections, and what each allowed and said. An offer refused
+    /// leaves the call as it was.
+    before_offer: Option<(usize, Vec<(MediaDirection, MediaDirection)>)>,
 }
 
 impl CallVideo {
+    /// A call without video yet, which may gain it (`set_video`, or the
+    /// far end's re-INVITE).
+    pub(crate) fn empty(host: Arc<dyn VideoHost>, capture: crate::capture::CaptureSlot) -> Self {
+        Self {
+            sections: Vec::new(),
+            host,
+            streams: Arc::default(),
+            capture,
+            audio: None,
+            held: false,
+            before_offer: None,
+        }
+    }
+
+    /// A camera section offered on its own sockets: sending and receiving.
+    async fn camera_offer(
+        host: &dyn VideoHost,
+        setup: SectionSetup,
+        direction: MediaDirection,
+    ) -> Option<(LocalSection, MediaSockets)> {
+        let codecs = host::usable_codecs(host);
+        if codecs.is_empty() {
+            return None;
+        }
+        let sockets = match crate::call::bind_rtp_socket(setup.media_ip).await {
+            Ok(s) => s,
+            Err(e) => {
+                tracing::warn!(%e, "no socket for video; offering none");
+                return None;
+            }
+        };
+        let port = sockets.rtp.local_addr().ok()?.port();
+        let crypto =
+            (setup.srtp != SrtpMode::Off).then(|| Crypto::generate(1, Suite::AesCm128HmacSha1_80));
+        Some((
+            LocalSection::offer(VideoKind::Camera, port, &codecs, direction, crypto),
+            sockets,
+        ))
+    }
+
     /// The sections of an offer of ours: a camera, sending and receiving.
     pub(crate) async fn offer(
         host: Arc<dyn VideoHost>,
@@ -198,41 +278,14 @@ impl CallVideo {
         srtp: SrtpMode,
         capture: crate::capture::CaptureSlot,
     ) -> Option<Self> {
-        let codecs = host::usable_codecs(host.as_ref());
-        if codecs.is_empty() {
-            return None;
-        }
-        let sockets = match crate::call::bind_rtp_socket(media_ip).await {
-            Ok(s) => s,
-            Err(e) => {
-                tracing::warn!(%e, "no socket for video; offering audio only");
-                return None;
-            }
-        };
-        let port = sockets.rtp.local_addr().ok()?.port();
-        let crypto =
-            (srtp != SrtpMode::Off).then(|| Crypto::generate(1, Suite::AesCm128HmacSha1_80));
-        let local = LocalSection::offer(
-            VideoKind::Camera,
-            port,
-            &codecs,
-            MediaDirection::Sendrecv,
-            crypto,
-        );
-        Some(Self {
-            sections: vec![CallSection {
-                local,
-                remote: None,
-                sockets: Some(sockets),
-                theirs: None,
-                transport: None,
-                session: None,
-            }],
-            host,
-            streams: Arc::default(),
-            capture,
-            audio: None,
-        })
+        let setup = SectionSetup { media_ip, srtp };
+        let (local, sockets) =
+            Self::camera_offer(host.as_ref(), setup, MediaDirection::Sendrecv).await?;
+        let mut v = Self::empty(host, capture);
+        let mut section = CallSection::new(local, MediaDirection::Sendrecv);
+        section.sockets = Some(sockets);
+        v.sections.push(section);
+        Some(v)
     }
 
     /// Our answer's sections to `offer`, each taken where we can and
@@ -249,50 +302,58 @@ impl CallVideo {
         if offered.is_empty() {
             return None;
         }
-        let codecs = host::usable_codecs(host.as_ref());
-        let mut sections = Vec::with_capacity(offered.len());
+        let mut v = Self::empty(host, capture);
+        let setup = SectionSetup { media_ip, srtp };
         for remote in offered {
-            let taken = match Self::take(&remote, &codecs, srtp) {
-                Some((codec, crypto)) => match crate::call::bind_rtp_socket(media_ip).await {
-                    Ok(sockets) => sockets
-                        .rtp
-                        .local_addr()
-                        .ok()
-                        .map(|a| (codec, crypto, sockets, a.port())),
-                    Err(e) => {
-                        tracing::warn!(%e, "no socket for a video section; declining it");
-                        None
-                    }
-                },
-                None => None,
-            };
-            let section = match taken {
-                Some((codec, (ours, theirs), sockets, port)) => CallSection {
-                    local: remote.answer(&codec, port, remote.direction.mirror(), ours),
-                    theirs,
-                    remote: Some(remote),
-                    sockets: Some(sockets),
-                    transport: None,
-                    session: None,
-                },
-                None => CallSection {
-                    local: LocalSection::declined(&remote),
-                    remote: Some(remote),
-                    sockets: None,
-                    theirs: None,
-                    transport: None,
-                    session: None,
-                },
-            };
-            sections.push(section);
+            let section = v
+                .take_offered(remote, setup, MediaDirection::Sendrecv)
+                .await;
+            v.sections.push(section);
         }
-        Some(Self {
-            sections,
-            host,
-            streams: Arc::default(),
-            capture,
-            audio: None,
-        })
+        Some(v)
+    }
+
+    /// One section of an offer, taken (with its sockets, ready to start,
+    /// answered within `want`) or declined.
+    async fn take_offered(
+        &self,
+        remote: RemoteSection,
+        setup: SectionSetup,
+        want: MediaDirection,
+    ) -> CallSection {
+        let codecs = host::usable_codecs(self.host.as_ref());
+        let taken = match Self::take(&remote, &codecs, setup.srtp) {
+            Some((codec, crypto)) => match crate::call::bind_rtp_socket(setup.media_ip).await {
+                Ok(sockets) => sockets
+                    .rtp
+                    .local_addr()
+                    .ok()
+                    .map(|a| (codec, crypto, sockets, a.port())),
+                Err(e) => {
+                    tracing::warn!(%e, "no socket for a video section; declining it");
+                    None
+                }
+            },
+            None => None,
+        };
+        match taken {
+            Some((codec, (ours, theirs), sockets, port)) => {
+                let mut direction = remote.direction.mirror().and(want);
+                if self.held {
+                    direction = MediaDirection::Inactive;
+                }
+                let mut s = CallSection::new(remote.answer(&codec, port, direction, ours), want);
+                s.theirs = theirs;
+                s.remote = Some(remote);
+                s.sockets = Some(sockets);
+                s
+            }
+            None => {
+                let mut s = CallSection::new(LocalSection::declined(&remote), want);
+                s.remote = Some(remote);
+                s
+            }
+        }
     }
 
     /// The codec and keys (ours, theirs) to take `remote` with, or `None`
@@ -325,7 +386,14 @@ impl CallVideo {
 
     /// Whether any section is (to be) carried.
     pub(crate) fn any_live(&self) -> bool {
-        self.sections.iter().any(|s| s.local.port != 0)
+        self.sections.iter().any(CallSection::live)
+    }
+
+    /// Whether our camera is on: a camera section the user allows to send.
+    pub(crate) fn camera_on(&self) -> bool {
+        self.sections
+            .iter()
+            .any(|s| s.live() && s.local.kind == VideoKind::Camera && s.want.sends())
     }
 
     /// Decline every section (an audio-only answer).
@@ -347,33 +415,154 @@ impl CallVideo {
         self.sections.iter().map(|s| s.local.clone()).collect()
     }
 
-    /// Our sections as an offer with `direction` on each live one (hold).
-    pub(crate) fn offer_with(&self, direction: MediaDirection) -> Vec<LocalSection> {
-        self.sections
-            .iter()
-            .map(|s| {
-                let mut l = s.local.clone();
-                if l.port != 0 {
-                    l.direction = direction;
-                }
-                l
-            })
-            .collect()
+    /// Our sections as an offer that holds the call (each live one
+    /// `inactive`) or resumes it (each as the user allows).
+    pub(crate) fn offer_for_hold(&mut self, held: bool) -> Vec<LocalSection> {
+        self.held = held;
+        for s in self.sections.iter_mut().filter(|s| s.live()) {
+            s.local.direction = if held {
+                MediaDirection::Inactive
+            } else {
+                s.want
+            };
+        }
+        self.sdp_sections()
     }
 
-    /// The far end answered our offer: start each section it took.
+    /// Our offer turning the camera on or off: on, the camera section
+    /// sends (one added, or a stopped one taken up again on new sockets
+    /// and keys); off, it stops (port 0). The others stay as they are.
+    pub(crate) async fn offer_camera(
+        &mut self,
+        on: bool,
+        setup: SectionSetup,
+    ) -> Vec<LocalSection> {
+        self.before_offer = Some((
+            self.sections.len(),
+            self.sections
+                .iter()
+                .map(|s| (s.want, s.local.direction))
+                .collect(),
+        ));
+        let camera = self
+            .sections
+            .iter()
+            .position(|s| s.local.kind == VideoKind::Camera);
+        let direction = |want: MediaDirection, held: bool| {
+            if held {
+                MediaDirection::Inactive
+            } else {
+                want
+            }
+        };
+        match (on, camera) {
+            (false, Some(i)) => {
+                let held = self.held;
+                let s = &mut self.sections[i];
+                // Off, we still see them while they send; with neither
+                // side sending, the section goes.
+                let they_send = s.live()
+                    && s.remote
+                        .as_ref()
+                        .is_some_and(|r| r.live() && r.direction.sends());
+                if they_send {
+                    s.want = MediaDirection::Recvonly;
+                    s.local.direction = direction(s.want, held);
+                    // The camera goes off now, not when the far end
+                    // answers.
+                    if let Some(session) = &s.session {
+                        session.set_direction_keeping(
+                            session.direction().and(MediaDirection::Recvonly),
+                            true,
+                        );
+                    }
+                } else {
+                    s.stop();
+                }
+            }
+            (false, None) => {}
+            (true, Some(i)) if self.sections[i].live() => {
+                let s = &mut self.sections[i];
+                s.want = MediaDirection::Sendrecv;
+                s.local.direction = direction(s.want, self.held);
+            }
+            (true, slot) => {
+                let held = self.held;
+                if let Some((local, sockets)) = Self::camera_offer(
+                    self.host.as_ref(),
+                    setup,
+                    direction(MediaDirection::Sendrecv, held),
+                )
+                .await
+                {
+                    let mut section = CallSection::new(local, MediaDirection::Sendrecv);
+                    section.sockets = Some(sockets);
+                    match slot {
+                        // A port-0 m-line is ours to use again (RFC 3264
+                        // §8.3).
+                        Some(i) => self.sections[i] = section,
+                        None => self.sections.push(section),
+                    }
+                }
+            }
+        }
+        self.sdp_sections()
+    }
+
+    /// An offer of ours awaits its answer being taken (`answered`) or
+    /// refused: a re-INVITE from the far end now would cross it.
+    pub(crate) fn offer_pending(&self) -> bool {
+        self.before_offer.is_some()
+    }
+
+    /// The far end refused our offer: the call keeps what it had.
+    pub(crate) fn offer_refused(&mut self) {
+        if let Some((n, was)) = self.before_offer.take() {
+            self.sections.truncate(n);
+            for (s, (want, direction)) in self.sections.iter_mut().zip(was) {
+                s.want = want;
+                s.local.direction = direction;
+            }
+        }
+        for s in &mut self.sections {
+            if s.session.is_none() {
+                s.stop();
+            }
+        }
+    }
+
+    /// The far end answered our offer, the call's first or a later one:
+    /// a running section takes what both now allow, a new one starts, one
+    /// it declined stops.
     pub(crate) fn answered(&mut self, answer: &[u8], events: Option<VideoEvents>) {
+        self.before_offer = None;
         let answered = sdp::sections(answer);
-        for (i, s) in self.sections.iter_mut().enumerate() {
-            let Some(remote) = answered.get(i).cloned() else {
+        for i in 0..self.sections.len() {
+            let remote = answered.get(i).cloned();
+            let s = &mut self.sections[i];
+            let Some(remote) = remote.filter(|r| r.live() && s.live()) else {
+                if s.live() {
+                    tracing::info!(section = i, "video section declined in the answer");
+                }
+                if let Some(r) = answered.get(i) {
+                    s.remote = Some(r.clone());
+                }
                 s.stop();
                 continue;
             };
+            if let Some(session) = &s.session {
+                session.set_direction_keeping(
+                    s.local.direction.and(remote.direction.mirror()),
+                    keeps_tiles(&remote, self.held),
+                );
+                if let (Some(t), Some(ip)) = (&s.transport, remote.addr) {
+                    t.set_remote(SocketAddr::new(ip, remote.port));
+                }
+                s.remote = Some(remote);
+                continue;
+            }
             let ours: Vec<VideoCodec> = s.local.codecs.iter().map(|c| c.codec).collect();
-            let chosen = remote
-                .live()
-                .then(|| remote.choose(&ours).cloned())
-                .flatten();
+            let chosen = remote.choose(&ours).cloned();
             let theirs = match &s.local.crypto {
                 None if remote.profile.secure() => None,
                 None => Some(None),
@@ -390,16 +579,13 @@ impl CallVideo {
                     }
                     let direction = s.local.direction.and(remote.direction.mirror());
                     s.remote = Some(remote);
+                    let links = self.links(events.clone());
                     Self::start_section(
-                        s,
+                        &mut self.sections[i],
                         &codec,
                         direction,
                         &self.host,
-                        SessionLinks {
-                            streams: Arc::clone(&self.streams),
-                            events: events.clone(),
-                            audio: self.audio.clone(),
-                        },
+                        links,
                         &self.capture,
                     );
                 }
@@ -412,26 +598,33 @@ impl CallVideo {
         }
     }
 
-    /// Start the sections of our answer (the app answered the call).
+    fn links(&self, events: Option<VideoEvents>) -> SessionLinks {
+        SessionLinks {
+            streams: Arc::clone(&self.streams),
+            events,
+            audio: self.audio.clone(),
+        }
+    }
+
+    /// Start the sections of our answer (the app answered the call, or a
+    /// re-INVITE added one).
     pub(crate) fn start(&mut self, events: Option<VideoEvents>) {
-        for s in &mut self.sections {
-            if s.local.port == 0 || s.session.is_some() {
+        for i in 0..self.sections.len() {
+            let s = &self.sections[i];
+            if !s.live() || s.session.is_some() {
                 continue;
             }
             let Some(codec) = s.local.codecs.first().cloned() else {
                 continue;
             };
             let direction = s.local.direction;
+            let links = self.links(events.clone());
             Self::start_section(
-                s,
+                &mut self.sections[i],
                 &codec,
                 direction,
                 &self.host,
-                SessionLinks {
-                    streams: Arc::clone(&self.streams),
-                    events: events.clone(),
-                    audio: self.audio.clone(),
-                },
+                links,
                 &self.capture,
             );
         }
@@ -504,63 +697,79 @@ impl CallVideo {
         s.transport = Some(t);
     }
 
-    /// Our answer's sections to a re-INVITE's offer: each section we carry
-    /// follows its new direction, address and key; one it drops stops; one
-    /// it adds is declined (taking video up mid-call is `set_video`'s).
-    pub(crate) fn reoffered(&mut self, offer: &[u8]) -> Vec<LocalSection> {
+    /// Our answer's sections to a re-INVITE's offer. A section we carry
+    /// follows its new direction (within what the user allows), address
+    /// and key; one it drops stops; one it adds, or takes up again, is
+    /// taken **receive-only** and started (the user's camera goes on only
+    /// through `set_video`). Returns the sections and whether the far end
+    /// asked to see our camera in one it added.
+    pub(crate) async fn reoffered(
+        &mut self,
+        offer: &[u8],
+        setup: SectionSetup,
+        events: Option<VideoEvents>,
+    ) -> (Vec<LocalSection>, bool) {
         let offered = sdp::sections(offer);
-        let mut out = Vec::with_capacity(offered.len());
+        let mut asked = false;
         for (i, remote) in offered.into_iter().enumerate() {
-            let Some(s) = self.sections.get_mut(i) else {
-                out.push(LocalSection::declined(&remote));
-                continue;
-            };
-            if s.session.is_none() || !remote.live() {
-                s.stop();
-                let declined = LocalSection::declined(&remote);
-                s.local = declined.clone();
-                s.remote = Some(remote);
-                out.push(declined);
-                continue;
-            }
-            if let (Some(t), Some(ip)) = (&s.transport, remote.addr) {
-                t.set_remote(SocketAddr::new(ip, remote.port));
-            }
-            if let Some(ours) = &s.local.crypto {
-                let new = srtp::answer_to(&remote.crypto).map(|(_, theirs)| theirs);
-                if let Some(theirs) = new.filter(|t| Some(t) != s.theirs.as_ref()) {
-                    if let (Some(t), Some(ctx)) = (&s.transport, srtp::context(ours, &theirs)) {
-                        t.rekey(ctx);
+            let running = self.sections.get(i).is_some_and(|s| s.session.is_some());
+            if running && remote.live() {
+                let held = self.held;
+                let s = &mut self.sections[i];
+                if let (Some(t), Some(ip)) = (&s.transport, remote.addr) {
+                    t.set_remote(SocketAddr::new(ip, remote.port));
+                }
+                if let Some(ours) = &s.local.crypto {
+                    let new = srtp::answer_to(&remote.crypto).map(|(_, theirs)| theirs);
+                    if let Some(theirs) = new.filter(|t| Some(t) != s.theirs.as_ref()) {
+                        if let (Some(t), Some(ctx)) = (&s.transport, srtp::context(ours, &theirs)) {
+                            t.rekey(ctx);
+                        }
+                        s.theirs = Some(theirs);
                     }
-                    s.theirs = Some(theirs);
                 }
-            }
-            let direction = remote.direction.mirror();
-            if let Some(session) = &s.session {
-                session.set_direction(direction);
-            }
-            s.local.direction = direction;
-            s.remote = Some(remote);
-            out.push(s.local.clone());
-        }
-        out
-    }
-
-    /// The far end answered our re-INVITE offering `offered` on each
-    /// section: each session takes what both allow.
-    pub(crate) fn reanswered(&mut self, answer: &[u8], offered: MediaDirection) {
-        let answered = sdp::sections(answer);
-        for (i, s) in self.sections.iter_mut().enumerate() {
-            let Some(session) = &s.session else { continue };
-            match answered.get(i) {
-                Some(r) if r.live() => {
-                    let d = offered.and(r.direction.mirror());
-                    session.set_direction(d);
-                    s.local.direction = offered;
+                let mut direction = remote.direction.mirror().and(s.want);
+                if held {
+                    direction = MediaDirection::Inactive;
                 }
-                _ => s.stop(),
+                if let Some(session) = &s.session {
+                    session.set_direction_keeping(direction, keeps_tiles(&remote, held));
+                }
+                s.local.direction = direction;
+                s.remote = Some(remote);
+                continue;
+            }
+            if !remote.live() {
+                let declined = LocalSection::declined(&remote);
+                match self.sections.get_mut(i) {
+                    Some(s) => {
+                        s.stop();
+                        s.local = declined;
+                        s.remote = Some(remote);
+                    }
+                    None => {
+                        let mut s = CallSection::new(declined, MediaDirection::Sendrecv);
+                        s.remote = Some(remote);
+                        self.sections.push(s);
+                    }
+                }
+                continue;
+            }
+            // Added, or taken up again: seen, not sent to.
+            let wants_ours = remote.direction.receives();
+            let section = self
+                .take_offered(remote, setup, MediaDirection::Recvonly)
+                .await;
+            if section.live() && wants_ours && section.local.kind == VideoKind::Camera {
+                asked = true;
+            }
+            match self.sections.get_mut(i) {
+                Some(s) => *s = section,
+                None => self.sections.push(section),
             }
         }
+        self.start(events);
+        (self.sdp_sections(), asked)
     }
 
     /// The direction each running section has now (tests, stats).

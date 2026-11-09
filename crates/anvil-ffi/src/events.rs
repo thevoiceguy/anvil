@@ -53,6 +53,45 @@ pub enum AnvilEventKind {
     /// `status_code` (1xx while the new call is placed, then the final)
     /// and `reason`.
     TransferProgress = 13,
+    /// `VideoStarted`: a video stream of `call_id` began. Read
+    /// `video_stream`, `video_direction`, `video_kind` and `video_codec`.
+    VideoStarted = 14,
+    /// `VideoStopped`: a video stream ended. Read `video_stream`.
+    VideoStopped = 15,
+    /// `VideoStats`: a video stream's last second. Read `video_stream`
+    /// and `video_stats` (with `video_direction`, `video_kind`,
+    /// `video_codec`).
+    VideoStats = 16,
+    /// `VideoRequested`: the far end added video to `call_id` and would
+    /// see our camera; ours is not sent until `anvil_set_video(…, 1)`.
+    VideoRequested = 17,
+}
+
+/// `VideoStats` payload. A value not yet known is NaN (floats) or 0
+/// (counts and rates, where 0 is not a reading).
+#[repr(C)]
+#[derive(Debug, Clone, Copy)]
+pub struct AnvilVideoStats {
+    pub kbps: f32,
+    pub fps: f32,
+    /// Incoming: packets the network lost, before any were sent again.
+    /// Outgoing: the far end's last report on ours. NaN until known.
+    pub loss_pct: f32,
+    /// Asked for again (incoming) or asked of us (outgoing).
+    pub nacks: u32,
+    pub keyframe_requests: u32,
+    /// Outgoing: what the encoder aims for. 0 for incoming.
+    pub target_kbps: u32,
+    /// Incoming: what we tell the far end it may send. 0 until known.
+    pub estimate_kbps: u32,
+    /// Incoming only; NaN otherwise.
+    pub jitter_ms: f32,
+    pub playout_delay_ms: f32,
+    /// Incoming: how far the picture is behind its audio (+: late). NaN
+    /// until sender reports tie them.
+    pub av_offset_ms: f32,
+    /// Outgoing: the round trip. NaN until measured.
+    pub rtt_ms: f32,
 }
 
 /// Mirrors `anvil_core::RegState`. Stable numbering.
@@ -154,6 +193,19 @@ pub struct AnvilEvent {
     /// `TransferProgress` only: the SIP status of the transferred party's
     /// new call.
     pub status_code: u16,
+    /// `IncomingCall` only: 1 when the call offers video this softphone
+    /// can take (`anvil_answer_media` with `video = 0` declines it).
+    pub video_offered: u8,
+    /// The `Video*` events: the stream, unique within the call.
+    pub video_stream: u32,
+    /// 0 incoming, 1 outgoing.
+    pub video_direction: u8,
+    /// 0 camera, 1 content (a shared screen).
+    pub video_kind: u8,
+    /// 0 H.264, 1 VP8.
+    pub video_codec: u8,
+    /// `VideoStats` only.
+    pub video_stats: AnvilVideoStats,
 }
 
 /// Function-pointer type for the user callback. Fires from a worker
@@ -208,6 +260,24 @@ pub(crate) fn dispatch(slot: CallbackSlot, event: &Event) {
         presence_open: 0,
         line_state: 0,
         status_code: 0,
+        video_offered: 0,
+        video_stream: 0,
+        video_direction: 0,
+        video_kind: 0,
+        video_codec: 0,
+        video_stats: AnvilVideoStats {
+            kbps: 0.0,
+            fps: 0.0,
+            loss_pct: f32::NAN,
+            nacks: 0,
+            keyframe_requests: 0,
+            target_kbps: 0,
+            estimate_kbps: 0,
+            jitter_ms: f32::NAN,
+            playout_delay_ms: f32::NAN,
+            av_offset_ms: f32::NAN,
+            rtt_ms: f32::NAN,
+        },
     };
 
     // Hold any allocated CStrings until after the callback returns.
@@ -230,10 +300,12 @@ pub(crate) fn dispatch(slot: CallbackSlot, event: &Event) {
             call,
             from,
             display_name,
+            video,
             ..
         } => {
             ev.kind = AnvilEventKind::IncomingCall;
             ev.call_id = call.0;
+            ev.video_offered = u8::from(*video);
             ev.from = push_cstr(&mut keep_alive, from);
             if let Some(name) = display_name.as_deref() {
                 ev.display_name = push_cstr(&mut keep_alive, name);
@@ -327,6 +399,42 @@ pub(crate) fn dispatch(slot: CallbackSlot, event: &Event) {
             ev.mwi_urgent_new = summary.urgent_new;
             ev.mwi_urgent_old = summary.urgent_old;
         }
+        Event::VideoStarted {
+            call,
+            stream,
+            direction,
+            kind,
+            codec,
+        } => {
+            ev.kind = AnvilEventKind::VideoStarted;
+            ev.call_id = call.0;
+            ev.video_stream = stream.0;
+            ev.video_direction = video_direction(*direction);
+            ev.video_kind = video_kind(*kind);
+            ev.video_codec = video_codec(*codec);
+        }
+        Event::VideoStopped { call, stream } => {
+            ev.kind = AnvilEventKind::VideoStopped;
+            ev.call_id = call.0;
+            ev.video_stream = stream.0;
+        }
+        Event::VideoStats {
+            call,
+            stream,
+            stats,
+        } => {
+            ev.kind = AnvilEventKind::VideoStats;
+            ev.call_id = call.0;
+            ev.video_stream = stream.0;
+            ev.video_direction = video_direction(stats.direction);
+            ev.video_kind = video_kind(stats.kind);
+            ev.video_codec = video_codec(stats.codec);
+            ev.video_stats = video_stats_to_c(stats);
+        }
+        Event::VideoRequested { call } => {
+            ev.kind = AnvilEventKind::VideoRequested;
+            ev.call_id = call.0;
+        }
         // `Event` is `#[non_exhaustive]`; cover any future variants
         // gracefully by emitting an Error rather than panicking.
         _ => {
@@ -346,6 +454,43 @@ pub(crate) fn dispatch(slot: CallbackSlot, event: &Event) {
     }
 
     drop(keep_alive);
+}
+
+fn video_direction(d: anvil_core::video::VideoStreamDirection) -> u8 {
+    match d {
+        anvil_core::video::VideoStreamDirection::Incoming => 0,
+        anvil_core::video::VideoStreamDirection::Outgoing => 1,
+    }
+}
+
+fn video_kind(k: anvil_core::video::host::VideoKind) -> u8 {
+    match k {
+        anvil_core::video::host::VideoKind::Camera => 0,
+        anvil_core::video::host::VideoKind::Content => 1,
+    }
+}
+
+fn video_codec(c: anvil_core::video::host::VideoCodec) -> u8 {
+    match c {
+        anvil_core::video::host::VideoCodec::H264 => 0,
+        anvil_core::video::host::VideoCodec::Vp8 => 1,
+    }
+}
+
+pub(crate) fn video_stats_to_c(s: &anvil_core::video::VideoStreamStats) -> AnvilVideoStats {
+    AnvilVideoStats {
+        kbps: s.kbps,
+        fps: s.fps,
+        loss_pct: s.loss_pct.unwrap_or(f32::NAN),
+        nacks: s.nacks,
+        keyframe_requests: s.keyframe_requests,
+        target_kbps: s.target_kbps.unwrap_or(0),
+        estimate_kbps: s.estimate_kbps.unwrap_or(0),
+        jitter_ms: s.jitter_ms.unwrap_or(f32::NAN),
+        playout_delay_ms: s.playout_delay_ms.unwrap_or(f32::NAN),
+        av_offset_ms: s.av_offset_ms.unwrap_or(f32::NAN),
+        rtt_ms: s.rtt_ms.unwrap_or(f32::NAN),
+    }
 }
 
 fn push_cstr(holder: &mut Vec<CString>, s: &str) -> *const c_char {
@@ -391,4 +536,102 @@ fn brand_json(profile: &anvil_core::BrandProfile) -> String {
         ringtone.asset.bytes.clear();
     }
     serde_json::to_string(&profile).unwrap_or_default()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use anvil_core::video::host::{StreamId, VideoCodec, VideoKind};
+    use anvil_core::video::{VideoStreamDirection, VideoStreamStats};
+    use anvil_core::CallId;
+
+    unsafe extern "C" fn record(event: *const AnvilEvent, user_data: *mut c_void) {
+        let seen = unsafe { &mut *(user_data as *mut Vec<AnvilEvent>) };
+        seen.push(unsafe { *event });
+    }
+
+    fn marshal(events: &[Event]) -> Vec<AnvilEvent> {
+        let mut seen: Vec<AnvilEvent> = Vec::new();
+        let slot = CallbackSlot {
+            cb: record,
+            user_data: &mut seen as *mut _ as *mut c_void,
+        };
+        for e in events {
+            dispatch(slot, e);
+        }
+        seen
+    }
+
+    #[test]
+    fn video_events_reach_c_with_their_stream_and_stats() {
+        let call = CallId(7);
+        let stats = VideoStreamStats {
+            direction: VideoStreamDirection::Incoming,
+            kind: VideoKind::Content,
+            codec: VideoCodec::Vp8,
+            kbps: 812.5,
+            fps: 29.9,
+            loss_pct: Some(1.5),
+            nacks: 3,
+            keyframe_requests: 1,
+            target_kbps: None,
+            estimate_kbps: Some(1200),
+            jitter_ms: Some(4.0),
+            playout_delay_ms: Some(60.0),
+            av_offset_ms: None,
+            rtt_ms: None,
+        };
+        let seen = marshal(&[
+            Event::VideoStarted {
+                call,
+                stream: StreamId(2),
+                direction: VideoStreamDirection::Outgoing,
+                kind: VideoKind::Camera,
+                codec: VideoCodec::H264,
+            },
+            Event::VideoStats {
+                call,
+                stream: StreamId(3),
+                stats,
+            },
+            Event::VideoRequested { call },
+            Event::VideoStopped {
+                call,
+                stream: StreamId(2),
+            },
+        ]);
+        assert_eq!(seen[0].kind, AnvilEventKind::VideoStarted);
+        assert_eq!(
+            (
+                seen[0].call_id,
+                seen[0].video_stream,
+                seen[0].video_direction
+            ),
+            (7, 2, 1)
+        );
+        assert_eq!((seen[0].video_kind, seen[0].video_codec), (0, 0));
+
+        let s = seen[1];
+        assert_eq!(s.kind, AnvilEventKind::VideoStats);
+        assert_eq!(
+            (
+                s.video_stream,
+                s.video_direction,
+                s.video_kind,
+                s.video_codec
+            ),
+            (3, 0, 1, 1)
+        );
+        assert_eq!(s.video_stats.kbps, 812.5);
+        assert_eq!(s.video_stats.loss_pct, 1.5);
+        assert_eq!(s.video_stats.estimate_kbps, 1200);
+        assert_eq!(s.video_stats.target_kbps, 0);
+        assert!(s.video_stats.av_offset_ms.is_nan(), "not yet known");
+        assert!(s.video_stats.rtt_ms.is_nan());
+
+        assert_eq!(seen[2].kind, AnvilEventKind::VideoRequested);
+        assert_eq!(seen[2].call_id, 7);
+        assert_eq!(seen[3].kind, AnvilEventKind::VideoStopped);
+        assert_eq!(seen[3].video_stream, 2);
+    }
 }

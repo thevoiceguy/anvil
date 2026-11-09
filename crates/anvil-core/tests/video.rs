@@ -10,7 +10,7 @@ use std::time::Duration;
 
 use anvil_core::config::{MediaConfig, SrtpMode};
 use anvil_core::video::host::{StreamId, VideoKind};
-use anvil_core::video::synthetic::{ReceivedStream, SyntheticVideoHost};
+use anvil_core::video::synthetic::{ReceivedStream, SyntheticRecord, SyntheticVideoHost};
 use anvil_core::video::{VideoStreamDirection, VideoStreamStats};
 use anvil_core::{Anvil, CallId, CallMedia, Event, EventStream};
 use common::*;
@@ -415,6 +415,230 @@ async fn a_video_call_reports_its_streams_and_keeps_the_picture_with_the_sound()
     let offset = seen.av_offset_ms.unwrap();
     assert!(offset.abs() < 50.0, "in sync: {seen:?}");
     in_order(&receives(&b_host, 100).await);
+
+    alice.hangup(out).await.expect("BYE");
+    hung_up_by_the_other_side(&mut bob_events, incoming).await;
+    alice.shutdown().await.unwrap();
+    bob.shutdown().await.unwrap();
+}
+
+/// An audio call from `alice` to `bob`, answered.
+async fn audio_call(
+    alice: &Anvil,
+    alice_events: &mut EventStream,
+    bob: &Anvil,
+    bob_events: &mut EventStream,
+) -> (CallId, CallId) {
+    let target = format!("sip:bob@{}", bob.sip_address());
+    let out = alice
+        .place_call_with_media(&target, CallMedia::AUDIO)
+        .await
+        .expect("the call is placed");
+    let incoming = rings(bob_events).await;
+    bob.answer(incoming).await.expect("bob answers");
+    expect(alice_events, SOON, |e| match e {
+        Event::CallEstablished { call, .. } if *call == out => Some(()),
+        _ => None,
+    })
+    .await
+    .expect("alice hears the answer");
+    (out, incoming)
+}
+
+/// Waits until `ok` holds of `host`'s record.
+async fn until(what: &str, host: &SyntheticVideoHost, ok: impl Fn(&SyntheticRecord) -> bool) {
+    let deadline = tokio::time::Instant::now() + SOON;
+    loop {
+        let record = host.record();
+        if ok(&record) {
+            return;
+        }
+        assert!(tokio::time::Instant::now() < deadline, "{what}: {record:?}");
+        tokio::time::sleep(Duration::from_millis(20)).await;
+    }
+}
+
+fn live_frames(r: &SyntheticRecord) -> usize {
+    r.received
+        .values()
+        .filter(|s| !s.stopped)
+        .map(|s| s.frames.len())
+        .sum()
+}
+
+fn cameras_open(r: &SyntheticRecord) -> usize {
+    r.sent.iter().filter(|s| !s.stopped).count()
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn an_audio_call_gains_video_one_camera_at_a_time_and_loses_it() {
+    for (srtp, a_ip, b_ip) in [
+        (SrtpMode::Off, "127.0.1.13", "127.0.1.14"),
+        (SrtpMode::Required, "127.0.1.15", "127.0.1.16"),
+    ] {
+        let (a_host, b_host) = (host(), host());
+        let (alice, mut alice_events) = phone("alice", a_ip, srtp, Some(a_host.clone())).await;
+        let (bob, mut bob_events) = phone("bob", b_ip, srtp, Some(b_host.clone())).await;
+        let (out, incoming) = audio_call(&alice, &mut alice_events, &bob, &mut bob_events).await;
+        tokio::time::sleep(Duration::from_millis(300)).await;
+        assert!(a_host.record().sent.is_empty() && b_host.record().sent.is_empty());
+
+        // Alice turns her camera on: Bob is asked, and sees her; his own
+        // camera stays shut until he says.
+        alice.set_video(out, true).await.expect("alice's camera on");
+        expect(&mut bob_events, SOON, |e| match e {
+            Event::VideoRequested { call } if *call == incoming => Some(()),
+            _ => None,
+        })
+        .await
+        .unwrap_or_else(|| panic!("{srtp:?}: bob is asked"));
+        in_order(&receives(&b_host, 30).await);
+        assert_eq!(
+            cameras_open(&b_host.record()),
+            0,
+            "bob's camera is his to open"
+        );
+        assert!(
+            a_host.record().received.is_empty(),
+            "alice sees nothing yet"
+        );
+
+        // Bob joins: both ways.
+        bob.set_video(incoming, true)
+            .await
+            .expect("bob's camera on");
+        in_order(&receives(&a_host, 30).await);
+        assert_eq!(cameras_open(&b_host.record()), 1);
+
+        // Alice turns hers off: her camera closes and Bob's tile of her
+        // goes; she still sees him.
+        alice
+            .set_video(out, false)
+            .await
+            .expect("alice's camera off");
+        until("alice's camera closes", &a_host, |r| cameras_open(r) == 0).await;
+        until("bob's tile of alice goes", &b_host, |r| {
+            r.received.values().all(|s| s.stopped)
+        })
+        .await;
+        let seen = live_frames(&a_host.record());
+        until("alice still sees bob", &a_host, |r| {
+            live_frames(r) > seen + 20
+        })
+        .await;
+
+        // Bob turns his off too: the video is gone both ways.
+        bob.set_video(incoming, false)
+            .await
+            .expect("bob's camera off");
+        until("bob's camera closes", &b_host, |r| cameras_open(r) == 0).await;
+        until("alice's tile of bob goes", &a_host, |r| {
+            r.received.values().all(|s| s.stopped)
+        })
+        .await;
+
+        // And Alice can start it again, asking Bob anew.
+        alice
+            .set_video(out, true)
+            .await
+            .expect("alice's camera on again");
+        expect(&mut bob_events, SOON, |e| match e {
+            Event::VideoRequested { call } if *call == incoming => Some(()),
+            _ => None,
+        })
+        .await
+        .expect("bob is asked again");
+        until("bob sees alice again", &b_host, |r| live_frames(r) > 10).await;
+
+        // The call itself carried on throughout.
+        alice.hangup(out).await.expect("BYE");
+        hung_up_by_the_other_side(&mut bob_events, incoming).await;
+        alice.shutdown().await.unwrap();
+        bob.shutdown().await.unwrap();
+    }
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_held_call_keeps_its_camera_choice_and_a_softphone_without_video_declines_one() {
+    let (a_host, b_host) = (host(), host());
+    let (alice, mut alice_events) =
+        phone("alice", "127.0.1.17", SrtpMode::Off, Some(a_host.clone())).await;
+    let (bob, mut bob_events) =
+        phone("bob", "127.0.1.18", SrtpMode::Off, Some(b_host.clone())).await;
+    let (out, incoming) = audio_call(&alice, &mut alice_events, &bob, &mut bob_events).await;
+    alice.set_video(out, true).await.expect("alice's camera on");
+    receives(&b_host, 10).await;
+
+    // Bob holds and resumes: his camera, never turned on, stays shut.
+    bob.hold(incoming, true).await.expect("hold");
+    bob.hold(incoming, false).await.expect("resume");
+    let shown = receives(&b_host, 0).await.frames.len();
+    until("alice's picture is back", &b_host, |r| {
+        live_frames(r) > shown + 10
+    })
+    .await;
+    assert_eq!(
+        cameras_open(&b_host.record()),
+        0,
+        "a resume opens no camera"
+    );
+    alice.hangup(out).await.expect("BYE");
+    hung_up_by_the_other_side(&mut bob_events, incoming).await;
+
+    // A softphone without video declines the upgrade, and the call goes on.
+    let (carol, mut carol_events) = phone("carol", "127.0.1.19", SrtpMode::Off, None).await;
+    let target = format!("sip:carol@{}", carol.sip_address());
+    let out = alice
+        .place_call_with_media(&target, CallMedia::AUDIO)
+        .await
+        .unwrap();
+    let incoming = rings(&mut carol_events).await;
+    carol.answer(incoming).await.unwrap();
+    expect(&mut alice_events, SOON, |e| match e {
+        Event::CallEstablished { call, .. } if *call == out => Some(()),
+        _ => None,
+    })
+    .await
+    .unwrap();
+    alice
+        .set_video(out, true)
+        .await
+        .expect("the offer is answered");
+    tokio::time::sleep(Duration::from_millis(500)).await;
+    assert_eq!(
+        cameras_open(&a_host.record()),
+        0,
+        "declined: alice's camera closes again"
+    );
+    assert!(
+        carol.set_video(incoming, true).await.is_err(),
+        "carol has none"
+    );
+    alice.hangup(out).await.expect("BYE");
+    hung_up_by_the_other_side(&mut carol_events, incoming).await;
+    for p in [alice, bob, carol] {
+        p.shutdown().await.unwrap();
+    }
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn both_cameras_turned_on_at_once_both_get_through() {
+    let (a_host, b_host) = (host(), host());
+    let (alice, mut alice_events) =
+        phone("alice", "127.0.1.20", SrtpMode::Off, Some(a_host.clone())).await;
+    let (bob, mut bob_events) =
+        phone("bob", "127.0.1.21", SrtpMode::Off, Some(b_host.clone())).await;
+    let (out, incoming) = audio_call(&alice, &mut alice_events, &bob, &mut bob_events).await;
+
+    // The two offers cross: one side answers 491 and the other tries again
+    // (RFC 3261 §14), and the call ends up with both cameras.
+    let (a, b) = tokio::join!(alice.set_video(out, true), bob.set_video(incoming, true));
+    a.expect("alice's camera on");
+    b.expect("bob's camera on");
+    in_order(&receives(&a_host, 20).await);
+    in_order(&receives(&b_host, 20).await);
+    assert_eq!(cameras_open(&a_host.record()), 1);
+    assert_eq!(cameras_open(&b_host.record()), 1);
 
     alice.hangup(out).await.expect("BYE");
     hung_up_by_the_other_side(&mut bob_events, incoming).await;
