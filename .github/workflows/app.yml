@@ -52,7 +52,7 @@ jobs:
           fi
       - name: The bindings match the Rust API
         run: |
-          sudo apt-get update && sudo apt-get install -y libasound2-dev
+          sudo apt-get update && sudo apt-get install -y libasound2-dev libvpx-dev libclang-dev
           flutter_rust_bridge_codegen generate
           git diff --exit-code -- lib/src/rust rust/src/frb_generated.rs
 
@@ -84,7 +84,7 @@ jobs:
         if: matrix.target == 'linux'
         run: |
           sudo apt-get update
-          sudo apt-get install -y clang cmake ninja-build pkg-config libgtk-3-dev liblzma-dev libasound2-dev libayatana-appindicator3-dev xvfb
+          sudo apt-get install -y clang cmake ninja-build pkg-config libgtk-3-dev liblzma-dev libasound2-dev libayatana-appindicator3-dev xvfb libvpx-dev libclang-dev
       - run: flutter pub get
       # One set of goldens, made on Linux, holds here too (the checks job
       # runs them on Linux).
@@ -99,6 +99,13 @@ jobs:
           path: app/test/goldens/failures
           if-no-files-found: ignore
       - run: flutter build ${{ matrix.target }} --release
+      # libvpx is linked in (anvil-video's build.rs): the packages and the
+      # AppImage need none on the machine.
+      - name: No shared libvpx needed
+        if: matrix.target == 'linux'
+        run: |
+          ldd build/linux/x64/release/bundle/lib/libanvil_bridge.so
+          ! ldd build/linux/x64/release/bundle/lib/libanvil_bridge.so | grep -q libvpx
       - name: The app starts with its Rust core
         # A hang (a system prompt nobody answers) fails, not waits six hours.
         timeout-minutes: 20

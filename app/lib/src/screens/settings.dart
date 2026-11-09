@@ -236,6 +236,12 @@ class SettingsPage extends StatelessWidget {
               ),
             ),
         ],
+        if (snap.video.available ||
+            snap.video.cameras.isNotEmpty ||
+            snap.video.h264Allowed != null) ...[
+          header(s.settingsVideo),
+          _Video(snap: snap, model: model),
+        ],
         if (DesktopScope.maybeOf(context) case final shell?
             when shell.canStartAtLogin) ...[
           header(s.settingsDesktop),
@@ -605,3 +611,78 @@ class _LogFile extends StatelessWidget {
 String _size(int bytes) => bytes < 1024 * 1024
     ? '${(bytes / 1024).ceil()} KB'
     : '${(bytes / 1024 / 1024).toStringAsFixed(1)} MB';
+
+/// The camera video calls use, and H.264 from Cisco's OpenH264 with the
+/// notice Cisco's terms ask for wherever it is used.
+class _Video extends StatelessWidget {
+  const _Video({required this.snap, required this.model});
+  final PhoneSnapshot snap;
+  final PhoneModel model;
+
+  @override
+  Widget build(BuildContext context) {
+    final s = Strings.of(context);
+    final video = snap.video;
+    final cameras = video.cameras;
+    // A camera chosen and since unplugged reads as the default.
+    final chosen = cameras.any((c) => c.id == video.camera)
+        ? video.camera
+        : null;
+    return Column(
+      children: [
+        if (!video.available)
+          ListTile(
+            key: const Key('videoUnavailable'),
+            leading: const Icon(Icons.videocam_off),
+            title: Text(s.videoUnavailable),
+          ),
+        ListTile(
+          key: const Key('cameraSetting'),
+          leading: const Icon(Icons.videocam),
+          title: Text(s.cameraSetting),
+          subtitle: cameras.isEmpty ? Text(s.noCameras) : null,
+          trailing: cameras.isEmpty
+              ? null
+              : DropdownButton<String?>(
+                  key: const Key('camera'),
+                  value: chosen,
+                  items: [
+                    DropdownMenuItem(
+                      key: const Key('camera-default'),
+                      value: null,
+                      child: Text(s.cameraDefault),
+                    ),
+                    for (final c in cameras)
+                      DropdownMenuItem(
+                        key: Key('camera-${c.id}'),
+                        value: c.id,
+                        child: Text(c.name),
+                      ),
+                  ],
+                  onChanged: (id) =>
+                      model.run(() => model.api.chooseCamera(id)),
+                ),
+        ),
+        if (video.h264Allowed case final allowed?)
+          SwitchListTile(
+            key: const Key('h264'),
+            secondary: const Icon(Icons.movie_outlined),
+            title: Text(s.h264Setting),
+            subtitle: Text(
+              [
+                switch ((allowed, video.h264Ready)) {
+                  (false, _) => s.h264Off,
+                  (true, true) => s.h264Ready,
+                  (true, false) => s.h264Fetching,
+                },
+                ?video.h264Notice,
+              ].join('\n'),
+            ),
+            isThreeLine: true,
+            value: allowed,
+            onChanged: (on) => model.run(() => model.api.allowH264(on)),
+          ),
+      ],
+    );
+  }
+}

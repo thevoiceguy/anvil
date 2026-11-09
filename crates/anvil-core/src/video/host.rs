@@ -120,6 +120,10 @@ pub trait VideoHost: Send + Sync {
     /// What it encodes and decodes.
     fn codecs(&self) -> Vec<VideoCodecCaps>;
     fn cameras(&self) -> Vec<CameraInfo>;
+    /// The camera a send without one opens (`None`, the host's own
+    /// default); a camera being captured switches to it, where the host
+    /// can, starting again on a keyframe.
+    fn set_camera(&self, _camera: Option<&str>) {}
     /// A camera or a screen, captured and encoded.
     fn start_send(&self, cfg: SendConfig) -> Result<Box<dyn VideoSource>, AnvilError>;
     /// One per incoming stream: decoded and shown.

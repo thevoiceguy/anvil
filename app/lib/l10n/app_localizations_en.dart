@@ -1080,4 +1080,67 @@ class StringsEn extends Strings {
 
   @override
   String get voicemailHeard => 'Heard';
+
+  @override
+  String get videoCallButton => 'Video call';
+
+  @override
+  String get incomingVideoCall => 'Incoming video call';
+
+  @override
+  String get answerVideoButton => 'Video';
+
+  @override
+  String get answerAudioButton => 'Audio only';
+
+  @override
+  String get startVideoButton => 'Start video';
+
+  @override
+  String get stopVideoButton => 'Stop video';
+
+  @override
+  String get cameraButton => 'Camera';
+
+  @override
+  String get cameraDefault => 'System default';
+
+  @override
+  String videoAsked(String name) {
+    return '$name turned on video. Start yours?';
+  }
+
+  @override
+  String get videoOff => 'Camera off';
+
+  @override
+  String get videoFrozen => 'The picture is catching up';
+
+  @override
+  String get selfView => 'You';
+
+  @override
+  String get settingsVideo => 'Video';
+
+  @override
+  String get cameraSetting => 'Camera';
+
+  @override
+  String get noCameras => 'No camera found';
+
+  @override
+  String get videoUnavailable =>
+      'Video calls are not available on this device yet';
+
+  @override
+  String get h264Setting => 'H.264';
+
+  @override
+  String get h264Ready => 'In use; downloaded from Cisco';
+
+  @override
+  String get h264Fetching => 'Downloading from Cisco…';
+
+  @override
+  String get h264Off => 'Off; video calls use VP8';
 }

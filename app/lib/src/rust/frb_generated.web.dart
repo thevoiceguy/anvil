@@ -8,6 +8,7 @@
 
 import 'api/phone.dart';
 import 'api/update.dart';
+import 'api/video.dart';
 
 import 'dart:async';
 import 'dart:convert';
@@ -78,6 +79,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   SystemLook dco_decode_box_autoadd_system_look(dynamic raw);
 
   @protected
+  TileInfo dco_decode_box_autoadd_tile_info(dynamic raw);
+
+  @protected
   int dco_decode_box_autoadd_u_16(dynamic raw);
 
   @protected
@@ -103,6 +107,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   CallingSettings dco_decode_calling_settings(dynamic raw);
+
+  @protected
+  Camera dco_decode_camera(dynamic raw);
 
   @protected
   CaptureInfo dco_decode_capture_info(dynamic raw);
@@ -141,6 +148,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   List<Call> dco_decode_list_call(dynamic raw);
 
   @protected
+  List<Camera> dco_decode_list_camera(dynamic raw);
+
+  @protected
   List<Contact> dco_decode_list_contact(dynamic raw);
 
   @protected
@@ -154,6 +164,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   List<Person> dco_decode_list_person(dynamic raw);
+
+  @protected
+  Uint32List dco_decode_list_prim_u_32_strict(dynamic raw);
 
   @protected
   Uint8List dco_decode_list_prim_u_8_strict(dynamic raw);
@@ -202,6 +215,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   SystemLook? dco_decode_opt_box_autoadd_system_look(dynamic raw);
+
+  @protected
+  TileInfo? dco_decode_opt_box_autoadd_tile_info(dynamic raw);
 
   @protected
   int? dco_decode_opt_box_autoadd_u_16(dynamic raw);
@@ -258,6 +274,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   SystemLook dco_decode_system_look(dynamic raw);
 
   @protected
+  TileInfo dco_decode_tile_info(dynamic raw);
+
+  @protected
   TrayIcon dco_decode_tray_icon(dynamic raw);
 
   @protected
@@ -277,6 +296,12 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   UpdateInfo dco_decode_update_info(dynamic raw);
+
+  @protected
+  BigInt dco_decode_usize(dynamic raw);
+
+  @protected
+  VideoInfo dco_decode_video_info(dynamic raw);
 
   @protected
   Voicemail dco_decode_voicemail(dynamic raw);
@@ -341,6 +366,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   SystemLook sse_decode_box_autoadd_system_look(SseDeserializer deserializer);
 
   @protected
+  TileInfo sse_decode_box_autoadd_tile_info(SseDeserializer deserializer);
+
+  @protected
   int sse_decode_box_autoadd_u_16(SseDeserializer deserializer);
 
   @protected
@@ -366,6 +394,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   CallingSettings sse_decode_calling_settings(SseDeserializer deserializer);
+
+  @protected
+  Camera sse_decode_camera(SseDeserializer deserializer);
 
   @protected
   CaptureInfo sse_decode_capture_info(SseDeserializer deserializer);
@@ -404,6 +435,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   List<Call> sse_decode_list_call(SseDeserializer deserializer);
 
   @protected
+  List<Camera> sse_decode_list_camera(SseDeserializer deserializer);
+
+  @protected
   List<Contact> sse_decode_list_contact(SseDeserializer deserializer);
 
   @protected
@@ -419,6 +453,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   List<Person> sse_decode_list_person(SseDeserializer deserializer);
+
+  @protected
+  Uint32List sse_decode_list_prim_u_32_strict(SseDeserializer deserializer);
 
   @protected
   Uint8List sse_decode_list_prim_u_8_strict(SseDeserializer deserializer);
@@ -477,6 +514,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   );
 
   @protected
+  TileInfo? sse_decode_opt_box_autoadd_tile_info(SseDeserializer deserializer);
+
+  @protected
   int? sse_decode_opt_box_autoadd_u_16(SseDeserializer deserializer);
 
   @protected
@@ -533,6 +573,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   SystemLook sse_decode_system_look(SseDeserializer deserializer);
 
   @protected
+  TileInfo sse_decode_tile_info(SseDeserializer deserializer);
+
+  @protected
   TrayIcon sse_decode_tray_icon(SseDeserializer deserializer);
 
   @protected
@@ -552,6 +595,12 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   UpdateInfo sse_decode_update_info(SseDeserializer deserializer);
+
+  @protected
+  BigInt sse_decode_usize(SseDeserializer deserializer);
+
+  @protected
+  VideoInfo sse_decode_video_info(SseDeserializer deserializer);
 
   @protected
   Voicemail sse_decode_voicemail(SseDeserializer deserializer);
@@ -632,6 +681,12 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   );
 
   @protected
+  void sse_encode_box_autoadd_tile_info(
+    TileInfo self,
+    SseSerializer serializer,
+  );
+
+  @protected
   void sse_encode_box_autoadd_u_16(int self, SseSerializer serializer);
 
   @protected
@@ -663,6 +718,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
     CallingSettings self,
     SseSerializer serializer,
   );
+
+  @protected
+  void sse_encode_camera(Camera self, SseSerializer serializer);
 
   @protected
   void sse_encode_capture_info(CaptureInfo self, SseSerializer serializer);
@@ -710,6 +768,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   void sse_encode_list_call(List<Call> self, SseSerializer serializer);
 
   @protected
+  void sse_encode_list_camera(List<Camera> self, SseSerializer serializer);
+
+  @protected
   void sse_encode_list_contact(List<Contact> self, SseSerializer serializer);
 
   @protected
@@ -729,6 +790,12 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   void sse_encode_list_person(List<Person> self, SseSerializer serializer);
+
+  @protected
+  void sse_encode_list_prim_u_32_strict(
+    Uint32List self,
+    SseSerializer serializer,
+  );
 
   @protected
   void sse_encode_list_prim_u_8_strict(
@@ -809,6 +876,12 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   );
 
   @protected
+  void sse_encode_opt_box_autoadd_tile_info(
+    TileInfo? self,
+    SseSerializer serializer,
+  );
+
+  @protected
   void sse_encode_opt_box_autoadd_u_16(int? self, SseSerializer serializer);
 
   @protected
@@ -872,6 +945,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   void sse_encode_system_look(SystemLook self, SseSerializer serializer);
 
   @protected
+  void sse_encode_tile_info(TileInfo self, SseSerializer serializer);
+
+  @protected
   void sse_encode_tray_icon(TrayIcon self, SseSerializer serializer);
 
   @protected
@@ -891,6 +967,12 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   void sse_encode_update_info(UpdateInfo self, SseSerializer serializer);
+
+  @protected
+  void sse_encode_usize(BigInt self, SseSerializer serializer);
+
+  @protected
+  void sse_encode_video_info(VideoInfo self, SseSerializer serializer);
 
   @protected
   void sse_encode_voicemail(Voicemail self, SseSerializer serializer);

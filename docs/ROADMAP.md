@@ -192,8 +192,11 @@ every recommendation:
           showing each stream on time in its tile; the CLI's `--video
           camera` and `pattern`; real pictures proved both ways and through
           FCP
-    - [ ] **A2b** The app: Flutter textures, the call screen, self-view,
-          camera picker and video toggle
+    - [x] **A2b** The app: Flutter textures (Linux's texture plugin; pictures
+          never in Dart), the call screen's stage with a draggable self-view,
+          video calls from the keypad, a video call answered with or without
+          video, the camera toggle and picker, the far end's ask, and
+          Settings' camera and H.264 with Cisco's notice; libvpx linked in
     - [ ] **A2c** macOS: AVFoundation and VideoToolbox
     - [ ] **A2d** Windows: Media Foundation
   - [ ] **A3** Mobile video

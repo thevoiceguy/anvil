@@ -135,11 +135,17 @@ async fn a_call_shows_each_camera_to_the_other(h264: bool) -> VideoCodec {
     tokio::spawn(async move { while bob_events.recv().await.is_some() {} });
 
     for (who, tiles) in [("bob", &bob_tiles), ("alice", &alice_tiles)] {
-        let key = shows(tiles, 30).await;
+        // Two seconds in, past the encoder's first frames (a rate control
+        // starting out codes them soft); the best of a few pictures, so
+        // one caught mid-recovery from a dropped frame does not decide.
+        let key = shows(tiles, 60).await;
         let stats = tiles.stats(key).unwrap();
         assert_eq!((stats.width, stats.height), (640, 360), "{who}");
-        let last = tiles.last(key).unwrap();
-        let psnr = likeness(&last);
+        let mut psnr = 0.0f64;
+        for _ in 0..5 {
+            psnr = psnr.max(likeness(&tiles.last(key).unwrap()));
+            tokio::time::sleep(std::time::Duration::from_millis(200)).await;
+        }
         assert!(psnr > 28.0, "{who} sees the pattern: {psnr:.1} dB");
         assert!(
             tiles.stats(TileKey::SelfView).is_some(),

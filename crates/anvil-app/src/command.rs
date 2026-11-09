@@ -16,6 +16,9 @@ pub enum Command {
         target: String,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         line: Option<String>,
+        /// A video call (audio where this device has no video).
+        #[serde(default, skip_serializing_if = "is_false")]
+        video: bool,
     },
     /// Name one of the lines (FCP keeps it, for every device the line is
     /// on); an empty name gives it back its administrator's label.
@@ -23,10 +26,30 @@ pub enum Command {
     /// Take appearance `index` of a shared line (by key): pick up the call
     /// held there, or join the one up where the line allows barging in.
     TakeAppearance { line: String, index: u8 },
+    /// Answer; `video` false answers a video call with audio only (left
+    /// out: with video when it offers some and this device has video).
     Answer {
         #[serde(default)]
         call: Option<u64>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        video: Option<bool>,
     },
+    /// Our camera on or off in a call: a re-INVITE. On, an audio call
+    /// becomes a video call.
+    Video {
+        #[serde(default)]
+        call: Option<u64>,
+        on: bool,
+    },
+    /// The camera video calls use, by id (`None`, the system's first); a
+    /// call sending switches to it.
+    Camera {
+        #[serde(default)]
+        camera: Option<String>,
+    },
+    /// Allow H.264 from Cisco's OpenH264 (fetched from Cisco if need be),
+    /// or not: where it is fetched (Linux).
+    H264 { on: bool },
     Decline {
         #[serde(default)]
         call: Option<u64>,
@@ -311,16 +334,18 @@ impl Command {
             return Err("an empty line".into());
         };
         Ok(match verb.to_ascii_lowercase().as_str() {
-            // `call 1002`, or `call 1002 on extension:1005` from a line.
-            "call" | "dial" => Command::Call {
+            // `call 1002`, or `call 1002 on extension:1005` from a line;
+            // `vcall 1002` with video.
+            "call" | "dial" | "vcall" | "video-call" => Command::Call {
                 target: need(words.get(1), "a number or address")?,
                 line: match (words.get(2), words.get(3)) {
                     (Some(on), Some(line)) if on.eq_ignore_ascii_case("on") => {
                         Some(line.to_string())
                     }
                     (None, _) => None,
-                    _ => return Err("call <number> [on <line>]".into()),
+                    _ => return Err(format!("{verb} <number> [on <line>]")),
                 },
+                video: matches!(verb.to_ascii_lowercase().as_str(), "vcall" | "video-call"),
             },
             // `take shared:+15551234567 2`
             "take" | "take-appearance" => Command::TakeAppearance {
@@ -333,8 +358,31 @@ impl Command {
                 line: need(words.get(1), "a line")?,
                 label: words[2.min(words.len())..].join(" "),
             },
-            "answer" => Command::Answer {
-                call: id(words.get(1))?,
+            // `answer`, `answer 3`, `answer audio`, `answer 3 video`.
+            "answer" => {
+                let media = |w: &&str| match w.to_ascii_lowercase().as_str() {
+                    "video" => Some(true),
+                    "audio" => Some(false),
+                    _ => None,
+                };
+                let video = words.get(1..).unwrap_or(&[]).iter().find_map(media);
+                let call = words.get(1).filter(|w| media(w).is_none());
+                Command::Answer {
+                    call: id(call)?,
+                    video,
+                }
+            }
+            // `video on`, `video off 3`.
+            "video" => Command::Video {
+                on: on_off(words.get(1)).ok_or("video needs on or off")?,
+                call: id(words.get(2))?,
+            },
+            // `camera /dev/video2`, `camera default`.
+            "camera" => Command::Camera {
+                camera: rest(&words, 1).filter(|c| !c.eq_ignore_ascii_case("default")),
+            },
+            "h264" => Command::H264 {
+                on: on_off(words.get(1)).ok_or("h264 needs on or off")?,
             },
             "decline" | "reject" => Command::Decline {
                 call: id(words.get(1))?,
@@ -606,6 +654,10 @@ fn until_of(word: &str) -> Option<String> {
     Some(chrono::DateTime::<chrono::Utc>::from(at).to_rfc3339())
 }
 
+fn is_false(b: &bool) -> bool {
+    !*b
+}
+
 /// `on` or `off` (or yes/no, true/false).
 fn on_off(word: Option<&&str>) -> Option<bool> {
     match word.map(|w| w.to_ascii_lowercase()).as_deref() {
@@ -631,6 +683,7 @@ mod tests {
             Command::Call {
                 target: "1002".into(),
                 line: None,
+                video: false,
             }
         );
         assert_eq!(
@@ -638,7 +691,49 @@ mod tests {
             Command::Call {
                 target: "1002".into(),
                 line: Some("extension:1005".into()),
+                video: false,
             }
+        );
+        assert_eq!(
+            Command::parse_line("vcall 1002").unwrap(),
+            Command::Call {
+                target: "1002".into(),
+                line: None,
+                video: true,
+            }
+        );
+        for (line, call, video) in [
+            ("answer", None, None),
+            ("answer 3", Some(3), None),
+            ("answer audio", None, Some(false)),
+            ("answer 3 video", Some(3), Some(true)),
+        ] {
+            assert_eq!(
+                Command::parse_line(line).unwrap(),
+                Command::Answer { call, video },
+                "{line}"
+            );
+        }
+        assert_eq!(
+            Command::parse_line("video off 3").unwrap(),
+            Command::Video {
+                call: Some(3),
+                on: false
+            }
+        );
+        assert_eq!(
+            Command::parse_line("camera /dev/video2").unwrap(),
+            Command::Camera {
+                camera: Some("/dev/video2".into())
+            }
+        );
+        assert_eq!(
+            Command::parse_line("camera default").unwrap(),
+            Command::Camera { camera: None }
+        );
+        assert_eq!(
+            Command::parse_line("h264 off").unwrap(),
+            Command::H264 { on: false }
         );
         assert_eq!(
             Command::parse_line("rename-line own My desk").unwrap(),
@@ -914,7 +1009,13 @@ mod tests {
         .unwrap();
         assert_eq!(json, r#"{"cmd":"transfer","target":"1003","call":null}"#);
         let back: Command = serde_json::from_str(r#"{"cmd":"answer"}"#).unwrap();
-        assert_eq!(back, Command::Answer { call: None });
+        assert_eq!(
+            back,
+            Command::Answer {
+                call: None,
+                video: None,
+            }
+        );
         assert_eq!(
             serde_json::to_string(&Response::ok()).unwrap(),
             r#"{"ok":true}"#

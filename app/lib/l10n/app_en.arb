@@ -643,5 +643,32 @@
   },
   "deleteCaptures": "Delete",
   "voicemailNew": "New",
-  "voicemailHeard": "Heard"
+  "voicemailHeard": "Heard",
+  "videoCallButton": "Video call",
+  "incomingVideoCall": "Incoming video call",
+  "answerVideoButton": "Video",
+  "answerAudioButton": "Audio only",
+  "startVideoButton": "Start video",
+  "stopVideoButton": "Stop video",
+  "cameraButton": "Camera",
+  "cameraDefault": "System default",
+  "videoAsked": "{name} turned on video. Start yours?",
+  "@videoAsked": {
+    "placeholders": {
+      "name": {
+        "type": "String"
+      }
+    }
+  },
+  "videoOff": "Camera off",
+  "videoFrozen": "The picture is catching up",
+  "selfView": "You",
+  "settingsVideo": "Video",
+  "cameraSetting": "Camera",
+  "noCameras": "No camera found",
+  "videoUnavailable": "Video calls are not available on this device yet",
+  "h264Setting": "H.264",
+  "h264Ready": "In use; downloaded from Cisco",
+  "h264Fetching": "Downloading from Cisco…",
+  "h264Off": "Off; video calls use VP8"
 }

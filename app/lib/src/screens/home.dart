@@ -81,6 +81,15 @@ class _HomeScreenState extends State<HomeScreen> {
     model.dial(target);
   }
 
+  /// A video call from the keypad.
+  void _videoDial(String target) {
+    setState(() {
+      _page = Section.phone;
+      _adding = false;
+    });
+    model.dial(target, video: true);
+  }
+
   @override
   Widget build(BuildContext context) {
     final s = Strings.of(context);
@@ -198,32 +207,33 @@ class _HomeScreenState extends State<HomeScreen> {
     );
   }
 
-  Widget _pageBody(List<PhoneCall> up, {required bool linesBeside}) =>
-      switch (_page) {
-        Section.phone =>
-          up.isNotEmpty && !_adding
-              ? InCallPanel(
-                  model: model,
-                  onAddCall: () => setState(() => _adding = true),
-                )
-              : Keypad(
-                  key: ValueKey(_fills),
-                  initial: _filled,
-                  onCall: _dial,
-                  onBack: up.isEmpty
-                      ? null
-                      : () => setState(() => _adding = false),
-                  from: model.snapshot.hasLines && !linesBeside
-                      ? LinePicker(model: model)
-                      : null,
-                  people: model.snapshot.people,
-                  contacts: model.snapshot.contacts,
-                ),
-        Section.recents => RecentsPage(model: model, onDial: _dial),
-        Section.people => PeoplePage(model: model, onDial: _dial),
-        Section.voicemail => VoicemailPage(model: model, onDial: _dial),
-        Section.settings => SettingsPage(model: model),
-      };
+  Widget _pageBody(
+    List<PhoneCall> up, {
+    required bool linesBeside,
+  }) => switch (_page) {
+    Section.phone =>
+      up.isNotEmpty && !_adding
+          ? InCallPanel(
+              model: model,
+              onAddCall: () => setState(() => _adding = true),
+            )
+          : Keypad(
+              key: ValueKey(_fills),
+              initial: _filled,
+              onCall: _dial,
+              onVideoCall: model.snapshot.video.available ? _videoDial : null,
+              onBack: up.isEmpty ? null : () => setState(() => _adding = false),
+              from: model.snapshot.hasLines && !linesBeside
+                  ? LinePicker(model: model)
+                  : null,
+              people: model.snapshot.people,
+              contacts: model.snapshot.contacts,
+            ),
+    Section.recents => RecentsPage(model: model, onDial: _dial),
+    Section.people => PeoplePage(model: model, onDial: _dial),
+    Section.voicemail => VoicemailPage(model: model, onDial: _dial),
+    Section.settings => SettingsPage(model: model),
+  };
 
   PreferredSizeWidget _appBar(BuildContext context) {
     final s = Strings.of(context);

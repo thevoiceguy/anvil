@@ -750,6 +750,41 @@ FCP's `docs/CALL_DIAGNOSTICS.md` phase 5 (FCP v0.25.491 takes them):
   - The app's folder limits, and widget tests for the setting and the call
     screen's badge.
 
+### Video calls (softphone video A2b)
+FCP's `docs/SOFTPHONE_VIDEO.md` §2.5, on the desktop (Linux first; macOS and
+Windows with their video hosts, A2c and A2d):
+- **Placing.** The keypad has **Video call** beside **Call** where the
+  device has video (a camera need not be there: the far end's picture
+  shows all the same).
+- **Ringing in.** A video call says so, and is answered with **Video** or
+  **Audio only**; a device without video answers it as audio.
+- **In the call.** The far end's pictures fill a stage above the controls,
+  one tile per stream (a room's composite is one; several share the stage);
+  ours is a corner tile, mirrored, that can be dragged anywhere on the stage.
+  **Start video** and **Stop video** turn our camera on and off (a
+  re-INVITE: an audio call becomes a video call); **Camera** picks another
+  when there are several, switched while sending. The far end turning its
+  video on asks whether to start ours. A frozen picture (waiting for a
+  keyframe) says so.
+- **Settings → Video.** The camera calls use (the system's first unless
+  chosen) and, on Linux, **H.264**: Cisco's OpenH264, fetched from Cisco when
+  first allowed, with the notice Cisco's terms ask for; off, it is neither
+  fetched nor offered, and calls use VP8.
+- **Pictures never reach Dart.** Each tile is a texture the runner's plugin
+  fills from Rust's video threads (`ARCHITECTURE.md` §5a).
+- **Proved by:**
+  - `anvil-app`'s `tests/video.rs`: two phones with the synthetic host — a
+    video call answered with audio only, the camera turned on (the far end
+    asked), both ways, the camera chosen (a missing one refused), turned
+    off, H.264 allowed and not; a phone without video places audio calls.
+  - `anvil-video`'s camera switch: the chosen camera opened, switched while
+    sending from a keyframe, one that will not open leaving the one there was.
+  - Widget tests (`test/video_test.dart`) for the keypad, the incoming card,
+    the stage, the self-view's drag, tiles opened and closed, the toggle,
+    the picker, the ask and the settings.
+  - The texture plugin compiled with `-Wall -Werror` by CI's Linux build,
+    which also checks the bridge needs no shared libvpx.
+
 ### W5: echo cancellation and noise suppression
 - The desktop's microphone is cleaned before it is sent: WebRTC's audio
   processing — AEC3, its noise suppressor and its high-pass filter — as

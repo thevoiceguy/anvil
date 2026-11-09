@@ -360,6 +360,21 @@ its size. A new or resumed incoming stream reaches its sink only from its first
 keyframe, and asks for one if that keyframe never came (a relay drops a stream's first
 packets until it has latched).
 
+**The app** shows video on Flutter textures, and pictures never cross into Dart. The
+runner's texture plugin (`linux/runner/video_texture.cc`, over `anvil/video`) makes a
+pixel-buffer texture and hands Dart its id, the C function that fills it and the
+texture's address; Dart hands those to the bridge (`attach_tile`), whose `Renderer`
+converts each picture to RGBA and calls the function on the host's thread. Detaching
+takes the renderer's lock, so the function is never called once `detach_tile`
+returns, and only then is the texture disposed of. `anvil-app` keeps each call's
+video (offered, our camera, our stream, the streams coming in, the far end asking)
+from the core's events, and the device's (cameras, the one chosen, H.264). The core's
+`set_camera` reaches the host, which switches a camera that is sending (closed, the
+new one opened, a keyframe) and opens the chosen one for each new send. The chosen
+camera and whether H.264 is allowed are kept with the phone's settings; with H.264
+off, OpenH264 is neither fetched nor offered. libvpx is linked statically where its
+archive is installed, so the packages need no libvpx of their own.
+
 ---
 
 ## 6. Threading and async

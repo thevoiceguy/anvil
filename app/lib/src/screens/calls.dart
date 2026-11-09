@@ -17,6 +17,7 @@ import 'audio_controls.dart';
 import 'call_stats.dart';
 import 'contacts.dart';
 import 'lines.dart';
+import 'video.dart';
 
 /// The call the in-call screen is about: the one up, else one being placed,
 /// else a held one.
@@ -62,7 +63,10 @@ class IncomingCallCard extends StatelessWidget {
         padding: const EdgeInsets.all(16),
         child: Column(
           children: [
-            Text(s.incomingCall, style: theme.textTheme.labelLarge),
+            Text(
+              call.videoOffered ? s.incomingVideoCall : s.incomingCall,
+              style: theme.textTheme.labelLarge,
+            ),
             if (line != null)
               Row(
                 key: const Key('incomingLine'),
@@ -94,16 +98,41 @@ class IncomingCallCard extends StatelessWidget {
                   icon: const Icon(Icons.call_end),
                   label: Text(s.declineButton),
                 ),
-                FilledButton.icon(
-                  key: const Key('answer'),
-                  style: FilledButton.styleFrom(
-                    backgroundColor: AnvilColors.answer,
-                    foregroundColor: Colors.white,
+                // A video call is answered with video, or audio only.
+                if (call.videoOffered && model.snapshot.video.available) ...[
+                  FilledButton.icon(
+                    key: const Key('answerAudio'),
+                    style: FilledButton.styleFrom(
+                      backgroundColor: AnvilColors.answer,
+                      foregroundColor: Colors.white,
+                    ),
+                    onPressed: () =>
+                        model.run(() => model.api.answer(call.id, false)),
+                    icon: const Icon(Icons.call),
+                    label: Text(s.answerAudioButton),
                   ),
-                  onPressed: () => model.run(() => model.api.answer(call.id)),
-                  icon: const Icon(Icons.call),
-                  label: Text(s.answerButton),
-                ),
+                  FilledButton.icon(
+                    key: const Key('answerVideo'),
+                    style: FilledButton.styleFrom(
+                      backgroundColor: AnvilColors.answer,
+                      foregroundColor: Colors.white,
+                    ),
+                    onPressed: () =>
+                        model.run(() => model.api.answer(call.id, true)),
+                    icon: const Icon(Icons.videocam),
+                    label: Text(s.answerVideoButton),
+                  ),
+                ] else
+                  FilledButton.icon(
+                    key: const Key('answer'),
+                    style: FilledButton.styleFrom(
+                      backgroundColor: AnvilColors.answer,
+                      foregroundColor: Colors.white,
+                    ),
+                    onPressed: () => model.run(() => model.api.answer(call.id)),
+                    icon: const Icon(Icons.call),
+                    label: Text(s.answerButton),
+                  ),
               ],
             ),
           ],
@@ -181,6 +210,9 @@ class _InCallPanelState extends State<InCallPanel> {
         .toList();
     final connected = call.isConnected;
     final name = nameFor(snap, call);
+    // A call with pictures shows them above its controls.
+    final video = call.hasVideo && !call.isRingingIn;
+    final cameras = snap.video.cameras;
     final number = shortAddress(call.remote);
     final canComplete =
         model.consulting != null &&
@@ -193,10 +225,33 @@ class _InCallPanelState extends State<InCallPanel> {
       padding: const EdgeInsets.all(16),
       child: Center(
         child: ConstrainedBox(
-          constraints: const BoxConstraints(maxWidth: 420),
+          constraints: BoxConstraints(maxWidth: video ? 720 : 420),
           child: Column(
             children: [
-              const SizedBox(height: 8),
+              if (video) ...[
+                CallVideoStage(
+                  key: const Key('videoStage'),
+                  tiles: model.api.videoTiles,
+                  call: call,
+                  name: name,
+                ),
+                const SizedBox(height: 12),
+              ] else
+                const SizedBox(height: 8),
+              if (call.videoRequested && snap.video.available && connected)
+                Card(
+                  key: const Key('videoAsked'),
+                  child: ListTile(
+                    leading: const Icon(Icons.videocam),
+                    title: Text(s.videoAsked(name)),
+                    trailing: TextButton(
+                      key: const Key('startVideo'),
+                      onPressed: () =>
+                          model.run(() => model.api.setVideo(call.id, true)),
+                      child: Text(s.startVideoButton),
+                    ),
+                  ),
+                ),
               Text(
                 name,
                 key: const Key('callName'),
@@ -301,6 +356,43 @@ class _InCallPanelState extends State<InCallPanel> {
                             )
                           : null,
                     ),
+                    if (snap.video.available)
+                      _RoundButton(
+                        key: const Key('video'),
+                        icon: call.camera ? Icons.videocam : Icons.videocam_off,
+                        label: call.camera
+                            ? s.stopVideoButton
+                            : s.startVideoButton,
+                        on: call.camera,
+                        onPressed: connected && !call.held
+                            ? () => model.run(
+                                () => model.api.setVideo(call.id, !call.camera),
+                              )
+                            : null,
+                      ),
+                    if (snap.video.available && cameras.length > 1)
+                      Builder(
+                        builder: (anchor) => _RoundButton(
+                          key: const Key('camera'),
+                          icon: Icons.cameraswitch,
+                          label: s.cameraButton,
+                          onPressed: () => showMoreMenu(anchor, [
+                            for (final c in cameras)
+                              MoreAction(
+                                key: Key('camera-${c.id}'),
+                                icon:
+                                    c.id ==
+                                        (snap.video.camera ?? cameras.first.id)
+                                    ? Icons.check
+                                    : Icons.videocam_outlined,
+                                label: c.name,
+                                onSelected: () => model.run(
+                                  () => model.api.chooseCamera(c.id),
+                                ),
+                              ),
+                          ]),
+                        ),
+                      ),
                     _RoundButton(
                       key: const Key('keypad'),
                       icon: Icons.dialpad,
@@ -990,7 +1082,11 @@ class Keypad extends StatefulWidget {
     this.from,
     this.people = const [],
     this.contacts = const [],
+    this.onVideoCall,
   });
+
+  /// Place a video call to what was typed; null where there is no video.
+  final ValueChanged<String>? onVideoCall;
 
   /// Whom the keypad offers as a name or number is typed.
   final List<Person> people;
@@ -1027,10 +1123,10 @@ class _KeypadState extends State<Keypad> {
     super.dispose();
   }
 
-  void _call() {
+  void _call({bool video = false}) {
     final target = _target.text.trim();
     if (target.isEmpty) return;
-    widget.onCall(target);
+    (video ? widget.onVideoCall! : widget.onCall)(target);
     _target.clear();
   }
 
@@ -1090,6 +1186,18 @@ class _KeypadState extends State<Keypad> {
                 icon: const Icon(Icons.call),
                 label: Text(s.callButton),
               ),
+              if (widget.onVideoCall != null) ...[
+                const SizedBox(height: 8),
+                OutlinedButton.icon(
+                  key: const Key('videoCall'),
+                  style: OutlinedButton.styleFrom(
+                    minimumSize: const Size.fromHeight(44),
+                  ),
+                  onPressed: () => _call(video: true),
+                  icon: const Icon(Icons.videocam),
+                  label: Text(s.videoCallButton),
+                ),
+              ],
               if (widget.onBack != null)
                 TextButton(
                   key: const Key('backToCall'),

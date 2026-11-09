@@ -54,9 +54,10 @@ impl SoftwareCodecs {
         }
     }
 
-    /// OpenH264 has arrived (downloaded after the host was made).
-    pub fn set_openh264(&self, path: PathBuf) {
-        *self.openh264.write() = Some(path);
+    /// OpenH264 has arrived (downloaded after the host was made), or
+    /// (`None`) is no longer to be used.
+    pub fn set_openh264(&self, path: Option<PathBuf>) {
+        *self.openh264.write() = path;
     }
 
     fn openh264(&self) -> Option<PathBuf> {

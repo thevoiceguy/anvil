@@ -10,7 +10,7 @@ use async_trait::async_trait;
 use parking_lot::Mutex;
 use tokio::sync::mpsc;
 
-use crate::camera::Capture;
+use crate::camera::{Cameras, Capture};
 use crate::codec::Encoder;
 use crate::tiles::{TileKey, Tiles};
 
@@ -20,6 +20,38 @@ struct Control {
     keyframe: AtomicBool,
     /// (kbps, max, fps), and whether it changed since the encoder saw it.
     target: Mutex<((u32, Resolution, u32), bool)>,
+    /// A camera to switch to (`Some(None)`, the default one).
+    switch: Mutex<Option<Option<String>>>,
+}
+
+/// A running source's way to switch cameras, kept by the host.
+#[derive(Clone)]
+pub(crate) struct Switch(std::sync::Weak<Control>);
+
+impl Switch {
+    pub(crate) fn alive(&self) -> bool {
+        self.0.strong_count() > 0
+    }
+
+    /// Ask the source to switch to `camera`; false once it has ended.
+    pub(crate) fn to(&self, camera: Option<&str>) -> bool {
+        match self.0.upgrade() {
+            Some(c) => {
+                *c.switch.lock() = Some(camera.map(str::to_owned));
+                true
+            }
+            None => false,
+        }
+    }
+}
+
+/// The camera being captured, and what it was opened for.
+pub(crate) struct Camera {
+    pub(crate) cameras: Arc<dyn Cameras>,
+    pub(crate) id: Option<String>,
+    pub(crate) capture: Box<dyn Capture>,
+    pub(crate) want: Resolution,
+    pub(crate) fps: u32,
 }
 
 pub(crate) struct CameraSource {
@@ -31,7 +63,7 @@ impl CameraSource {
     /// Start capturing: the camera is open, the encoder made. The
     /// self-view shows what is captured.
     pub(crate) fn start(
-        capture: Box<dyn Capture>,
+        camera: Camera,
         encoder: Box<dyn Encoder>,
         target: (u32, Resolution, u32),
         tiles: Tiles,
@@ -41,15 +73,20 @@ impl CameraSource {
             stop: AtomicBool::new(false),
             keyframe: AtomicBool::new(false),
             target: Mutex::new((target, false)),
+            switch: Mutex::new(None),
         });
         let c = Arc::clone(&control);
         let spawned = std::thread::Builder::new()
             .name("anvil-video-send".into())
-            .spawn(move || run(capture, encoder, &c, &tx, &tiles));
+            .spawn(move || run(camera, encoder, &c, &tx, &tiles));
         if let Err(e) = spawned {
             tracing::warn!("video send thread: {e}");
         }
         Self { frames, control }
+    }
+
+    pub(crate) fn switch(&self) -> Switch {
+        Switch(Arc::downgrade(&self.control))
     }
 }
 
@@ -75,8 +112,51 @@ impl VideoSource for CameraSource {
     }
 }
 
+/// Close the camera and open `id`; if it will not open, the one there was
+/// again. `false` when neither opens.
+fn switch_camera(camera: &mut Camera, id: Option<String>) -> bool {
+    if id == camera.id {
+        return true;
+    }
+    // Closed first: a camera opened twice is busy.
+    camera.capture = Box::new(Closed);
+    match camera.cameras.open(id.as_deref(), camera.want, camera.fps) {
+        Ok(c) => {
+            tracing::info!(camera = ?id, "switched camera");
+            camera.capture = c;
+            camera.id = id;
+            true
+        }
+        Err(e) => {
+            tracing::warn!(camera = ?id, "camera would not open: {e}");
+            match camera
+                .cameras
+                .open(camera.id.as_deref(), camera.want, camera.fps)
+            {
+                Ok(c) => {
+                    camera.capture = c;
+                    true
+                }
+                Err(e) => {
+                    tracing::warn!(camera = ?camera.id, "camera would not open again: {e}");
+                    false
+                }
+            }
+        }
+    }
+}
+
+/// No camera, between closing one and opening the next.
+struct Closed;
+
+impl Capture for Closed {
+    fn next(&mut self) -> Option<crate::picture::Picture> {
+        None
+    }
+}
+
 fn run(
-    mut capture: Box<dyn Capture>,
+    mut camera: Camera,
     mut encoder: Box<dyn Encoder>,
     control: &Control,
     tx: &mpsc::Sender<(EncodingId, CodedFrame)>,
@@ -84,7 +164,15 @@ fn run(
 ) {
     let mut last_sent: Option<Instant> = None;
     while !control.stop.load(Ordering::Relaxed) {
-        let Some(picture) = capture.next() else {
+        let switch = control.switch.lock().take();
+        if let Some(id) = switch {
+            if !switch_camera(&mut camera, id) {
+                break;
+            }
+            // The far end sees the new camera from a keyframe.
+            control.keyframe.store(true, Ordering::Relaxed);
+        }
+        let Some(picture) = camera.capture.next() else {
             break;
         };
         tiles.present(TileKey::SelfView, picture.clone());

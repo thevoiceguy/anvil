@@ -389,8 +389,12 @@ impl Command {
             Command::Call { target, line } => P::Call {
                 target: target.clone(),
                 line: line.clone(),
+                video: false,
             },
-            Command::Answer { id } => P::Answer { call: *id },
+            Command::Answer { id } => P::Answer {
+                call: *id,
+                video: None,
+            },
             Command::Decline { id } => P::Decline { call: *id },
             Command::Hangup { id } => P::Hangup { call: *id },
             Command::Hold { id } => P::Hold { call: *id },
@@ -750,6 +754,23 @@ fn print_change(change: &anvil_app::Change) {
             Some(t) => println!("[test] {:?}", t.stage),
             None => println!("[test] done"),
         },
+        C::Video { video } => println!(
+            "[video] {} camera={} cameras={} h264={}",
+            if video.available { "available" } else { "none" },
+            video.camera.as_deref().unwrap_or("default"),
+            video
+                .cameras
+                .iter()
+                .map(|c| c.id.as_str())
+                .collect::<Vec<_>>()
+                .join(","),
+            match &video.h264 {
+                Some(h) if h.ready => "ready",
+                Some(h) if h.allowed => "fetching",
+                Some(_) => "off",
+                None => "-",
+            }
+        ),
     }
 }
 
@@ -765,6 +786,7 @@ async fn run_phone(cli: &Cli) -> Result<()> {
         // A terminal phone rings like the app on a desktop.
         ring: true,
         fallback_brand: None,
+        openh264: None,
     })
     .await?;
     let endpoint = control_endpoint(cli);

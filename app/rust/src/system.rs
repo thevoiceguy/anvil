@@ -297,7 +297,10 @@ pub(crate) fn command_for(action: &Action, state: &State) -> Option<Command> {
     let ringing_in = call.direction == Direction::Incoming && call.state != CallState::Connected;
     let id = Some(action.id);
     Some(match action.action.as_str() {
-        "answer" if ringing_in => Command::Answer { call: id },
+        "answer" if ringing_in => Command::Answer {
+            call: id,
+            video: None,
+        },
         "end" if ringing_in => Command::Decline { call: id },
         "end" => Command::Hangup { call: id },
         "failed" if ringing_in && action.reason.as_deref() == Some("filtered") => {
@@ -432,7 +435,10 @@ mod tests {
         let ringing = state(vec![ringing_in(7)]);
         assert!(matches!(
             command_for(&action(r#"{"action":"answer","id":7}"#), &ringing),
-            Some(Command::Answer { call: Some(7) })
+            Some(Command::Answer {
+                call: Some(7),
+                video: None
+            })
         ));
         assert!(matches!(
             command_for(&action(r#"{"action":"end","id":7}"#), &ringing),

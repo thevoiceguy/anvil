@@ -52,8 +52,8 @@ class PhoneModel extends ChangeNotifier {
   }
 
   /// Dial from the line chosen.
-  Future<void> dial(String target) =>
-      run(() async => api.call(target, line: line));
+  Future<void> dial(String target, {bool video = false}) =>
+      run(() async => api.call(target, line: line, video: video));
 
   /// Pick up a shared line's held call, or join its call up.
   Future<void> takeAppearance(String line, int index) =>

@@ -106,6 +106,7 @@ async fn start(
         settings_path,
         ring,
         fallback_brand,
+        openh264: None,
     })
     .await
     .expect("the phone starts")
@@ -174,6 +175,7 @@ async fn a_running_phone_is_driven_through_its_control_socket() {
         .request(&Command::Call {
             target: format!("sip:bob@{}", bob.sip_address()),
             line: None,
+            video: false,
         })
         .await
         .unwrap();
@@ -184,10 +186,13 @@ async fn a_running_phone_is_driven_through_its_control_socket() {
     })
     .await;
     assert!(
-        bob.execute(Command::Answer { call: None })
-            .await
-            .unwrap()
-            .ok
+        bob.execute(Command::Answer {
+            call: None,
+            video: None
+        })
+        .await
+        .unwrap()
+        .ok
     );
     until(&alice, "Alice's call is up", |s| {
         s.call_state(call) == Some(CallState::Connected)
@@ -222,7 +227,10 @@ async fn a_running_phone_is_driven_through_its_control_socket() {
 
     // A command that cannot be done says why.
     let refused = control
-        .request(&Command::Answer { call: None })
+        .request(&Command::Answer {
+            call: None,
+            video: None,
+        })
         .await
         .unwrap();
     assert!(!refused.ok && refused.error.unwrap().contains("no call to answer"));
@@ -677,6 +685,7 @@ async fn answering_a_second_call_holds_the_first_and_resuming_swaps() {
         .execute(Command::Call {
             target: format!("sip:bob@{}", bob.sip_address()),
             line: None,
+            video: false,
         })
         .await
         .unwrap()
@@ -687,10 +696,13 @@ async fn answering_a_second_call_holds_the_first_and_resuming_swaps() {
     })
     .await;
     assert!(
-        bob.execute(Command::Answer { call: None })
-            .await
-            .unwrap()
-            .ok
+        bob.execute(Command::Answer {
+            call: None,
+            video: None
+        })
+        .await
+        .unwrap()
+        .ok
     );
     until(&alice, "Alice and Bob talk", |s| {
         s.call_state(first) == Some(CallState::Connected)
@@ -709,6 +721,7 @@ async fn answering_a_second_call_holds_the_first_and_resuming_swaps() {
         .execute(Command::Call {
             target: format!("sip:alice@{}", alice.sip_address()),
             line: None,
+            video: false,
         })
         .await
         .unwrap();
@@ -718,7 +731,10 @@ async fn answering_a_second_call_holds_the_first_and_resuming_swaps() {
     .await;
     assert!(
         alice
-            .execute(Command::Answer { call: None })
+            .execute(Command::Answer {
+                call: None,
+                video: None
+            })
             .await
             .unwrap()
             .ok
@@ -908,6 +924,7 @@ async fn a_call_rings_until_answered_and_a_second_is_a_tone_in_the_call() {
     bob.execute(Command::Call {
         target: format!("sip:alice@{}", alice.sip_address()),
         line: None,
+        video: false,
     })
     .await
     .unwrap();
@@ -921,7 +938,10 @@ async fn a_call_rings_until_answered_and_a_second_is_a_tone_in_the_call() {
     // Answered: quiet.
     assert!(
         alice
-            .execute(Command::Answer { call: None })
+            .execute(Command::Answer {
+                call: None,
+                video: None
+            })
             .await
             .unwrap()
             .ok
@@ -938,6 +958,7 @@ async fn a_call_rings_until_answered_and_a_second_is_a_tone_in_the_call() {
         .execute(Command::Call {
             target: format!("sip:alice@{}", alice.sip_address()),
             line: None,
+            video: false,
         })
         .await
         .unwrap();
@@ -1459,6 +1480,7 @@ async fn rings(alice: &Phone, heard: &Heard, caller: &Phone) -> bool {
         .execute(Command::Call {
             target: format!("sip:alice@{}", alice.sip_address()),
             line: None,
+            video: false,
         })
         .await
         .unwrap();
