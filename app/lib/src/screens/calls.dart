@@ -106,8 +106,7 @@ class IncomingCallCard extends StatelessWidget {
                       backgroundColor: AnvilColors.answer,
                       foregroundColor: Colors.white,
                     ),
-                    onPressed: () =>
-                        model.run(() => model.api.answer(call.id, false)),
+                    onPressed: () => model.answer(call.id, false),
                     icon: const Icon(Icons.call),
                     label: Text(s.answerAudioButton),
                   ),
@@ -117,8 +116,7 @@ class IncomingCallCard extends StatelessWidget {
                       backgroundColor: AnvilColors.answer,
                       foregroundColor: Colors.white,
                     ),
-                    onPressed: () =>
-                        model.run(() => model.api.answer(call.id, true)),
+                    onPressed: () => model.answer(call.id, true),
                     icon: const Icon(Icons.videocam),
                     label: Text(s.answerVideoButton),
                   ),
@@ -129,7 +127,7 @@ class IncomingCallCard extends StatelessWidget {
                       backgroundColor: AnvilColors.answer,
                       foregroundColor: Colors.white,
                     ),
-                    onPressed: () => model.run(() => model.api.answer(call.id)),
+                    onPressed: () => model.answer(call.id),
                     icon: const Icon(Icons.call),
                     label: Text(s.answerButton),
                   ),
@@ -246,8 +244,7 @@ class _InCallPanelState extends State<InCallPanel> {
                     title: Text(s.videoAsked(name)),
                     trailing: TextButton(
                       key: const Key('startVideo'),
-                      onPressed: () =>
-                          model.run(() => model.api.setVideo(call.id, true)),
+                      onPressed: () => model.setVideo(call.id, true),
                       child: Text(s.startVideoButton),
                     ),
                   ),
@@ -365,9 +362,7 @@ class _InCallPanelState extends State<InCallPanel> {
                             : s.startVideoButton,
                         on: call.camera,
                         onPressed: connected && !call.held
-                            ? () => model.run(
-                                () => model.api.setVideo(call.id, !call.camera),
-                              )
+                            ? () => model.setVideo(call.id, !call.camera)
                             : null,
                       ),
                     if (snap.video.available && cameras.length > 1)

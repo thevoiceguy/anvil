@@ -434,7 +434,6 @@ pub async fn start_phone(session_path: String) -> anyhow::Result<()> {
     let settings_path = std::path::Path::new(&session_path).with_file_name("settings.json");
     // Where the platform wakes this install, when it has said (`system.rs`).
     let push = crate::system::load_push(std::path::Path::new(&session_path));
-    #[cfg(not(target_os = "android"))]
     let session_path_for_video = session_path.clone();
     let phone = on_runtime(async move {
         let store = Arc::new(FileTokenStore::new(session_path));
@@ -448,8 +447,7 @@ pub async fn start_phone(session_path: String) -> anyhow::Result<()> {
         let brand = anvil_fcp::brand_config(Arc::clone(&client), None)?;
         let audio =
             anvil_audio::CpalHost::new().map_err(|e| anyhow::anyhow!("no audio devices: {e}"))?;
-        // The platform's cameras and codecs; Android's come later.
-        #[cfg(not(target_os = "android"))]
+        // The platform's cameras and codecs.
         let (video, openh264) = {
             let dir = super::video::native::openh264_dir(&session_path_for_video);
             let host = super::video::native::host(&dir);
@@ -459,8 +457,6 @@ pub async fn start_phone(session_path: String) -> anyhow::Result<()> {
                 openh264,
             )
         };
-        #[cfg(target_os = "android")]
-        let (video, openh264) = (None, None);
         let phone = Phone::start(PhoneConfig {
             anvil: anvil_core::AnvilConfig {
                 account,

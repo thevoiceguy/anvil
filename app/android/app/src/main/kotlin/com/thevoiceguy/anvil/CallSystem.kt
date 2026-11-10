@@ -45,6 +45,7 @@ object CallSystem {
     class Call(var id: Long, val name: String, val number: String, val incoming: Boolean) {
         var connected = false
         var held = false
+        var video = false
         var connection: AnvilConnection? = null
 
         /** The server's id for the call, as a push or its INVITE named it. */
@@ -253,9 +254,12 @@ object CallSystem {
         when (event.optString("kind")) {
             "incoming" -> {
                 val serverCall = if (event.isNull("server_call")) null else event.optString("server_call")
-                phoneRinging(context, id, name, number, serverCall)
+                phoneRinging(context, id, name, number, serverCall, event.optBoolean("video"))
             }
-            "outgoing" -> if (!calls.containsKey(id)) reportOutgoing(context, id, name, number)
+            "outgoing" -> if (!calls.containsKey(id)) {
+                reportOutgoing(context, id, name, number, event.optBoolean("video"))
+            }
+            "video" -> reportVideo(id, event.optBoolean("on"))
             "connected" -> reportConnected(context, id)
             "held" -> reportHeld(context, id, event.optBoolean("on"))
             "ended" -> reportEnded(context, id)
@@ -265,7 +269,14 @@ object CallSystem {
     }
 
     /** The phone's call ringing in: the pushed call it is, or a new one. */
-    private fun phoneRinging(context: Context, id: Long, name: String, number: String, serverCall: String?) {
+    private fun phoneRinging(
+        context: Context,
+        id: Long,
+        name: String,
+        number: String,
+        serverCall: String?,
+        video: Boolean,
+    ) {
         if (calls.containsKey(id)) return
         if (serverCall != null && declined.remove(serverCall) != null) {
             PhoneLink.act("end", id)
@@ -276,7 +287,7 @@ object CallSystem {
         val pushed = calls.values.firstOrNull { it.pushed && serverCall != null && it.serverCall == serverCall }
             ?: calls.values.firstOrNull { it.pushed && serverCall == null }
         if (pushed == null) {
-            reportIncoming(context, id, name, number)
+            reportIncoming(context, id, name, number, video)
             calls[id]?.serverCall = serverCall
             return
         }
@@ -284,6 +295,7 @@ object CallSystem {
         pushed.id = id
         calls[id] = pushed
         pushed.connection?.callId = id
+        if (video) reportVideo(id, true)
         CallService.update(context)
         if (pushed.answerWhenReady) PhoneLink.act("answer", id)
     }
@@ -322,10 +334,11 @@ object CallSystem {
         putLong("id", call.id)
         putString("name", call.name)
         putString("number", call.number)
+        putBoolean("video", call.video)
     }
 
-    fun reportIncoming(context: Context, id: Long, name: String, number: String) {
-        ring(context, Call(id, name, number, incoming = true))
+    fun reportIncoming(context: Context, id: Long, name: String, number: String, video: Boolean = false) {
+        ring(context, Call(id, name, number, incoming = true).also { it.video = video })
     }
 
     private fun ring(context: Context, call: Call) {
@@ -342,6 +355,7 @@ object CallSystem {
             }
             val bundle = Bundle().apply {
                 putBundle(TelecomManager.EXTRA_INCOMING_CALL_EXTRAS, extras(call))
+                putInt(TelecomManager.EXTRA_INCOMING_VIDEO_STATE, videoState(call.video))
             }
             telecom.addNewIncomingCall(handle(context), bundle)
         } catch (e: Exception) {
@@ -354,14 +368,16 @@ object CallSystem {
     // placeCall on the app's own self-managed account needs MANAGE_OWN_CALLS
     // (in the manifest), not CALL_PHONE, which lint assumes.
     @SuppressLint("MissingPermission")
-    fun reportOutgoing(context: Context, id: Long, name: String, number: String) {
+    fun reportOutgoing(context: Context, id: Long, name: String, number: String, video: Boolean = false) {
         val call = Call(id, name, number, incoming = false)
+        call.video = video
         calls[id] = call
         try {
             register(context)
             val bundle = Bundle().apply {
                 putParcelable(TelecomManager.EXTRA_PHONE_ACCOUNT_HANDLE, handle(context))
                 putBundle(TelecomManager.EXTRA_OUTGOING_CALL_EXTRAS, extras(call))
+                putInt(TelecomManager.EXTRA_START_CALL_WITH_VIDEO_STATE, videoState(call.video))
             }
             telecom(context).placeCall(Uri.fromParts("sip", number, null), bundle)
         } catch (e: Exception) {
@@ -383,6 +399,13 @@ object CallSystem {
         call.held = on
         call.connection?.let { if (on) it.setOnHold() else it.setActive() }
         CallService.update(context)
+    }
+
+    /** The call became a video call, or stopped being one. */
+    fun reportVideo(id: Long, on: Boolean) {
+        val call = calls[id] ?: return
+        call.video = on
+        call.connection?.showVideo(on)
     }
 
     fun reportEnded(context: Context, id: Long) {
@@ -411,6 +434,7 @@ object CallSystem {
         call.connection = connection
         if (call.connected) connection.setActive()
         if (call.held) connection.setOnHold()
+        connection.showVideo(call.video)
         CallService.update(context)
         emit("shown", call.id)
     }

@@ -20,6 +20,8 @@ anvil-core  = { workspace = true }
 anvil-fcp   = { workspace = true }
 anvil-audio = { workspace = true }
 anvil-update = { workspace = true }
+# The cameras and codecs (src/api/video.rs).
+anvil-video = { workspace = true }
 tokio       = { workspace = true }
 anyhow      = { workspace = true }
 parking_lot = { workspace = true }
@@ -28,10 +30,6 @@ tracing-subscriber = { workspace = true }
 serde       = { workspace = true }
 serde_json  = { workspace = true }
 
-# The cameras and codecs (src/api/video.rs): a desktop's and an iPhone's;
-# Android's come later.
-[target.'cfg(not(target_os = "android"))'.dependencies]
-anvil-video = { workspace = true }
 
 # A phone's model for the name it signs in under (src/device.rs).
 [target.'cfg(any(target_os = "android", target_os = "ios"))'.dependencies]
@@ -44,6 +42,8 @@ libc = ">=0.2.150, <0.2.190"
 # versions cpal 0.15 uses.
 jni         = "0.21"
 ndk-context = "0.1"
+# The surfaces video tiles are drawn on (src/android_video.rs).
+ndk-sys     = "0.5"
 
 [lints.rust]
 unexpected_cfgs = { level = "warn", check-cfg = ['cfg(frb_expand)'] }

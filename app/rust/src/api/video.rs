@@ -7,7 +7,9 @@
 //! with a C function and its argument; Dart hands those here
 //! ([`attach_tile`]), and the video host's threads call the function with
 //! each picture, as RGBA (BGRA on macOS and iOS: `macos/Runner`,
-//! `ios/Runner`), at the moment it is to be seen.
+//! `ios/Runner`), at the moment it is to be seen. Android's plugin
+//! (`VideoTextures.kt`) hands over a function of ours instead, which draws
+//! on the texture's surface (`src/android_video.rs`).
 
 use std::sync::atomic::{AtomicBool, Ordering};
 
@@ -82,7 +84,6 @@ pub fn detach_tile(attachment: u64) {
     native::detach(attachment);
 }
 
-#[cfg(not(target_os = "android"))]
 pub(crate) mod native {
     use super::*;
 
@@ -252,17 +253,6 @@ pub(crate) mod native {
                 host.tiles().detach(key);
             }
         }
-    }
-}
-
-#[cfg(target_os = "android")]
-pub(crate) mod native {
-    pub(crate) fn attach(_: Option<u32>, _: usize, _: usize) -> anyhow::Result<u64> {
-        anyhow::bail!("no video on this platform yet")
-    }
-    pub(crate) fn detach(_: u64) {}
-    pub(crate) fn info(_: Option<u32>) -> Option<super::TileInfo> {
-        None
     }
 }
 

@@ -357,6 +357,12 @@ abstract class Strings {
   /// **'Anvil may not use the microphone, so callers won\'t hear you. Allow it in the system\'s settings for Anvil.'**
   String get microphoneRefused;
 
+  /// No description provided for @cameraRefused.
+  ///
+  /// In en, this message translates to:
+  /// **'Anvil may not use the camera, so callers won\'t see you. Allow it in the system\'s settings for Anvil.'**
+  String get cameraRefused;
+
   /// No description provided for @commandFailed.
   ///
   /// In en, this message translates to:

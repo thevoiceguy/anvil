@@ -52,8 +52,40 @@ class PhoneModel extends ChangeNotifier {
   }
 
   /// Dial from the line chosen.
-  Future<void> dial(String target, {bool video = false}) =>
-      run(() async => api.call(target, line: line, video: video));
+  Future<void> dial(String target, {bool video = false}) async {
+    final camera = !video || await _camera();
+    await run(() async => api.call(target, line: line, video: video));
+    _cameraRefused(camera);
+  }
+
+  /// Answer `call`, with our camera or not (`null`: with it when the call
+  /// offers video).
+  Future<void> answer(int call, [bool? video]) async {
+    final offered =
+        snapshot.calls.where((c) => c.id == call).firstOrNull?.videoOffered ??
+        false;
+    final camera = !(video ?? offered) || await _camera();
+    await run(() => api.answer(call, video));
+    _cameraRefused(camera);
+  }
+
+  /// Our camera on or off in `call`.
+  Future<void> setVideo(int call, bool on) async {
+    final camera = !on || await _camera();
+    await run(() => api.setVideo(call, on));
+    _cameraRefused(camera);
+  }
+
+  /// Before a call uses our camera: a phone asks for it the first time
+  /// (whether it may be used). The call goes on without it if not.
+  Future<bool> _camera() async =>
+      mobile == null || await mobile!.requestCamera();
+
+  void _cameraRefused(bool allowed) {
+    if (allowed) return;
+    notice = const Notice('camera', '');
+    notifyListeners();
+  }
 
   /// Pick up a shared line's held call, or join its call up.
   Future<void> takeAppearance(String line, int index) =>

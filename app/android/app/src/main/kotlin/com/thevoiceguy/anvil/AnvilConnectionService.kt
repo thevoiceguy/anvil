@@ -9,15 +9,24 @@ import android.telecom.ConnectionRequest
 import android.telecom.ConnectionService
 import android.telecom.PhoneAccountHandle
 import android.telecom.TelecomManager
+import android.telecom.VideoProfile
 
-/** One of the app's calls as Telecom holds it. */
-class AnvilConnection(callId: Long, name: String, number: String) : Connection() {
+/** Telecom's video state for a call with video, or without. */
+fun videoState(video: Boolean) = if (video) VideoProfile.STATE_BIDIRECTIONAL else VideoProfile.STATE_AUDIO_ONLY
+
+/**
+ * One of the app's calls as Telecom holds it. A video call is one to
+ * Telecom too: it routes the audio to the loudspeaker, as a video call's is.
+ */
+class AnvilConnection(callId: Long, name: String, number: String, video: Boolean) : Connection() {
     /** The phone's id for the call: a pushed call's changes when the phone's comes. */
     var callId: Long = callId
 
     init {
         connectionProperties = PROPERTY_SELF_MANAGED
-        connectionCapabilities = CAPABILITY_HOLD or CAPABILITY_SUPPORT_HOLD or CAPABILITY_MUTE
+        connectionCapabilities = CAPABILITY_HOLD or CAPABILITY_SUPPORT_HOLD or CAPABILITY_MUTE or
+            CAPABILITY_SUPPORTS_VT_LOCAL_BIDIRECTIONAL or CAPABILITY_SUPPORTS_VT_REMOTE_BIDIRECTIONAL
+        videoState = videoState(video)
         audioModeIsVoip = true
         setAddress(Uri.fromParts("sip", number, null), TelecomManager.PRESENTATION_ALLOWED)
         setCallerDisplayName(name, TelecomManager.PRESENTATION_ALLOWED)
@@ -25,7 +34,17 @@ class AnvilConnection(callId: Long, name: String, number: String) : Connection()
 
     override fun onAnswer() = CallSystem.emit("answer", callId)
 
-    override fun onAnswer(videoState: Int) = onAnswer()
+    /** Answered at a headset or watch: audio only when it says so. */
+    override fun onAnswer(videoState: Int) {
+        if (VideoProfile.isAudioOnly(videoState)) {
+            CallSystem.emit("answer", callId, mapOf("video" to false))
+        } else {
+            onAnswer()
+        }
+    }
+
+    /** The call became a video call, or stopped being one. */
+    fun showVideo(on: Boolean) = setVideoState(videoState(on))
 
     override fun onReject() = CallSystem.emit("end", callId)
 
@@ -74,6 +93,7 @@ class AnvilConnectionService : ConnectionService() {
             extras.getLong("id"),
             extras.getString("name") ?: "",
             extras.getString("number") ?: "",
+            extras.getBoolean("video") || VideoProfile.isVideo(request.videoState),
         )
     }
 

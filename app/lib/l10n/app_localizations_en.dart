@@ -158,6 +158,10 @@ class StringsEn extends Strings {
       'Anvil may not use the microphone, so callers won\'t hear you. Allow it in the system\'s settings for Anvil.';
 
   @override
+  String get cameraRefused =>
+      'Anvil may not use the camera, so callers won\'t see you. Allow it in the system\'s settings for Anvil.';
+
+  @override
   String commandFailed(String reason) {
     return '$reason';
   }
