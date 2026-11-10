@@ -288,6 +288,9 @@ enum Output {
 /// One picture's wait for its frame: an encoder gives it within a frame
 /// or two; a frame later than this is taken at the next picture.
 const WAIT: Duration = Duration::from_millis(100);
+/// A new encoder's first frame, which may take longer while it warms up
+/// (a frame left behind then would leave every later one behind too).
+const FIRST_WAIT: Duration = Duration::from_secs(1);
 
 pub(crate) struct McEncoder {
     codec_kind: VideoCodec,
@@ -297,6 +300,8 @@ pub(crate) struct McEncoder {
     fps: u32,
     /// The pictures sent so far (their times are made from it).
     n: u64,
+    /// No frame has come out of this codec yet.
+    first: bool,
     /// H.264's parameter sets, put before each keyframe.
     config: Vec<u8>,
     /// Frames coded but not yet handed out.
@@ -313,6 +318,7 @@ impl McEncoder {
             kbps: kbps.max(30),
             fps: fps.max(1),
             n: 0,
+            first: false,
             config: Vec::new(),
             out: VecDeque::new(),
             input: Vec::new(),
@@ -413,6 +419,7 @@ impl Encoder for McEncoder {
             self.out.clear();
             self.codec = Some(self.make(size.0, size.1)?);
             self.size = size;
+            self.first = true;
             keyframe = false;
         }
         let (codec, color) = self.codec.as_ref().expect("made above");
@@ -434,7 +441,8 @@ impl Encoder for McEncoder {
             n
         })?;
         self.n += 1;
-        self.drain(pts, WAIT)?;
+        self.drain(pts, if self.first { FIRST_WAIT } else { WAIT })?;
+        self.first &= self.out.is_empty();
         Ok(self.out.pop_front())
     }
 
