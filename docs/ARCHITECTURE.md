@@ -433,7 +433,18 @@ withholds our camera as the background does, except that a video call placed or
 answered meanwhile still receives the far end's picture (`CallMedia::receive_only`:
 offered `recvonly`, or an answer's sections made `recvonly`), and the camera starts
 in it back on Wi-Fi. One hold (`CameraHold`) says why the camera is withheld and
-which calls start it again when it no longer is. Hidden, every call sending our
+which calls start it again when it no longer is.
+
+Picture-in-picture is allowed while a call is up, not held, and shows the other
+side's picture (`mobile/bridge.dart`): their first stream, on the texture the call's
+stage shows it on (`VideoTile.showing`), at its size, told to the phone as
+`setPictureInPicture` (`null` when not). Android lets the activity shrink to that
+shape (`setAutoEnterEnabled` from Android 12, `onUserLeaveHint` before); while it is
+in picture-in-picture (`pictureInPicture` back to Dart) the app shows only that
+texture over itself, its tiles kept open beneath. iOS makes an
+`AVPictureInPictureVideoCallViewController` whose sample-buffer layer is fed each
+picture of that texture (`CallPictureInPicture` in `VideoTextures.swift`), started by
+the system when the app goes to the background (the `audio` background mode). Hidden, every call sending our
 camera stops sending it (a re-INVITE) and is remembered, and a video call placed or
 answered meanwhile (at the lock screen) goes without our camera; shown, each
 remembered call still up and not held starts it again. The bridge keeps the last

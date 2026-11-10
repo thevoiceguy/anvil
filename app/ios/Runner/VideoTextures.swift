@@ -1,3 +1,5 @@
+import AVKit
+import CoreMedia
 import CoreVideo
 import Flutter
 
@@ -90,5 +92,105 @@ final class VideoTexture: NSObject, FlutterTexture {
     lock.unlock()
     // Safe from any thread.
     registry.textureFrameAvailable(id)
+    if #available(iOS 15.0, *) {
+      CallPictureInPicture.shared.picture(buffer, texture: id)
+    }
   }
+}
+
+/// A video call's picture-in-picture (AVKit's, iOS 15): the other side's
+/// picture in a window of its own while the app is away. Dart allows it
+/// while a call shows their picture, naming the texture it is shown on
+/// (`setPictureInPicture` on `anvil/mobile`); that texture's pictures are
+/// shown here too. The system starts it when the app goes to the
+/// background.
+@available(iOS 15.0, *)
+final class CallPictureInPicture: NSObject {
+  static let shared = CallPictureInPicture()
+
+  private let content = AVPictureInPictureVideoCallViewController()
+  private let display = SampleBufferView()
+  private var controller: AVPictureInPictureController?
+  private let lock = NSLock()
+  private var feeding: Int64?
+
+  override init() {
+    super.init()
+    display.frame = content.view.bounds
+    display.autoresizingMask = [.flexibleWidth, .flexibleHeight]
+    display.displayLayer.videoGravity = .resizeAspect
+    content.view.addSubview(display)
+  }
+
+  /// Allowed with `texture`'s pictures (`width` × `height`), from the
+  /// app's `source` view; or not (`texture` nil). On the main thread.
+  func set(texture: Int64?, width: Int, height: Int, source: UIView?) {
+    lock.lock()
+    feeding = texture
+    lock.unlock()
+    guard texture != nil, let source = source,
+      AVPictureInPictureController.isPictureInPictureSupported()
+    else {
+      controller?.stopPictureInPicture()
+      controller = nil
+      display.displayLayer.flushAndRemoveImage()
+      return
+    }
+    content.preferredContentSize = CGSize(width: max(width, 1), height: max(height, 1))
+    if controller == nil {
+      let made = AVPictureInPictureController(
+        contentSource: AVPictureInPictureController.ContentSource(
+          activeVideoCallSourceView: source, contentViewController: content))
+      made.canStartPictureInPictureAutomaticallyFromInline = true
+      controller = made
+    }
+  }
+
+  /// A picture shown on `texture`, from a video thread: shown here too
+  /// when it is the one allowed.
+  func picture(_ buffer: CVPixelBuffer, texture: Int64) {
+    lock.lock()
+    let wanted = feeding == texture
+    lock.unlock()
+    guard wanted else { return }
+    var format: CMVideoFormatDescription?
+    guard
+      CMVideoFormatDescriptionCreateForImageBuffer(
+        allocator: kCFAllocatorDefault, imageBuffer: buffer, formatDescriptionOut: &format)
+        == noErr, let format = format
+    else { return }
+    var timing = CMSampleTimingInfo(
+      duration: .invalid, presentationTimeStamp: CMClockGetTime(CMClockGetHostTimeClock()),
+      decodeTimeStamp: .invalid)
+    var made: CMSampleBuffer?
+    guard
+      CMSampleBufferCreateReadyWithImageBuffer(
+        allocator: kCFAllocatorDefault, imageBuffer: buffer, formatDescription: format,
+        sampleTiming: &timing, sampleBufferOut: &made) == noErr, let sample = made
+    else { return }
+    // Shown as it comes, not by its time.
+    if let attachments = CMSampleBufferGetSampleAttachmentsArray(sample, createIfNecessary: true),
+      CFArrayGetCount(attachments) > 0
+    {
+      let first = unsafeBitCast(
+        CFArrayGetValueAtIndex(attachments, 0), to: CFMutableDictionary.self)
+      CFDictionarySetValue(
+        first,
+        Unmanaged.passUnretained(kCMSampleAttachmentKey_DisplayImmediately).toOpaque(),
+        Unmanaged.passUnretained(kCFBooleanTrue).toOpaque())
+    }
+    DispatchQueue.main.async {
+      let layer = self.display.displayLayer
+      if layer.status == .failed { layer.flush() }
+      layer.enqueue(sample)
+    }
+  }
+}
+
+/// A view whose layer shows sample buffers.
+final class SampleBufferView: UIView {
+  override class var layerClass: AnyClass { AVSampleBufferDisplayLayer.self }
+  // Its layer is made as the class says.
+  // swiftlint:disable:next force_cast
+  var displayLayer: AVSampleBufferDisplayLayer { layer as! AVSampleBufferDisplayLayer }
 }

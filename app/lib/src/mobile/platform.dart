@@ -173,6 +173,15 @@ abstract class MobilePlatform {
   /// Send the call's audio this way.
   Future<void> setAudioRoute(AudioRoute route);
 
+  /// Picture-in-picture while a call shows the other side's picture:
+  /// allowed, with the picture (null: not now). Android shrinks the app's
+  /// own window, which shows only the picture meanwhile; iOS shows the
+  /// texture's pictures in a window of its own.
+  Future<void> setPictureInPicture(PictureInPicture? pip);
+
+  /// Whether the app's window is in picture-in-picture now (Android).
+  Stream<bool> get pictureInPictureChanges;
+
   /// Whether the phone's network is cellular now (null: not known), and
   /// each change to it.
   Future<bool?> cellular();
@@ -181,6 +190,29 @@ abstract class MobilePlatform {
   /// Turn the screen off when the phone is held to the ear (a call up on
   /// the earpiece), or stop.
   Future<void> setProximity(bool on);
+}
+
+/// What picture-in-picture shows: a texture's pictures, and their size.
+class PictureInPicture {
+  const PictureInPicture({
+    required this.texture,
+    required this.width,
+    required this.height,
+  });
+
+  final int texture;
+  final int width;
+  final int height;
+
+  @override
+  bool operator ==(Object other) =>
+      other is PictureInPicture &&
+      other.texture == texture &&
+      other.width == width &&
+      other.height == height;
+
+  @override
+  int get hashCode => Object.hash(texture, width, height);
 }
 
 /// The app's own channel to `MainActivity` (Kotlin) and `AppDelegate`
@@ -198,6 +230,7 @@ class NativeMobile implements MobilePlatform {
   final _events = StreamController<SystemCallEvent>.broadcast();
   final _routes = StreamController<AudioRoutes>.broadcast();
   final _cellular = StreamController<bool>.broadcast();
+  final _pip = StreamController<bool>.broadcast();
 
   static bool get supported =>
       !kIsWeb && (Platform.isAndroid || Platform.isIOS);
@@ -267,6 +300,28 @@ class NativeMobile implements MobilePlatform {
       _channel.invokeMethod<void>('setProximity', {'on': on});
 
   @override
+  Future<void> setPictureInPicture(PictureInPicture? pip) async {
+    try {
+      await _channel.invokeMethod<void>(
+        'setPictureInPicture',
+        pip == null
+            ? {'enabled': false}
+            : {
+                'enabled': true,
+                'texture': pip.texture,
+                'width': pip.width,
+                'height': pip.height,
+              },
+      );
+    } on MissingPluginException {
+      // A system without it.
+    }
+  }
+
+  @override
+  Stream<bool> get pictureInPictureChanges => _pip.stream;
+
+  @override
   Future<bool?> cellular() async {
     try {
       return await _channel.invokeMethod<bool>('cellular');
@@ -280,6 +335,11 @@ class NativeMobile implements MobilePlatform {
 
   /// `callEvent` from the native side: `{action, id, on?, digits?, reason?}`.
   Future<void> _fromSystem(MethodCall call) async {
+    if (call.method == 'pictureInPicture') {
+      final on = (call.arguments as Map?)?['on'];
+      if (on is bool) _pip.add(on);
+      return;
+    }
     if (call.method == 'network') {
       final cellular = (call.arguments as Map?)?['cellular'];
       if (cellular is bool) _cellular.add(cellular);

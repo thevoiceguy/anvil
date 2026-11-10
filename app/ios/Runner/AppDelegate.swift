@@ -22,6 +22,15 @@ import UIKit
     return super.application(application, didFinishLaunchingWithOptions: launchOptions)
   }
 
+  /// The app's Flutter view, where picture-in-picture starts from.
+  static func appView() -> UIView? {
+    UIApplication.shared.connectedScenes
+      .compactMap { $0 as? UIWindowScene }
+      .flatMap { $0.windows }
+      .first { $0.isKeyWindow }?
+      .rootViewController?.view
+  }
+
   func didInitializeImplicitFlutterEngine(_ engineBridge: FlutterImplicitEngineBridge) {
     GeneratedPluginRegistrant.register(with: engineBridge.pluginRegistry)
     if let registrar = engineBridge.pluginRegistry.registrar(forPlugin: "AnvilVideo") {
@@ -60,6 +69,16 @@ import UIKit
           result(nil)
         case "audioRoutes": result(routes.current())
         case "cellular": result(network.cellular)
+        case "setPictureInPicture":
+          if #available(iOS 15.0, *) {
+            let enabled = args["enabled"] as? Bool ?? false
+            CallPictureInPicture.shared.set(
+              texture: enabled ? (args["texture"] as? NSNumber)?.int64Value : nil,
+              width: (args["width"] as? NSNumber)?.intValue ?? 16,
+              height: (args["height"] as? NSNumber)?.intValue ?? 9,
+              source: AppDelegate.appView())
+          }
+          result(nil)
         case "setAudioRoute":
           do {
             try routes.set(args["route"] as? String ?? "")

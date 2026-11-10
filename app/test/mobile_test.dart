@@ -3,7 +3,8 @@
 // system's call screen follows the phone's calls, and what the user does
 // there reaches the phone; and the camera stops while the app is out of
 // sight, and is asked for before a call first uses it; and the phone hears
-// when it is on cellular, where the user may keep video to Wi-Fi.
+// when it is on cellular, where the user may keep video to Wi-Fi; and a call
+// showing the other side's picture may go to picture-in-picture.
 
 import 'package:anvil/src/app.dart';
 import 'package:anvil/src/mobile/platform.dart';
@@ -353,5 +354,44 @@ void main() {
     await tester.pumpAndSettle();
     await go(tester, 'Settings');
     expect(find.byKey(const Key('wifiOnly')), findsNothing);
+  });
+
+  testWidgets('a call showing their picture may go to picture-in-picture', (
+    tester,
+  ) async {
+    tester.view.physicalSize = const Size(1000, 1400);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.reset);
+    final phone = FakePhone()
+      ..saved = const SignedInAccountFake()
+      ..seed = withVideo;
+    final mobile = FakeMobile();
+    await tester.pumpWidget(AnvilApp(phone: phone, mobile: mobile));
+    await tester.pumpAndSettle();
+    phone.ring('1002', video: true);
+    await tester.pumpAndSettle();
+    await tapKey(tester, 'answerVideo');
+    expect(mobile.pip, isNull, reason: 'no picture of theirs yet');
+
+    phone.tiles.sizes[7] = (width: 640, height: 360, frozen: false);
+    phone.streamIn(1, 7);
+    await tester.pumpAndSettle();
+    final pip = mobile.pip!;
+    expect((pip.width, pip.height), (640, 360));
+
+    // Android shrinks the window: only their picture shows.
+    mobile.pictureInPicture(true);
+    await tester.pumpAndSettle();
+    expect(find.byKey(const Key('pictureInPicture')), findsOneWidget);
+    mobile.pictureInPicture(false);
+    await tester.pumpAndSettle();
+    expect(find.byKey(const Key('pictureInPicture')), findsNothing);
+
+    // Their camera off: nothing for picture-in-picture to show.
+    phone.streamOut(1, 7);
+    await tester.pumpAndSettle();
+    expect(mobile.pip, isNull);
+    expect(mobile.log.last, 'pip off');
+    await tapKey(tester, 'hangup');
   });
 }

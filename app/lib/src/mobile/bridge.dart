@@ -14,6 +14,7 @@ import 'package:flutter/widgets.dart';
 import '../phone/phone_api.dart';
 import '../phone/phone_model.dart';
 import '../screens/calls.dart' show nameFor;
+import '../screens/video.dart' show VideoTile;
 import 'platform.dart';
 
 class MobileBridge extends StatefulWidget {
@@ -43,6 +44,10 @@ class _MobileBridgeState extends State<MobileBridge> {
   StreamSubscription<SystemCallEvent>? _events;
   StreamSubscription<AudioRoutes>? _routeChanges;
   StreamSubscription<bool>? _networkChanges;
+  StreamSubscription<bool>? _pipChanges;
+  Timer? _pipSize;
+  PictureInPicture? _pip;
+  final ValueNotifier<bool> _inPip = ValueNotifier(false);
   late final AppLifecycleListener _lifecycle;
   final Map<int, _Told> _told = {};
   final ValueNotifier<AudioRoutes?> _routes = ValueNotifier(null);
@@ -60,6 +65,11 @@ class _MobileBridgeState extends State<MobileBridge> {
     _routeChanges = mobile.audioRouteChanges.listen(_routed);
     // On cellular a call sends less video, or none (the user's setting).
     _networkChanges = mobile.cellularChanges.listen(_network);
+    // Picture-in-picture while a call shows the other side's picture.
+    _pipChanges = mobile.pictureInPictureChanges.listen(
+      (on) => _inPip.value = on,
+    );
+    VideoTile.showing.addListener(_pipFor);
     unawaited(
       mobile.cellular().then((on) {
         if (on != null) _network(on);
@@ -97,6 +107,10 @@ class _MobileBridgeState extends State<MobileBridge> {
     unawaited(_events?.cancel());
     unawaited(_routeChanges?.cancel());
     unawaited(_networkChanges?.cancel());
+    unawaited(_pipChanges?.cancel());
+    VideoTile.showing.removeListener(_pipFor);
+    _pipSize?.cancel();
+    _inPip.dispose();
     _routes.dispose();
     super.dispose();
   }
@@ -108,6 +122,7 @@ class _MobileBridgeState extends State<MobileBridge> {
     if (!mounted) return;
     _routes.value = routes;
     _proximityFor();
+    _pipFor();
   }
 
   /// Where the audio goes changes with the calls (Telecom's routes come
@@ -115,6 +130,37 @@ class _MobileBridgeState extends State<MobileBridge> {
   Future<void> _askRoutes() async {
     final routes = await mobile.audioRoutes();
     if (mounted && routes != null) _routed(routes);
+  }
+
+  /// Picture-in-picture is allowed while a call is up, not held, and shows
+  /// the other side's picture: their first stream, on the texture the
+  /// call's stage shows it on, at its size (read again each second while
+  /// allowed, as the network moves it).
+  void _pipFor() {
+    if (!mounted) return;
+    final call = model.snapshot.calls
+        .where((c) => c.isConnected && !c.held && c.streams.isNotEmpty)
+        .firstOrNull;
+    final stream = call?.streams.first;
+    final texture = stream == null ? null : VideoTile.showing.value[stream];
+    PictureInPicture? pip;
+    if (stream != null && texture != null) {
+      final info = model.api.videoTiles.info(stream);
+      pip = PictureInPicture(
+        texture: texture,
+        width: info?.width ?? 16,
+        height: info?.height ?? 9,
+      );
+    }
+    if (pip == null) {
+      _pipSize?.cancel();
+      _pipSize = null;
+    } else {
+      _pipSize ??= Timer.periodic(const Duration(seconds: 1), (_) => _pipFor());
+    }
+    if (pip == _pip) return;
+    _pip = pip;
+    unawaited(mobile.setPictureInPicture(pip).catchError((Object _) {}));
   }
 
   /// The screen goes off at the ear: a call up or being placed, its audio
@@ -146,6 +192,7 @@ class _MobileBridgeState extends State<MobileBridge> {
             c.id: _Told(connected: c.isConnected, held: c.held),
         });
       _proximityFor();
+      _pipFor();
       return;
     }
     for (final call in calls.values) {
@@ -181,6 +228,7 @@ class _MobileBridgeState extends State<MobileBridge> {
       }
     }
     _proximityFor();
+    _pipFor();
   }
 
   PhoneCall? _call(int id) =>
@@ -229,8 +277,26 @@ class _MobileBridgeState extends State<MobileBridge> {
   }
 
   @override
-  Widget build(BuildContext context) =>
-      MobileScope(routes: _routes, setRoute: _setRoute, child: widget.child);
+  Widget build(BuildContext context) => MobileScope(
+    routes: _routes,
+    setRoute: _setRoute,
+    // In Android's picture-in-picture the app's window shows only the
+    // other side's picture; the app stays beneath, its tiles still open.
+    child: ValueListenableBuilder(
+      valueListenable: _inPip,
+      builder: (context, inPip, child) {
+        final pip = _pip;
+        return Stack(
+          fit: StackFit.expand,
+          children: [
+            child!,
+            if (inPip && pip != null) _PipView(pip: pip),
+          ],
+        );
+      },
+      child: widget.child,
+    ),
+  );
 }
 
 /// The phone around the app, for a screen: where the call's audio goes and
@@ -252,4 +318,23 @@ class MobileScope extends InheritedWidget {
   @override
   bool updateShouldNotify(MobileScope old) =>
       routes != old.routes || setRoute != old.setRoute;
+}
+
+/// The other side's picture, filling the window (picture-in-picture).
+class _PipView extends StatelessWidget {
+  const _PipView({required this.pip});
+  final PictureInPicture pip;
+
+  @override
+  Widget build(BuildContext context) => ColoredBox(
+    key: const Key('pictureInPicture'),
+    color: const Color(0xFF000000),
+    child: FittedBox(
+      child: SizedBox(
+        width: pip.width.toDouble(),
+        height: pip.height.toDouble(),
+        child: Texture(textureId: pip.texture),
+      ),
+    ),
+  );
 }

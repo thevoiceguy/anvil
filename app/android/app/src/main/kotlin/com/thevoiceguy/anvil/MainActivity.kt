@@ -1,11 +1,14 @@
 package com.thevoiceguy.anvil
 
 import android.Manifest
+import android.app.PictureInPictureParams
 import android.content.Intent
 import android.content.pm.ApplicationInfo
 import android.content.pm.PackageManager
+import android.content.res.Configuration
 import android.os.Build
 import android.os.Bundle
+import android.util.Rational
 import io.flutter.embedding.android.FlutterActivity
 import io.flutter.embedding.engine.FlutterEngine
 import io.flutter.plugin.common.MethodCall
@@ -15,6 +18,9 @@ class MainActivity : FlutterActivity() {
     private var microphoneAnswer: MethodChannel.Result? = null
     private var cameraAnswer: MethodChannel.Result? = null
     private var network: NetworkWatch? = null
+
+    /** Picture-in-picture as allowed now (a call shows their picture). */
+    private var pip: PictureInPictureParams? = null
 
     override fun onCreate(savedInstanceState: Bundle?) {
         // Before Dart opens the library: its audio needs the JVM. The
@@ -86,6 +92,10 @@ class MainActivity : FlutterActivity() {
                 }
                 "audioRoutes" -> result.success(CallSystem.audioRoutes())
                 "cellular" -> result.success(network?.cellular())
+                "setPictureInPicture" -> {
+                    setPictureInPicture(call)
+                    result.success(null)
+                }
                 "setAudioRoute" -> {
                     CallSystem.setAudioRoute(call.text("route"))
                     result.success(null)
@@ -120,6 +130,40 @@ class MainActivity : FlutterActivity() {
         network?.stop()
         network = null
         super.cleanUpFlutterEngine(flutterEngine)
+    }
+
+    /**
+     * Picture-in-picture allowed with the picture's shape, or not: from
+     * Android 12 the window shrinks by itself when the user leaves the app;
+     * before, when they leave it ([onUserLeaveHint]).
+     */
+    private fun setPictureInPicture(call: MethodCall) {
+        if (!packageManager.hasSystemFeature(PackageManager.FEATURE_PICTURE_IN_PICTURE)) return
+        val enabled = call.argument<Boolean>("enabled") == true
+        val width = (call.argument<Number>("width") ?: 16).toInt().coerceAtLeast(1)
+        val height = (call.argument<Number>("height") ?: 9).toInt().coerceAtLeast(1)
+        // Android takes shapes from 1:2.39 to 2.39:1.
+        val ratio = (width.toDouble() / height).coerceIn(1 / 2.39 + 0.001, 2.39 - 0.001)
+        val builder = PictureInPictureParams.Builder()
+            .setAspectRatio(Rational((ratio * 1000).toInt(), 1000))
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+            builder.setAutoEnterEnabled(enabled).setSeamlessResizeEnabled(true)
+        }
+        val params = builder.build()
+        setPictureInPictureParams(params)
+        pip = if (enabled) params else null
+    }
+
+    override fun onUserLeaveHint() {
+        super.onUserLeaveHint()
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.S) {
+            pip?.let { enterPictureInPictureMode(it) }
+        }
+    }
+
+    override fun onPictureInPictureModeChanged(inPictureInPicture: Boolean, newConfig: Configuration) {
+        super.onPictureInPictureModeChanged(inPictureInPicture, newConfig)
+        CallSystem.channel?.invokeMethod("pictureInPicture", mapOf("on" to inPictureInPicture))
     }
 
     /** Dart's ints arrive as Integer or Long by size. */

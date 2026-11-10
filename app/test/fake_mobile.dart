@@ -19,6 +19,24 @@ class FakeMobile implements MobilePlatform {
   final _events = StreamController<SystemCallEvent>.broadcast();
   final _routes = StreamController<AudioRoutes>.broadcast();
   final _cellular = StreamController<bool>.broadcast();
+  final _pip = StreamController<bool>.broadcast();
+
+  /// What picture-in-picture is allowed to show now.
+  PictureInPicture? pip;
+
+  @override
+  Future<void> setPictureInPicture(PictureInPicture? pip) async {
+    this.pip = pip;
+    log.add(
+      pip == null ? 'pip off' : 'pip ${pip.texture} ${pip.width}x${pip.height}',
+    );
+  }
+
+  /// The system puts the app's window in picture-in-picture, or back.
+  void pictureInPicture(bool on) => _pip.add(on);
+
+  @override
+  Stream<bool> get pictureInPictureChanges => _pip.stream;
 
   /// The phone's network: set by a test, changed with [network].
   bool? onCellular;
