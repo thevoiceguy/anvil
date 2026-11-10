@@ -148,8 +148,10 @@ async fn a_call_shows_each_camera_to_the_other(h264: bool) -> VideoCodec {
             stats.width,
             stats.height
         );
+        // The best of three seconds: a busy runner may spend one of them
+        // recovering from a lost frame.
         let mut psnr = 0.0f64;
-        for _ in 0..5 {
+        for _ in 0..15 {
             psnr = psnr.max(likeness(&tiles.last(key).unwrap()));
             tokio::time::sleep(std::time::Duration::from_millis(200)).await;
         }

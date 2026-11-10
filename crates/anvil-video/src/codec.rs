@@ -116,6 +116,7 @@ impl Codecs for SoftwareCodecs {
 mod tests {
     use super::*;
     use crate::picture::Picture;
+    use std::collections::VecDeque;
 
     /// OpenH264 for the tests: `ANVIL_OPENH264_DIR`, where it was fetched
     /// (CI sets it, so there it must be there).
@@ -130,28 +131,65 @@ mod tests {
     /// picture close to what was sent; keyframes when asked; a new size a
     /// new keyframe.
     pub(crate) fn round_trip(codecs: &dyn Codecs, codec: VideoCodec) {
+        round_trip_late(codecs, codec, 0);
+    }
+
+    /// As [`round_trip`], an asked-for keyframe coming up to `late`
+    /// pictures after it was asked for (MediaCodec may take a request a
+    /// picture late).
+    pub(crate) fn round_trip_late(codecs: &dyn Codecs, codec: VideoCodec, late: u32) {
         let mut enc = codecs.encoder(codec, 1200, 30).unwrap();
         let mut dec = codecs.decoder(codec).unwrap();
         let mut keyframes = Vec::new();
-        let mut worst = f64::MAX;
+        let (mut worst, mut worst_at) = (f64::MAX, 0);
+        // The pictures sent lately: a codec running behind hands back an
+        // earlier one's frame, which is judged against that picture (when
+        // it came is the keyframes' to say).
+        let mut recent: VecDeque<Picture> = VecDeque::new();
         for n in 0..40u32 {
             let size = if n < 30 { (640, 360) } else { (320, 180) };
             let sent = Picture::pattern(size.0, size.1, n);
+            if n == 30 {
+                recent.clear();
+            }
+            recent.push_back(sent.clone());
+            if recent.len() > 4 {
+                recent.pop_front();
+            }
             if n == 20 {
                 enc.set_rate(600, 30);
             }
-            let Some(e) = enc.encode(&sent, n == 10).unwrap() else {
+            let encoded = enc.encode(&sent, n == 10);
+            let Some(e) = encoded.unwrap_or_else(|e| panic!("{codec:?} picture {n}: {e}")) else {
                 continue;
             };
             if e.keyframe {
                 keyframes.push(n);
             }
-            let got = dec.decode(&e.data).unwrap().expect("a picture");
+            let got = dec
+                .decode(&e.data)
+                .unwrap_or_else(|e| panic!("{codec:?} picture {n}: {e}"))
+                .expect("a picture");
             assert_eq!((got.width, got.height), size);
-            worst = worst.min(got.psnr(&sent));
+            let likeness = recent.iter().map(|p| got.psnr(p)).fold(0.0, f64::max);
+            if likeness < worst {
+                (worst, worst_at) = (likeness, n);
+            }
         }
-        assert_eq!(keyframes, [0, 10, 30], "{codec:?}");
-        assert!(worst > 28.0, "{codec:?}: worst PSNR {worst:.1} dB");
+        assert_eq!(keyframes.len(), 3, "{codec:?}: {keyframes:?}");
+        assert_eq!(
+            (keyframes[0], keyframes[2]),
+            (0, 30),
+            "{codec:?}: {keyframes:?}"
+        );
+        assert!(
+            (10..=10 + late).contains(&keyframes[1]),
+            "{codec:?}: {keyframes:?}"
+        );
+        assert!(
+            worst > 28.0,
+            "{codec:?}: worst PSNR {worst:.1} dB at picture {worst_at}"
+        );
     }
 
     #[cfg(target_os = "linux")]
@@ -226,6 +264,39 @@ mod tests {
             .collect();
         assert!(
             types.contains(&7) && types.contains(&8) && types.contains(&5),
+            "{types:?}"
+        );
+    }
+
+    #[cfg(target_os = "android")]
+    #[test]
+    fn h264_and_vp8_round_trip_the_pattern_through_mediacodec() {
+        crate::binder_threads();
+        let codecs = crate::mc::McCodecs;
+        let caps = codecs.caps();
+        for codec in [VideoCodec::H264, VideoCodec::Vp8] {
+            assert!(
+                caps.iter()
+                    .any(|c| c.codec == codec && c.encode && c.decode),
+                "{codec:?} in {caps:?}"
+            );
+            // The emulator's encoder is software, slow and uneven: its
+            // frames come out pictures behind, by a different count each
+            // run. The keyframe asked for at 10 must come before the new
+            // size's at 30; how soon is a phone's hardware's to say.
+            round_trip_late(&codecs, codec, 19);
+        }
+        // Each IDR carries its parameter sets (the core needs them).
+        let mut enc = codecs.encoder(VideoCodec::H264, 800, 30).unwrap();
+        let e = enc
+            .encode(&Picture::pattern(320, 180, 0), true)
+            .unwrap()
+            .expect("a frame for the first picture");
+        let types: Vec<u8> = openh264::nal_units(&e.data)
+            .map(|nal| nal[nal.iter().position(|&b| b == 1).unwrap() + 1] & 0x1F)
+            .collect();
+        assert!(
+            types.starts_with(&[7, 8]) && types.contains(&5),
             "{types:?}"
         );
     }

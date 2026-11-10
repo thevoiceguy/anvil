@@ -28,7 +28,7 @@ anvil/
 ├── crates/
 │   ├── anvil-core    # softphone logic, SIP↔media orchestration, public API
 │   ├── anvil-audio   # cpal I/O + AEC/NS/AGC + device enumeration
-│   ├── anvil-video   # the desktop's video host: cameras, codecs, tiles
+│   ├── anvil-video   # the video host: cameras, codecs, tiles (desktop and phone)
 │   ├── anvil-brand   # FCP brand provisioning (HTTP fetch, fs cache)
 │   ├── anvil-codec   # Opus (forge-media already provides G.711, G.722)
 │   └── anvil-ffi     # C ABI for mobile / UI hosts
@@ -375,6 +375,20 @@ wide-angle ones by discovery session, the front one first and by default; pictur
 come upright for a phone held upright (the output's orientation), and the capture
 session does not configure the app's audio session, which is the call's (CallKit's).
 A limit is a size either way up, so an upright picture fits 640×360 as 360×640.
+On Android, H.264 and VP8 go through MediaCodec (`mc.rs`, the phone's own codecs,
+in hardware where it has them, so nothing is fetched): the encoder fed from buffers in
+NV12 or planar 4:2:0, whichever it takes, CBR, baseline, real time, a keyframe by
+`request-sync`, and the parameter sets it gives once put before each keyframe; the
+decoder draws into an `AImageReader`, whose images say their own layout, so no
+vendor's buffer layout is guessed, and a new reader is made when the stream's size
+changes. Format keys are written as strings so the library loads on Android 8. Its
+cameras come through the NDK's Camera2 (`ndkcam.rs`): front, back, then external,
+the front one by default; YUV_420_888 into an `AImageReader` at the smallest size that
+covers the one asked, at a frame rate range that reaches the call's and goes lowest;
+each picture turned upright by the sensor's orientation. Access is the app's camera
+permission; without it a camera fails to open, saying where to allow it. CI runs
+these tests on the emulator as a bare program, starting binder's threads for it as an
+app's runtime would.
 `anvil-cli
 --video camera` films with the computer's camera, `--video pattern` a moving test
 pattern through the same codecs, and `--video-snapshot` writes the last picture

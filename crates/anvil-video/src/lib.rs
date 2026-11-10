@@ -18,17 +18,24 @@
 //! **Linux**: V4L2 cameras; VP8 through libvpx; H.264 through Cisco's
 //! OpenH264, fetched at first use ([`openh264_fetch`]). **macOS**:
 //! AVFoundation cameras; H.264 through VideoToolbox. **Windows**: Media
-//! Foundation cameras; H.264 through Media Foundation.
+//! Foundation cameras; H.264 through Media Foundation. **Android**:
+//! Camera2 cameras through the NDK; H.264 and VP8 through MediaCodec.
 
+#[cfg(target_os = "android")]
+mod aimage;
 #[cfg(target_vendor = "apple")]
 pub mod avf;
 pub mod camera;
 pub mod codec;
 mod h264;
+#[cfg(target_os = "android")]
+mod mc;
 #[cfg(windows)]
 mod mf;
 #[cfg(windows)]
 pub mod mfcam;
+#[cfg(target_os = "android")]
+pub mod ndkcam;
 pub mod openh264_fetch;
 pub mod picture;
 pub mod png;
@@ -105,7 +112,13 @@ impl DesktopVideoHost {
             let _ = openh264_dir;
             (Arc::new(mf::MfCodecs), None)
         };
-        #[cfg(not(any(target_vendor = "apple", windows)))]
+        // Android: the phone's own codecs, H.264 and VP8.
+        #[cfg(target_os = "android")]
+        let (codecs, software): (Arc<dyn Codecs>, _) = {
+            let _ = openh264_dir;
+            (Arc::new(mc::McCodecs), None)
+        };
+        #[cfg(not(any(target_vendor = "apple", windows, target_os = "android")))]
         let (codecs, software): (Arc<dyn Codecs>, _) = {
             let software = SoftwareCodecs::with_openh264(openh264_fetch::installed(openh264_dir));
             (Arc::new(software.clone()), Some(software))
@@ -162,7 +175,14 @@ pub fn platform_cameras() -> Box<dyn Cameras> {
     let cameras = Box::new(avf::AvfCameras);
     #[cfg(windows)]
     let cameras = Box::new(mfcam::MfCameras);
-    #[cfg(not(any(target_os = "linux", target_vendor = "apple", windows)))]
+    #[cfg(target_os = "android")]
+    let cameras = Box::new(ndkcam::NdkCameras);
+    #[cfg(not(any(
+        target_os = "linux",
+        target_vendor = "apple",
+        windows,
+        target_os = "android"
+    )))]
     let cameras = Box::new(NoCameras);
     cameras
 }
@@ -243,6 +263,26 @@ impl VideoHost for DesktopVideoHost {
             self.tiles.clone(),
         )))
     }
+}
+
+/// A test is a bare program, not an app: nothing has started the binder
+/// threads that a camera's and a decoder's pictures arrive on, so this
+/// does, as an app's runtime would (the call is not in the NDK's headers).
+#[cfg(all(test, target_os = "android"))]
+pub(crate) fn binder_threads() {
+    static ONCE: std::sync::Once = std::sync::Once::new();
+    ONCE.call_once(|| {
+        // SAFETY: the system's binder library; the symbol takes nothing
+        // and returns nothing.
+        unsafe {
+            let lib = libloading::Library::new("libbinder_ndk.so").expect("libbinder_ndk");
+            let start: libloading::Symbol<unsafe extern "C" fn()> = lib
+                .get(b"ABinderProcess_startThreadPool\0")
+                .expect("ABinderProcess_startThreadPool");
+            start();
+            std::mem::forget(lib);
+        }
+    });
 }
 
 #[cfg(all(test, target_os = "linux"))]
