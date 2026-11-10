@@ -752,10 +752,10 @@ FCP's `docs/CALL_DIAGNOSTICS.md` phase 5 (FCP v0.25.491 takes them):
 
 ### Video calls (softphone video A2b)
 FCP's `docs/SOFTPHONE_VIDEO.md` §2.5, on the desktop (Linux, macOS and
-Windows). On a Mac the system asks for the camera the first time a call sends
-video; the call goes on meanwhile, and a camera refused leaves it receiving only.
-On Windows camera access is the Privacy setting, and a refused camera does the
-same:
+Windows) and the iPhone (A3a; Android follows). On a Mac and an iPhone the
+system asks for the camera the first time a call sends video; the call goes on
+meanwhile, and a camera refused leaves it receiving only. On Windows camera
+access is the Privacy setting, and a refused camera does the same:
 - **Placing.** The keypad has **Video call** beside **Call** where the
   device has video (a camera need not be there: the far end's picture
   shows all the same).
@@ -773,13 +773,23 @@ same:
   chosen) and, on Linux, **H.264**: Cisco's OpenH264, fetched from Cisco when
   first allowed, with the notice Cisco's terms ask for; off, it is neither
   fetched nor offered, and calls use VP8.
+- **On an iPhone.** The cameras are the front and back ones (front by
+  default; **Camera** switches). CallKit shows a video call as one. The
+  camera stops while the app is out of sight and starts again on its return;
+  a video call answered at the lock screen starts our camera when the app is
+  opened.
 - **Pictures never reach Dart.** Each tile is a texture the runner's plugin
   fills from Rust's video threads (`ARCHITECTURE.md` §5a).
 - **Proved by:**
   - `anvil-app`'s `tests/video.rs`: two phones with the synthetic host — a
     video call answered with audio only, the camera turned on (the far end
     asked), both ways, the camera chosen (a missing one refused), turned
-    off, H.264 allowed and not; a phone without video places audio calls.
+    off, H.264 allowed and not; a phone without video places audio calls;
+    a phone in the background answering without its camera and starting it
+    on its return, and stopping a camera that was sending.
+  - The bridge's `system.rs`: a video call told to the system's screen as
+    one, and as its video changes. `test/mobile_test.dart`: the app hidden
+    and shown tells the phone.
   - `anvil-video`'s camera switch: the chosen camera opened, switched while
     sending from a keyframe, one that will not open leaving the one there was.
   - Widget tests (`test/video_test.dart`) for the keypad, the incoming card,

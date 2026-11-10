@@ -348,6 +348,11 @@ class FakePhone implements PhoneApi {
   }
 
   @override
+  Future<void> setBackground(bool on) async {
+    log.add('background ${on ? 'on' : 'off'}');
+  }
+
+  @override
   Future<void> allowH264(bool on) async {
     log.add('h264 ${on ? 'on' : 'off'}');
     set(

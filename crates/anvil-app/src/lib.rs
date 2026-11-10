@@ -133,6 +133,9 @@ struct Inner {
     /// capture is uploaded under.
     device_id: Mutex<Option<String>>,
     openh264: Option<Arc<dyn OpenH264>>,
+    /// In the background (a phone's app), with the calls whose camera
+    /// starts again on its return; `None` in the foreground.
+    background: Mutex<Option<Vec<u64>>>,
 }
 
 impl Phone {
@@ -231,6 +234,7 @@ impl Phone {
             fallback_brand: cfg.fallback_brand,
             device_id: Mutex::new(None),
             openh264: cfg.openh264,
+            background: Mutex::new(None),
         });
         if let Some(fallback) = &inner.fallback_brand {
             inner.set_brand(fallback);
@@ -313,6 +317,7 @@ impl Phone {
                     .await?
                     .place_call_from_with_media(&to, from.as_deref(), media)
                     .await?;
+                self.camera_later(call.0, video).await;
                 self.update_call(
                     call.0,
                     |c| {
@@ -334,7 +339,8 @@ impl Phone {
                 let id = self.pick(call, "no call to answer", |c| {
                     c.direction == Direction::Incoming && c.state == CallState::Ringing
                 })?;
-                let media = self.answer_media(id, video).await?;
+                let video = self.answer_wants_video(id, video);
+                let media = self.media_for(video).await?;
                 // Quiet at once, not when the call is set up.
                 self.inner.stop_sound();
                 self.hold_the_others(Some(id)).await?;
@@ -346,6 +352,7 @@ impl Phone {
                     .map(|_| ());
                 if answered.is_ok() {
                     self.update_call(id, |c| c.video.camera = media.video, || outgoing(id));
+                    self.camera_later(id, video).await;
                 }
                 self.inner.sound().await;
                 answered?;
@@ -1051,6 +1058,10 @@ impl Phone {
             }
             Command::H264 { on } => {
                 self.allow_h264(on).await?;
+                Ok(Response::ok())
+            }
+            Command::Background { on } => {
+                self.set_background(on).await;
                 Ok(Response::ok())
             }
             Command::Status => Ok(Response {

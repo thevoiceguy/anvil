@@ -183,7 +183,7 @@ mod tests {
         );
     }
 
-    #[cfg(target_os = "macos")]
+    #[cfg(target_vendor = "apple")]
     #[test]
     fn h264_round_trips_the_pattern_through_videotoolbox() {
         round_trip(&crate::vt::VtCodecs, VideoCodec::H264);

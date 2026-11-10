@@ -1,7 +1,8 @@
 //! Video calls through the phone, two phones and no server, with the
 //! core's synthetic video host: a video call answered with audio only,
 //! the camera turned on later, the camera chosen, and H.264 allowed and
-//! not (FCP's `docs/SOFTPHONE_VIDEO.md` §2.5).
+//! not, and the camera stopped while a phone's app is in the background
+//! (FCP's `docs/SOFTPHONE_VIDEO.md` §2.5).
 
 use std::future::Future;
 use std::pin::Pin;
@@ -325,6 +326,87 @@ async fn without_a_video_host_a_video_call_is_an_audio_call() {
             .any(|c| c.state == CallState::Ringing && !c.video.offered)
     })
     .await;
+    alice.shutdown().await;
+    bob.shutdown().await;
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_phone_in_the_background_stops_its_camera_until_it_comes_back() {
+    log();
+    let alice = phone(
+        "alice",
+        "127.0.0.64",
+        Some(SyntheticVideoHost::default()),
+        None,
+    )
+    .await;
+    let bob = phone(
+        "bob",
+        "127.0.0.65",
+        Some(SyntheticVideoHost::default()),
+        None,
+    )
+    .await;
+    let run = |p: &Phone, line: &str| {
+        let (p, command) = (p.clone(), Command::parse_line(line).unwrap());
+        async move { p.execute(command).await.unwrap() }
+    };
+
+    // Bob's app is in the background when Alice's video call rings (it is
+    // answered at the lock screen): answered without his camera.
+    run(&bob, "background on").await;
+    run(&alice, &format!("vcall sip:bob@{}", bob.sip_address())).await;
+    until(&bob, "Bob rings with video", |s| {
+        s.calls
+            .iter()
+            .any(|c| c.state == CallState::Ringing && c.video.offered)
+    })
+    .await;
+    run(&bob, "answer").await;
+    until(&bob, "the call is up", |s| {
+        s.calls.iter().any(|c| c.state == CallState::Connected)
+    })
+    .await;
+    assert!(!call(&bob).video.camera, "{:?}", call(&bob));
+
+    // Bob comes back: his camera starts, and each sees the other once
+    // Alice turns hers on again.
+    run(&bob, "background off").await;
+    until(&bob, "Bob sends", |s| {
+        let c = &s.calls[0];
+        c.video.camera && c.video.sending.is_some()
+    })
+    .await;
+    until(&alice, "Alice sees Bob", |s| {
+        s.calls[0].video.streams.len() == 1
+    })
+    .await;
+    run(&alice, "video on").await;
+    until(&bob, "Bob sees Alice", |s| {
+        s.calls[0].video.streams.len() == 1
+    })
+    .await;
+
+    // Alice's app goes to the background: her camera stops, Bob's tile of
+    // her goes; back, it starts again.
+    run(&alice, "background on").await;
+    assert!(!call(&alice).video.camera);
+    until(&bob, "Alice's picture goes", |s| {
+        s.calls[0].video.streams.is_empty()
+    })
+    .await;
+    run(&alice, "background off").await;
+    until(&alice, "Alice sends again", |s| {
+        s.calls[0].video.camera && s.calls[0].video.sending.is_some()
+    })
+    .await;
+    until(&bob, "Bob sees Alice again", |s| {
+        s.calls[0].video.streams.len() == 1
+    })
+    .await;
+
+    run(&alice, "hangup").await;
+    until(&bob, "the call ends", |s| s.calls.is_empty()).await;
     alice.shutdown().await;
     bob.shutdown().await;
 }
