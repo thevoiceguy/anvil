@@ -192,14 +192,14 @@ impl Codec {
         wait: Duration,
         pts_us: u64,
         fill: impl FnOnce(&mut [u8]) -> usize,
-    ) -> Result<(), String> {
+    ) -> Result<bool, String> {
         // SAFETY: plain calls on a started codec; the buffer is the codec's
         // until queued, and written within its size.
         unsafe {
             let index =
                 ndk_sys::AMediaCodec_dequeueInputBuffer(self.ptr(), wait.as_micros() as i64);
             if index < 0 {
-                return Err("the codec has no room".into());
+                return Ok(false);
             }
             let index = index as usize;
             let mut size = 0;
@@ -212,6 +212,7 @@ impl Codec {
                 "queue",
                 ndk_sys::AMediaCodec_queueInputBuffer(self.ptr(), index, 0, n, pts_us, 0),
             )
+            .map(|()| true)
         }
     }
 
@@ -435,13 +436,21 @@ impl Encoder for McEncoder {
         layout(picture, *color, &mut self.input);
         let pts = self.pts();
         let input = &self.input;
-        codec.queue(WAIT, pts, |buf| {
+        let wait = if self.first { FIRST_WAIT } else { WAIT };
+        let queued = codec.queue(wait, pts, |buf| {
             let n = input.len().min(buf.len());
             buf[..n].copy_from_slice(&input[..n]);
             n
         })?;
+        if !queued {
+            // Busy: this picture is let go, as a camera's would be; a
+            // keyframe asked for comes with the next.
+            tracing::debug!("the encoder is busy; a picture dropped");
+            self.drain(pts, Duration::ZERO)?;
+            return Ok(self.out.pop_front());
+        }
         self.n += 1;
-        self.drain(pts, if self.first { FIRST_WAIT } else { WAIT })?;
+        self.drain(pts, wait)?;
         self.first &= self.out.is_empty();
         Ok(self.out.pop_front())
     }
@@ -528,11 +537,13 @@ impl Decoder for McDecoder {
     fn decode(&mut self, data: &[u8]) -> Result<Option<Picture>, String> {
         let pts = self.n * 33_333;
         self.n += 1;
-        self.codec.queue(WAIT, pts, |buf| {
+        if !self.codec.queue(WAIT, pts, |buf| {
             let n = data.len().min(buf.len());
             buf[..n].copy_from_slice(&data[..n]);
             n
-        })?;
+        })? {
+            return Err("the decoder has no room".into());
+        }
         let until = Instant::now() + WAIT;
         let mut drawn = false;
         loop {

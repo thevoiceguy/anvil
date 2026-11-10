@@ -147,13 +147,17 @@ mod tests {
             if n == 20 {
                 enc.set_rate(600, 30);
             }
-            let Some(e) = enc.encode(&sent, n == 10).unwrap() else {
+            let encoded = enc.encode(&sent, n == 10);
+            let Some(e) = encoded.unwrap_or_else(|e| panic!("{codec:?} picture {n}: {e}")) else {
                 continue;
             };
             if e.keyframe {
                 keyframes.push(n);
             }
-            let got = dec.decode(&e.data).unwrap().expect("a picture");
+            let got = dec
+                .decode(&e.data)
+                .unwrap_or_else(|e| panic!("{codec:?} picture {n}: {e}"))
+                .expect("a picture");
             assert_eq!((got.width, got.height), size);
             worst = worst.min(got.psnr(&sent));
         }
