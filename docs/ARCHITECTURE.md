@@ -369,7 +369,12 @@ by device link with their friendly names, read synchronously through a source re
 whose video processing turns whatever the camera sends (YUY2, MJPEG, NV12) into NV12
 at the camera's largest size not above the one asked. Windows asks nothing at the
 call: access is the user's setting (Privacy & security → Camera), and a camera it
-refuses fails to open, saying where to allow it.
+refuses fails to open, saying where to allow it. On an iPhone the Mac's code serves
+(`vt.rs`, `avf.rs`; the app's bridge links them on iOS): the cameras are the built-in
+wide-angle ones by discovery session, the front one first and by default; pictures
+come upright for a phone held upright (the output's orientation), and the capture
+session does not configure the app's audio session, which is the call's (CallKit's).
+A limit is a size either way up, so an upright picture fits 640×360 as 360×640.
 On Android, H.264 and VP8 go through MediaCodec (`mc.rs`, the phone's own codecs,
 in hardware where it has them, so nothing is fetched): the encoder fed from buffers in
 NV12 or planar 4:2:0, whichever it takes, CBR, baseline, real time, a keyframe by
@@ -396,11 +401,12 @@ packets until it has latched).
 
 **The app** shows video on Flutter textures, and pictures never cross into Dart. The
 runner's texture plugin (`linux/runner/video_texture.cc`, `VideoTextures` in
-`macos/Runner/MainFlutterWindow.swift`, or `windows/runner/video_texture.cpp`, over
+`macos/Runner/MainFlutterWindow.swift` and `ios/Runner/VideoTextures.swift`, or
+`windows/runner/video_texture.cpp`, over
 `anvil/video`) makes a pixel-buffer
 texture and hands Dart its id, the C function that fills it and the
 texture's address; Dart hands those to the bridge (`attach_tile`), whose `Renderer`
-converts each picture to RGBA (BGRA, Core Video's order, on macOS) and calls the function on the host's thread. Detaching
+converts each picture to RGBA (BGRA, Core Video's order, on macOS and iOS) and calls the function on the host's thread. Detaching
 takes the renderer's lock, so the function is never called once `detach_tile`
 returns, and only then is the texture disposed of. `anvil-app` keeps each call's
 video (offered, our camera, our stream, the streams coming in, the far end asking)
@@ -410,6 +416,17 @@ new one opened, a keyframe) and opens the chosen one for each new send. The chos
 camera and whether H.264 is allowed are kept with the phone's settings; with H.264
 off, OpenH264 is neither fetched nor offered. libvpx is linked statically where its
 archive is installed, so the packages need no libvpx of their own.
+
+On a phone the camera is the app's only while it is seen: the app tells the phone
+when it is hidden and shown (`background on|off`). Hidden, every call sending our
+camera stops sending it (a re-INVITE) and is remembered, and a video call placed or
+answered meanwhile (at the lock screen) goes without our camera; shown, each
+remembered call still up and not held starts it again. The bridge keeps the last
+word for a phone started later and assumes a phone's app hidden until told, as a push
+starts the phone with nothing on the screen. The system's call screen hears a call's
+video with the call (`video` on `incoming` and `outgoing`) and as it changes
+(`video`): ringing in, as it offers; else while either side's picture is in it.
+CallKit shows it (`supportsVideo`, `hasVideo`, a start action's `isVideo`).
 
 ---
 

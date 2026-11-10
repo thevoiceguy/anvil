@@ -436,6 +436,9 @@ class RustPhone implements PhoneApi {
   Future<void> allowH264(bool on) => rust_video.allowH264(on_: on);
 
   @override
+  Future<void> setBackground(bool on) => rust_video.setBackground(on_: on);
+
+  @override
   final VideoTiles videoTiles = TextureTiles();
 
   @override

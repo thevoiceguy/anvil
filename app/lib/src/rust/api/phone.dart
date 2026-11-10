@@ -7,7 +7,7 @@ import '../frb_generated.dart';
 
 import 'package:flutter_rust_bridge/flutter_rust_bridge_for_generated.dart';
 
-// These functions are ignored because they are not marked as `pub`: `act`, `capture_mode_name`, `devices`, `direction`, `execute`, `kind_only`, `managed`, `on_runtime_pub`, `on_runtime`, `phone`, `place_of`, `registration`, `remember`, `run_command`, `runtime`, `set_push`, `this_install`, `wake`
+// These functions are ignored because they are not marked as `pub`: `act`, `capture_mode_name`, `devices`, `direction`, `execute`, `kind_only`, `managed`, `on_runtime_pub`, `on_runtime`, `phone`, `place_of`, `registration`, `remember`, `run_command`, `running`, `runtime`, `set_push`, `this_install`, `wake`
 
 /// This install's managed settings; an ordinary install's are all open.
 ManagedSettings managedSettings() =>

@@ -23,7 +23,7 @@
 
 #[cfg(target_os = "android")]
 mod aimage;
-#[cfg(target_os = "macos")]
+#[cfg(target_vendor = "apple")]
 pub mod avf;
 pub mod camera;
 pub mod codec;
@@ -46,7 +46,7 @@ pub mod tiles;
 pub mod v4l2;
 #[cfg(target_os = "linux")]
 mod vpx;
-#[cfg(target_os = "macos")]
+#[cfg(target_vendor = "apple")]
 mod vt;
 
 use std::path::{Path, PathBuf};
@@ -101,7 +101,7 @@ impl DesktopVideoHost {
     pub fn with_cameras(cameras: impl Cameras + 'static, openh264_dir: &Path) -> Self {
         // macOS: the system's own H.264 (VideoToolbox, in hardware where
         // the Mac has it), so nothing is fetched.
-        #[cfg(target_os = "macos")]
+        #[cfg(target_vendor = "apple")]
         let (codecs, software): (Arc<dyn Codecs>, _) = {
             let _ = openh264_dir;
             (Arc::new(vt::VtCodecs), None)
@@ -118,7 +118,7 @@ impl DesktopVideoHost {
             let _ = openh264_dir;
             (Arc::new(mc::McCodecs), None)
         };
-        #[cfg(not(any(target_os = "macos", windows, target_os = "android")))]
+        #[cfg(not(any(target_vendor = "apple", windows, target_os = "android")))]
         let (codecs, software): (Arc<dyn Codecs>, _) = {
             let software = SoftwareCodecs::with_openh264(openh264_fetch::installed(openh264_dir));
             (Arc::new(software.clone()), Some(software))
@@ -171,7 +171,7 @@ impl DesktopVideoHost {
 pub fn platform_cameras() -> Box<dyn Cameras> {
     #[cfg(target_os = "linux")]
     let cameras = Box::new(v4l2::V4l2Cameras);
-    #[cfg(target_os = "macos")]
+    #[cfg(target_vendor = "apple")]
     let cameras = Box::new(avf::AvfCameras);
     #[cfg(windows)]
     let cameras = Box::new(mfcam::MfCameras);
@@ -179,7 +179,7 @@ pub fn platform_cameras() -> Box<dyn Cameras> {
     let cameras = Box::new(ndkcam::NdkCameras);
     #[cfg(not(any(
         target_os = "linux",
-        target_os = "macos",
+        target_vendor = "apple",
         windows,
         target_os = "android"
     )))]

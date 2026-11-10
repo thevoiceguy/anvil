@@ -14,6 +14,7 @@
 		7884E8682EC3CC0700C636F2 /* SceneDelegate.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7884E8672EC3CC0400C636F2 /* SceneDelegate.swift */; };
 		A3A300012F00000000000001 /* PhoneLink.swift in Sources */ = {isa = PBXBuildFile; fileRef = A3A300012F00000000000002 /* PhoneLink.swift */; };
 		A3A300012F00000000000003 /* Push.swift in Sources */ = {isa = PBXBuildFile; fileRef = A3A300012F00000000000004 /* Push.swift */; };
+		A3A300012F00000000000006 /* VideoTextures.swift in Sources */ = {isa = PBXBuildFile; fileRef = A3A300012F00000000000007 /* VideoTextures.swift */; };
 		78A318202AECB46A00862997 /* FlutterGeneratedPluginSwiftPackage in Frameworks */ = {isa = PBXBuildFile; productRef = 78A3181F2AECB46A00862997 /* FlutterGeneratedPluginSwiftPackage */; };
 		97C146FC1CF9000F007C117D /* Main.storyboard in Resources */ = {isa = PBXBuildFile; fileRef = 97C146FA1CF9000F007C117D /* Main.storyboard */; };
 		97C146FE1CF9000F007C117D /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 97C146FD1CF9000F007C117D /* Assets.xcassets */; };
@@ -54,6 +55,7 @@
 		7884E8672EC3CC0400C636F2 /* SceneDelegate.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SceneDelegate.swift; sourceTree = "<group>"; };
 		A3A300012F00000000000002 /* PhoneLink.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PhoneLink.swift; sourceTree = "<group>"; };
 		A3A300012F00000000000004 /* Push.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Push.swift; sourceTree = "<group>"; };
+		A3A300012F00000000000007 /* VideoTextures.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VideoTextures.swift; sourceTree = "<group>"; };
 		A3A300012F00000000000005 /* Runner.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = Runner.entitlements; sourceTree = "<group>"; };
 		78E0A7A72DC9AD7400C4905E /* FlutterGeneratedPluginSwiftPackage */ = {isa = PBXFileReference; lastKnownFileType = wrapper; name = FlutterGeneratedPluginSwiftPackage; path = Flutter/ephemeral/Packages/FlutterGeneratedPluginSwiftPackage; sourceTree = "<group>"; };
 		7AFA3C8E1D35360C0083082E /* Release.xcconfig */ = {isa = PBXFileReference; lastKnownFileType = text.xcconfig; name = Release.xcconfig; path = Flutter/Release.xcconfig; sourceTree = "<group>"; };
@@ -130,6 +132,7 @@
 				7884E8672EC3CC0400C636F2 /* SceneDelegate.swift */,
 				A3A300012F00000000000002 /* PhoneLink.swift */,
 				A3A300012F00000000000004 /* Push.swift */,
+				A3A300012F00000000000007 /* VideoTextures.swift */,
 				74858FAD1ED2DC5600515810 /* Runner-Bridging-Header.h */,
 				A3A300012F00000000000005 /* Runner.entitlements */,
 			);
@@ -294,6 +297,7 @@
 				7884E8682EC3CC0700C636F2 /* SceneDelegate.swift in Sources */,
 				A3A300012F00000000000001 /* PhoneLink.swift in Sources */,
 				A3A300012F00000000000003 /* Push.swift in Sources */,
+				A3A300012F00000000000006 /* VideoTextures.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

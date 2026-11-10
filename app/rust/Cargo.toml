@@ -28,8 +28,9 @@ tracing-subscriber = { workspace = true }
 serde       = { workspace = true }
 serde_json  = { workspace = true }
 
-# A desktop's cameras and codecs (src/api/video.rs); a phone's come later.
-[target.'cfg(not(any(target_os = "android", target_os = "ios")))'.dependencies]
+# The cameras and codecs (src/api/video.rs): a desktop's and an iPhone's;
+# Android's come later.
+[target.'cfg(not(target_os = "android"))'.dependencies]
 anvil-video = { workspace = true }
 
 # A phone's model for the name it signs in under (src/device.rs).
