@@ -434,7 +434,7 @@ pub async fn start_phone(session_path: String) -> anyhow::Result<()> {
     let settings_path = std::path::Path::new(&session_path).with_file_name("settings.json");
     // Where the platform wakes this install, when it has said (`system.rs`).
     let push = crate::system::load_push(std::path::Path::new(&session_path));
-    #[cfg(not(any(target_os = "android", target_os = "ios")))]
+    #[cfg(not(target_os = "android"))]
     let session_path_for_video = session_path.clone();
     let phone = on_runtime(async move {
         let store = Arc::new(FileTokenStore::new(session_path));
