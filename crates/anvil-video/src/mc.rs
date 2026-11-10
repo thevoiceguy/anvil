@@ -416,6 +416,8 @@ impl Encoder for McEncoder {
             keyframe = false;
         }
         let (codec, color) = self.codec.as_ref().expect("made above");
+        // Codec2 takes the request at the picture after this one: a
+        // keyframe a frame late, which a far end that asked waits for.
         if keyframe {
             let p = Format::new();
             p.set(c"request-sync", 0);

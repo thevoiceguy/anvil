@@ -130,6 +130,13 @@ mod tests {
     /// picture close to what was sent; keyframes when asked; a new size a
     /// new keyframe.
     pub(crate) fn round_trip(codecs: &dyn Codecs, codec: VideoCodec) {
+        round_trip_late(codecs, codec, 0);
+    }
+
+    /// As [`round_trip`], an asked-for keyframe coming up to `late`
+    /// pictures after it was asked for (MediaCodec may take a request a
+    /// picture late).
+    pub(crate) fn round_trip_late(codecs: &dyn Codecs, codec: VideoCodec, late: u32) {
         let mut enc = codecs.encoder(codec, 1200, 30).unwrap();
         let mut dec = codecs.decoder(codec).unwrap();
         let mut keyframes = Vec::new();
@@ -150,7 +157,16 @@ mod tests {
             assert_eq!((got.width, got.height), size);
             worst = worst.min(got.psnr(&sent));
         }
-        assert_eq!(keyframes, [0, 10, 30], "{codec:?}");
+        assert_eq!(keyframes.len(), 3, "{codec:?}: {keyframes:?}");
+        assert_eq!(
+            (keyframes[0], keyframes[2]),
+            (0, 30),
+            "{codec:?}: {keyframes:?}"
+        );
+        assert!(
+            (10..=10 + late).contains(&keyframes[1]),
+            "{codec:?}: {keyframes:?}"
+        );
         assert!(worst > 28.0, "{codec:?}: worst PSNR {worst:.1} dB");
     }
 
@@ -242,7 +258,7 @@ mod tests {
                     .any(|c| c.codec == codec && c.encode && c.decode),
                 "{codec:?} in {caps:?}"
             );
-            round_trip(&codecs, codec);
+            round_trip_late(&codecs, codec, 1);
         }
         // Each IDR carries its parameter sets (the core needs them).
         let mut enc = codecs.encoder(VideoCodec::H264, 800, 30).unwrap();
