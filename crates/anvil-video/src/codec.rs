@@ -230,6 +230,35 @@ mod tests {
         );
     }
 
+    #[cfg(target_os = "android")]
+    #[test]
+    fn h264_and_vp8_round_trip_the_pattern_through_mediacodec() {
+        crate::binder_threads();
+        let codecs = crate::mc::McCodecs;
+        let caps = codecs.caps();
+        for codec in [VideoCodec::H264, VideoCodec::Vp8] {
+            assert!(
+                caps.iter()
+                    .any(|c| c.codec == codec && c.encode && c.decode),
+                "{codec:?} in {caps:?}"
+            );
+            round_trip(&codecs, codec);
+        }
+        // Each IDR carries its parameter sets (the core needs them).
+        let mut enc = codecs.encoder(VideoCodec::H264, 800, 30).unwrap();
+        let e = enc
+            .encode(&Picture::pattern(320, 180, 0), true)
+            .unwrap()
+            .expect("a frame for the first picture");
+        let types: Vec<u8> = openh264::nal_units(&e.data)
+            .map(|nal| nal[nal.iter().position(|&b| b == 1).unwrap() + 1] & 0x1F)
+            .collect();
+        assert!(
+            types.starts_with(&[7, 8]) && types.contains(&5),
+            "{types:?}"
+        );
+    }
+
     #[test]
     fn without_openh264_there_is_no_h264() {
         let codecs = SoftwareCodecs::default();

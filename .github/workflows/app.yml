@@ -159,6 +159,19 @@ jobs:
       # The emulator's debug build needs only its own ABI; the release
       # build's four go.
       - run: rm -rf build
+      # anvil-video's Android half (MediaCodec, the cameras) is tested on
+      # the emulator as a bare program, linked by the NDK's clang.
+      - name: anvil-video's tests for the emulator
+        working-directory: .
+        run: |
+          bin=$ANDROID_NDK_LATEST_HOME/toolchains/llvm/prebuilt/linux-x86_64/bin
+          export CC_x86_64_linux_android=$bin/x86_64-linux-android26-clang
+          export CXX_x86_64_linux_android=$bin/x86_64-linux-android26-clang++
+          export AR_x86_64_linux_android=$bin/llvm-ar
+          export CARGO_TARGET_X86_64_LINUX_ANDROID_LINKER=$bin/x86_64-linux-android26-clang
+          exe=$(cargo test -p anvil-video --target x86_64-linux-android --lib --no-run --message-format=json \
+            | jq -r 'select(.executable != null and .target.name == "anvil_video") | .executable')
+          cp "$exe" app/anvil-video-tests
       - name: The emulator may use KVM
         working-directory: .
         run: |
@@ -173,8 +186,12 @@ jobs:
           arch: x86_64
           target: google_apis
           disable-animations: true
+          # The emulator's cameras film a scene, for anvil-video's tests.
+          emulator-options: -no-window -gpu swiftshader_indirect -no-snapshot -noaudio -no-boot-anim -camera-front emulated -camera-back emulated
           working-directory: app
-          script: tool/android_test.sh
+          script: |
+            tool/android_video_test.sh
+            tool/android_test.sh
       - name: The emulator's log
         if: failure()
         uses: actions/upload-artifact@v4

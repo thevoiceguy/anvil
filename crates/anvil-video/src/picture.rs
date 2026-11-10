@@ -139,6 +139,71 @@ impl Picture {
         p
     }
 
+    /// From Android's YUV_420_888: three planes, each with a row stride,
+    /// and the chroma with a pixel stride too (1 is planar, 2 interleaved).
+    /// Only `width` × `height` from the top left is read (a crop).
+    pub fn from_yuv_420_888(
+        width: u32,
+        height: u32,
+        (y, ys): (&[u8], usize),
+        (u, v): (&[u8], &[u8]),
+        (uvs, step): (usize, usize),
+    ) -> Self {
+        let mut p = Self::black(width, height);
+        let (w, h) = (width as usize, height as usize);
+        let (cw, ch) = chroma(width, height);
+        let (py, pu, pv) = p.planes_mut();
+        for r in 0..h {
+            py[r * w..(r + 1) * w].copy_from_slice(&y[r * ys..r * ys + w]);
+        }
+        for r in 0..ch {
+            for cx in 0..cw {
+                let i = r * uvs + cx * step;
+                pu[r * cw + cx] = u.get(i).copied().unwrap_or(128);
+                pv[r * cw + cx] = v.get(i).copied().unwrap_or(128);
+            }
+        }
+        p
+    }
+
+    /// Turned clockwise by `degrees` (0, 90, 180 or 270; others as the
+    /// nearest below): a phone's sensor lies on its side.
+    pub fn rotated(&self, degrees: u32) -> Picture {
+        let quarter = (degrees / 90) % 4;
+        if quarter == 0 {
+            return self.clone();
+        }
+        let (w, h) = (self.width, self.height);
+        let (nw, nh) = if quarter == 2 { (w, h) } else { (h, w) };
+        let mut p = Self::black(nw, nh);
+        p.captured = self.captured;
+        let (cw, ch) = chroma(w, h);
+        let (ncw, _) = chroma(nw, nh);
+        let (sy, su, sv) = (self.y(), self.u(), self.v());
+        let (dy, du, dv) = p.planes_mut();
+        // Where the source pixel (x, r) of a plane w × h lands.
+        let turn = |x: usize, r: usize, w: usize, h: usize| match quarter {
+            1 => (h - 1 - r, x),
+            2 => (w - 1 - x, h - 1 - r),
+            _ => (r, w - 1 - x),
+        };
+        let (w, h, nw) = (w as usize, h as usize, nw as usize);
+        for r in 0..h {
+            for x in 0..w {
+                let (nx, nr) = turn(x, r, w, h);
+                dy[nr * nw + nx] = sy[r * w + x];
+            }
+        }
+        for r in 0..ch {
+            for x in 0..cw {
+                let (nx, nr) = turn(x, r, cw, ch);
+                du[nr * ncw + nx] = su[r * cw + x];
+                dv[nr * ncw + nx] = sv[r * cw + x];
+            }
+        }
+        p
+    }
+
     /// From full-range 4:4:4 YCbCr, interleaved (a JPEG's colours): the
     /// range squeezed to video's, the chroma averaged over each 2×2.
     pub fn from_full_range_ycbcr(src: &[u8], width: u32, height: u32) -> Self {
@@ -387,6 +452,56 @@ mod tests {
             Picture::from_nv12(src.y(), 64, &uv, 64, 64, 32).data,
             src.data
         );
+    }
+
+    #[test]
+    fn android_planes_planar_or_interleaved_become_the_same_picture() {
+        let src = Picture::pattern(64, 32, 5);
+        let cw = src.chroma_width();
+        // Planar, rows padded to 80 (luma) and 40 (chroma).
+        let mut y = vec![0u8; 80 * 32];
+        for r in 0..32 {
+            y[r * 80..r * 80 + 64].copy_from_slice(&src.y()[r * 64..r * 64 + 64]);
+        }
+        let (mut u, mut v) = (vec![0u8; 40 * 16], vec![0u8; 40 * 16]);
+        for r in 0..16 {
+            u[r * 40..r * 40 + cw].copy_from_slice(&src.u()[r * cw..(r + 1) * cw]);
+            v[r * 40..r * 40 + cw].copy_from_slice(&src.v()[r * cw..(r + 1) * cw]);
+        }
+        let planar = Picture::from_yuv_420_888(64, 32, (&y, 80), (&u, &v), (40, 1));
+        assert_eq!(planar.data, src.data);
+        // Interleaved (NV12 as Android hands it: V one byte after U).
+        let mut uv = vec![0u8; 80 * 16];
+        for r in 0..16 {
+            for cx in 0..cw {
+                uv[r * 80 + cx * 2] = src.u()[r * cw + cx];
+                uv[r * 80 + cx * 2 + 1] = src.v()[r * cw + cx];
+            }
+        }
+        let semi = Picture::from_yuv_420_888(64, 32, (&y, 80), (&uv, &uv[1..]), (80, 2));
+        assert_eq!(semi.data, src.data);
+    }
+
+    #[test]
+    fn a_picture_turns_a_quarter_at_a_time() {
+        let src = Picture::pattern(64, 32, 2);
+        let right = src.rotated(90);
+        assert_eq!((right.width, right.height), (32, 64));
+        // The top left goes to the top right.
+        assert_eq!(right.y()[31], src.y()[0]);
+        assert_eq!(right.u()[15], src.u()[0]);
+        // The bottom left goes to the top left.
+        assert_eq!(right.y()[0], src.y()[31 * 64]);
+        assert_eq!(src.rotated(180).y()[0], src.y()[32 * 64 - 1]);
+        assert_eq!(src.rotated(270).y()[0], src.y()[63]);
+        // Four turns, or two halves, are where it started.
+        assert_eq!(
+            right.rotated(90).rotated(180).data,
+            src.rotated(270).rotated(90).data
+        );
+        assert_eq!(src.rotated(180).rotated(180).data, src.data);
+        assert_eq!(right.rotated(270).data, src.data);
+        assert_eq!(src.rotated(0).data, src.data);
     }
 
     #[test]

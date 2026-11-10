@@ -213,6 +213,15 @@ every recommendation:
             size nearest the one asked; access is the user's Privacy
             setting, a refused camera failing to open with a message)
   - [ ] **A3** Mobile video
+    - [ ] **A3b** Android
+      - [x] **A3b1** `anvil-video` on Android: Camera2 cameras through the
+            NDK (front first, upright by the sensor's orientation, YUV into
+            an `AImageReader`), H.264 and VP8 through MediaCodec (the
+            decoder drawing into an image reader, parameter sets before each
+            keyframe), tested on CI's emulator
+      - [ ] **A3b2** The app: the texture plugin, the camera permission,
+            `ConnectionService` video state
+    - [ ] **A3c** Picture-in-picture, and video only on Wi-Fi
   - [ ] **A4** Anvil in FCP's rooms
   - [ ] **A5** Mobile screen share
 - [ ] **U6** Accessibility, localisation, store listings
