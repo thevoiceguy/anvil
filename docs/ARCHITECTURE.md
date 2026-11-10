@@ -408,7 +408,12 @@ texture and hands Dart its id, the C function that fills it and the
 texture's address; Dart hands those to the bridge (`attach_tile`), whose `Renderer`
 converts each picture to RGBA (BGRA, Core Video's order, on macOS and iOS) and calls the function on the host's thread. Detaching
 takes the renderer's lock, so the function is never called once `detach_tile`
-returns, and only then is the texture disposed of. `anvil-app` keeps each call's
+returns, and only then is the texture disposed of. Android's plugin
+(`VideoTextures.kt`) makes a `SurfaceProducer` texture and, in the bridge, a slot for
+its surface (`src/android_video.rs`), and hands Dart the bridge's own function, which
+draws each picture on the slot's surface (`ANativeWindow`, RGBA, sized to the
+picture); Flutter lets the surface go while the app is away and makes another on its
+return, and the slot follows it, a picture with no surface let go. `anvil-app` keeps each call's
 video (offered, our camera, our stream, the streams coming in, the far end asking)
 from the core's events, and the device's (cameras, the one chosen, H.264). The core's
 `set_camera` reaches the host, which switches a camera that is sending (closed, the
@@ -426,7 +431,13 @@ word for a phone started later and assumes a phone's app hidden until told, as a
 starts the phone with nothing on the screen. The system's call screen hears a call's
 video with the call (`video` on `incoming` and `outgoing`) and as it changes
 (`video`): ringing in, as it offers; else while either side's picture is in it.
-CallKit shows it (`supportsVideo`, `hasVideo`, a start action's `isVideo`).
+CallKit shows it (`supportsVideo`, `hasVideo`, a start action's `isVideo`); Telecom
+as the connection's video state (bidirectional or audio only, from the request's
+`EXTRA_INCOMING_VIDEO_STATE` or `EXTRA_START_CALL_WITH_VIDEO_STATE`), which routes a
+video call's audio to the loudspeaker; a call answered audio only at a headset or
+watch is answered without our camera. Android asks for the camera when a call first
+uses it (placed or answered with video, or the camera turned on); refused, the call
+goes on without it and the user is told where to allow it.
 
 ---
 

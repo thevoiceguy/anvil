@@ -5,8 +5,13 @@ import 'package:anvil/src/mobile/platform.dart';
 /// The phone around the app, as a log of what it was told and a way for a
 /// test to act at the system's call screen.
 class FakeMobile implements MobilePlatform {
-  FakeMobile({this.allow = true, this.systemFollowsPhone = false});
+  FakeMobile({
+    this.allow = true,
+    this.allowCamera = true,
+    this.systemFollowsPhone = false,
+  });
   final bool allow;
+  final bool allowCamera;
 
   @override
   final bool systemFollowsPhone;
@@ -30,6 +35,12 @@ class FakeMobile implements MobilePlatform {
   Future<bool> requestMicrophone() async {
     log.add('requestMicrophone');
     return allow;
+  }
+
+  @override
+  Future<bool> requestCamera() async {
+    log.add('requestCamera');
+    return allowCamera;
   }
 
   @override

@@ -285,6 +285,7 @@ class _NoticeBanner extends StatelessWidget {
       'call_ended' => s.callEnded(notice.text),
       'transfer' => s.transferProgress(notice.text),
       'microphone' => s.microphoneRefused,
+      'camera' => s.cameraRefused,
       _ => s.commandFailed(notice.text),
     };
     return Material(

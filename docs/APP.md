@@ -752,9 +752,11 @@ FCP's `docs/CALL_DIAGNOSTICS.md` phase 5 (FCP v0.25.491 takes them):
 
 ### Video calls (softphone video A2b)
 FCP's `docs/SOFTPHONE_VIDEO.md` §2.5, on the desktop (Linux, macOS and
-Windows) and the iPhone (A3a; Android follows). On a Mac and an iPhone the
-system asks for the camera the first time a call sends video; the call goes on
-meanwhile, and a camera refused leaves it receiving only. On Windows camera
+Windows) and the phones (A3a the iPhone, A3b Android). On a Mac and an iPhone
+the system asks for the camera the first time a call sends video; the call goes
+on meanwhile, and a camera refused leaves it receiving only. Android asks before
+a call first uses it (placed or answered with video, or the camera turned on);
+refused, the call goes on receiving only and the app says where to allow it. On Windows camera
 access is the Privacy setting, and a refused camera does the same:
 - **Placing.** The keypad has **Video call** beside **Call** where the
   device has video (a camera need not be there: the far end's picture

@@ -317,6 +317,10 @@ pub(crate) struct Action {
     digits: Option<String>,
     #[serde(default)]
     reason: Option<String>,
+    /// For `answer`: with our camera or not, when the screen says (the
+    /// phone decides otherwise).
+    #[serde(default)]
+    video: Option<bool>,
 }
 
 /// The phone command for `action` on the phone as `state` has it, if any:
@@ -329,7 +333,7 @@ pub(crate) fn command_for(action: &Action, state: &State) -> Option<Command> {
     Some(match action.action.as_str() {
         "answer" if ringing_in => Command::Answer {
             call: id,
-            video: None,
+            video: action.video,
         },
         "end" if ringing_in => Command::Decline { call: id },
         "end" => Command::Hangup { call: id },
@@ -498,6 +502,16 @@ mod tests {
             Some(Command::Answer {
                 call: Some(7),
                 video: None
+            })
+        ));
+        assert!(matches!(
+            command_for(
+                &action(r#"{"action":"answer","id":7,"video":false}"#),
+                &ringing
+            ),
+            Some(Command::Answer {
+                call: Some(7),
+                video: Some(false)
             })
         ));
         assert!(matches!(

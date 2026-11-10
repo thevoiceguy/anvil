@@ -5,6 +5,11 @@
     <!-- The caller hears the user; asked for at the first sign-in. -->
     <uses-permission android:name="android.permission.RECORD_AUDIO"/>
     <uses-permission android:name="android.permission.MODIFY_AUDIO_SETTINGS"/>
+    <!-- The caller sees the user; asked for when a call first uses it. A
+         phone without a camera installs too, its calls receiving video. -->
+    <uses-permission android:name="android.permission.CAMERA"/>
+    <uses-feature android:name="android.hardware.camera" android:required="false"/>
+    <uses-feature android:name="android.hardware.camera.front" android:required="false"/>
     <!-- The app's own calls with Telecom (a self-managed ConnectionService). -->
     <uses-permission android:name="android.permission.MANAGE_OWN_CALLS"/>
     <!-- A call keeps going, with its microphone, when the user leaves the

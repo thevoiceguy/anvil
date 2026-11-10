@@ -2,7 +2,7 @@
 // the phone starts, and says so when the microphone is refused; and the
 // system's call screen follows the phone's calls, and what the user does
 // there reaches the phone; and the camera stops while the app is out of
-// sight.
+// sight, and is asked for before a call first uses it.
 
 import 'package:anvil/src/app.dart';
 import 'package:anvil/src/mobile/platform.dart';
@@ -11,6 +11,8 @@ import 'package:flutter_test/flutter_test.dart';
 
 import 'fake_mobile.dart';
 import 'fake_phone.dart';
+import 'screens_test.dart' show tapKey;
+import 'video_test.dart' show withVideo;
 
 void main() {
   testWidgets('the microphone is asked for and the audio set up first', (
@@ -283,5 +285,32 @@ void main() {
     expect(find.byKey(const Key('signOut')), findsOneWidget);
     expect(find.byKey(const Key('microphone')), findsNothing);
     expect(find.byKey(const Key('speaker')), findsNothing);
+  });
+
+  testWidgets('the camera is asked for before a call uses it, and a refusal '
+      'is said while the call goes on', (tester) async {
+    tester.view.physicalSize = const Size(1000, 1400);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.reset);
+    final phone = FakePhone()
+      ..saved = const SignedInAccountFake()
+      ..seed = withVideo;
+    final mobile = FakeMobile(allowCamera: false);
+    await tester.pumpWidget(AnvilApp(phone: phone, mobile: mobile));
+    await tester.pumpAndSettle();
+    mobile.log.clear();
+
+    phone.ring('1002', video: true);
+    await tester.pumpAndSettle();
+    await tapKey(tester, 'answerAudio');
+    expect(mobile.log, isNot(contains('requestCamera')));
+    await tapKey(tester, 'hangup');
+
+    phone.ring('1003', video: true);
+    await tester.pumpAndSettle();
+    await tapKey(tester, 'answerVideo');
+    expect(mobile.log, contains('requestCamera'));
+    expect(phone.log, contains('answer 2 video=true'));
+    expect(find.textContaining('may not use the camera'), findsOneWidget);
   });
 }

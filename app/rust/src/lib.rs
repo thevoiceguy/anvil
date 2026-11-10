@@ -6,5 +6,7 @@ mod system;
 
 #[cfg(target_os = "android")]
 mod android;
+#[cfg(target_os = "android")]
+mod android_video;
 #[cfg(any(target_os = "ios", test))]
 mod ios;

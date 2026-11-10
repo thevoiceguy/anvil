@@ -219,14 +219,16 @@ every recommendation:
           CallKit told a call's video (`hasVideo`, `isVideo`), and the
           camera stopped while the app is out of sight (`background`),
           a video call answered there getting it on the app's return
-    - [ ] **A3b** Android
+    - [x] **A3b** Android
       - [x] **A3b1** `anvil-video` on Android: Camera2 cameras through the
             NDK (front first, upright by the sensor's orientation, YUV into
             an `AImageReader`), H.264 and VP8 through MediaCodec (the
             decoder drawing into an image reader, parameter sets before each
             keyframe), tested on CI's emulator
-      - [ ] **A3b2** The app: the texture plugin, the camera permission,
-            `ConnectionService` video state
+      - [x] **A3b2** The app: the texture plugin (`SurfaceProducer`, the
+            bridge drawing on its surface), the camera permission asked
+            for when a call first uses it, Telecom told a call's video
+            state
     - [ ] **A3c** Picture-in-picture, and video only on Wi-Fi
   - [ ] **A4** Anvil in FCP's rooms
   - [ ] **A5** Mobile screen share
