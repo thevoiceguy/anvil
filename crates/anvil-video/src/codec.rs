@@ -205,6 +205,31 @@ mod tests {
         );
     }
 
+    #[cfg(windows)]
+    #[test]
+    fn h264_round_trips_the_pattern_through_media_foundation() {
+        let codecs = crate::mf::MfCodecs;
+        if codecs.caps().is_empty() {
+            eprintln!("skipped: no Media Foundation H.264 here");
+            return;
+        }
+        round_trip(&codecs, VideoCodec::H264);
+        // Each IDR carries its parameter sets (the core needs them).
+        let mut enc = codecs.encoder(VideoCodec::H264, 800, 30).unwrap();
+        let e = enc
+            .encode(&Picture::pattern(320, 180, 0), true)
+            .unwrap()
+            .expect("a frame for the first picture");
+        let types: Vec<u8> = crate::mf::nal_units(&e.data)
+            .iter()
+            .map(|nal| nal[0] & 0x1F)
+            .collect();
+        assert!(
+            types.contains(&7) && types.contains(&8) && types.contains(&5),
+            "{types:?}"
+        );
+    }
+
     #[test]
     fn without_openh264_there_is_no_h264() {
         let codecs = SoftwareCodecs::default();

@@ -8,6 +8,7 @@
 
 #include <memory>
 
+#include "video_texture.h"
 #include "win32_window.h"
 
 // A window that does nothing but host a Flutter view.
@@ -35,6 +36,9 @@ class FlutterWindow : public Win32Window {
   // Starts handed on by a second start, and the session ending
   // (lib/src/desktop/native_shell.dart).
   std::unique_ptr<flutter::MethodChannel<flutter::EncodableValue>> instance_;
+
+  // Textures for video tiles (`anvil/video`).
+  std::unique_ptr<VideoTextures> video_;
 
   bool hidden_;
 

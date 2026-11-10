@@ -204,7 +204,11 @@ every recommendation:
       - [x] **A2c2** Cameras through AVFoundation (NV12 on a dispatch
             queue; access asked at the first video call, on the source's
             thread), with the camera entitlement and usage description
-    - [ ] **A2d** Windows: Media Foundation
+    - [ ] **A2d** Windows
+      - [x] **A2d1** H.264 through Media Foundation's transforms (low
+            latency, CBR, baseline, keyframes when asked; NV12 each way),
+            and the runner's texture plugin (`PixelBufferTexture`)
+      - [ ] **A2d2** Cameras through Media Foundation
   - [ ] **A3** Mobile video
   - [ ] **A4** Anvil in FCP's rooms
   - [ ] **A5** Mobile screen share

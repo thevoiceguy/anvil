@@ -3,7 +3,7 @@
 // its id, the C function that fills it and the texture's own address; those
 // two go to Rust (`app/rust/src/api/video.rs`), whose video threads put each
 // picture on it. Pictures never cross into Dart. Where the runner has no
-// plugin (Windows until its video host), nothing is shown.
+// plugin (the phones, until theirs), nothing is shown.
 
 import 'package:flutter/services.dart';
 

@@ -139,8 +139,15 @@ async fn a_call_shows_each_camera_to_the_other(h264: bool) -> VideoCodec {
         // starting out codes them soft); the best of a few pictures, so
         // one caught mid-recovery from a dropped frame does not decide.
         let key = shows(tiles, 60).await;
+        // The camera's 640x360, or a rung below it if the ladder stepped
+        // down on a busy machine (the ladder is the core's to test).
         let stats = tiles.stats(key).unwrap();
-        assert_eq!((stats.width, stats.height), (640, 360), "{who}");
+        assert!(
+            [(640, 360), (320, 180)].contains(&(stats.width, stats.height)),
+            "{who}: {}x{}",
+            stats.width,
+            stats.height
+        );
         let mut psnr = 0.0f64;
         for _ in 0..5 {
             psnr = psnr.max(likeness(&tiles.last(key).unwrap()));

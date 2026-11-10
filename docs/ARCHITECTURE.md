@@ -359,7 +359,12 @@ captured as NV12 on a dispatch queue of their own by an Objective-C delegate def
 in Rust, a picture the source is not ready for dropped. Opening only checks that
 access is not refused: the session starts, and the system asks for access the first
 time, on the source's thread at its first picture, so a call goes on while the user
-answers. Windows brings Media Foundation's next. `anvil-cli
+answers. On Windows, H.264 goes through Media Foundation's own encoder and decoder
+transforms (`mf.rs`; Windows' licence covers H.264, so nothing is fetched): made on
+the thread that uses each, in the multithreaded apartment; the encoder set for low
+latency, CBR and baseline, a keyframe forced through its codec API; NV12 each way, the
+decoder's output cropped from its coded size to the picture's. A Windows without them
+(an N edition without the Media Feature Pack) offers no video. Its cameras follow. `anvil-cli
 --video camera` films with the computer's camera, `--video pattern` a moving test
 pattern through the same codecs, and `--video-snapshot` writes the last picture
 received as a PNG. The ladder steps the picture down only when the network is the
@@ -370,8 +375,9 @@ keyframe, and asks for one if that keyframe never came (a relay drops a stream's
 packets until it has latched).
 
 **The app** shows video on Flutter textures, and pictures never cross into Dart. The
-runner's texture plugin (`linux/runner/video_texture.cc`, or `VideoTextures` in
-`macos/Runner/MainFlutterWindow.swift`, over `anvil/video`) makes a pixel-buffer
+runner's texture plugin (`linux/runner/video_texture.cc`, `VideoTextures` in
+`macos/Runner/MainFlutterWindow.swift`, or `windows/runner/video_texture.cpp`, over
+`anvil/video`) makes a pixel-buffer
 texture and hands Dart its id, the C function that fills it and the
 texture's address; Dart hands those to the bridge (`attach_tile`), whose `Renderer`
 converts each picture to RGBA (BGRA, Core Video's order, on macOS) and calls the function on the host's thread. Detaching
