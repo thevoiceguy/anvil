@@ -22,6 +22,9 @@ import UIKit
 
   func didInitializeImplicitFlutterEngine(_ engineBridge: FlutterImplicitEngineBridge) {
     GeneratedPluginRegistrant.register(with: engineBridge.pluginRegistry)
+    if let registrar = engineBridge.pluginRegistry.registrar(forPlugin: "AnvilVideo") {
+      VideoTextures.register(with: registrar)
+    }
     // `anvil/mobile`: what the app asks of the phone (lib/src/mobile).
     if let registrar = engineBridge.pluginRegistry.registrar(forPlugin: "AnvilMobile") {
       let channel = FlutterMethodChannel(
@@ -132,7 +135,7 @@ final class CallSystem: NSObject, CXProviderDelegate {
   /// Calls answered at the system's screen (not to be answered again).
   private var answered: Set<Int64> = []
   /// Calls the system took as placed.
-  private var started: [Int64: (name: String, number: String)] = [:]
+  private var started: [Int64: (name: String, number: String, video: Bool)] = [:]
   /// The server's id for a call, as a push or its INVITE named it.
   private var serverCalls: [Int64: String] = [:]
   /// Pushed calls answered at the screen before the phone's call came.
@@ -147,7 +150,7 @@ final class CallSystem: NSObject, CXProviderDelegate {
 
   override init() {
     let config = CXProviderConfiguration()
-    config.supportsVideo = false
+    config.supportsVideo = true
     config.maximumCallGroups = 2
     config.maximumCallsPerCallGroup = 1
     config.supportedHandleTypes = [.generic, .phoneNumber]
@@ -208,11 +211,11 @@ final class CallSystem: NSObject, CXProviderDelegate {
     declined[serverCall] = now
   }
 
-  private func update(name: String, number: String) -> CXCallUpdate {
+  private func update(name: String, number: String, video: Bool = false) -> CXCallUpdate {
     let update = CXCallUpdate()
     update.remoteHandle = CXHandle(type: .generic, value: number)
     update.localizedCallerName = name.isEmpty ? number : name
-    update.hasVideo = false
+    update.hasVideo = video
     update.supportsHolding = true
     update.supportsDTMF = true
     update.supportsGrouping = false
@@ -225,14 +228,17 @@ final class CallSystem: NSObject, CXProviderDelegate {
     let id = (event["id"] as? NSNumber)?.int64Value ?? -1
     let name = event["name"] as? String ?? ""
     let number = event["number"] as? String ?? ""
+    let video = (event["video"] as? NSNumber)?.boolValue ?? false
     switch event["kind"] as? String {
     case "incoming":
       phoneRinging(
-        id: id, name: name, number: number, serverCall: event["server_call"] as? String)
+        id: id, name: name, number: number, video: video,
+        serverCall: event["server_call"] as? String)
     case "outgoing":
-      if uuids[id] == nil { reportOutgoing(id: id, name: name, number: number) }
+      if uuids[id] == nil { reportOutgoing(id: id, name: name, number: number, video: video) }
     case "connected": reportConnected(id: id)
     case "held": reportHeld(id: id, on: (event["on"] as? NSNumber)?.boolValue ?? false)
+    case "video": reportVideo(id: id, on: (event["on"] as? NSNumber)?.boolValue ?? false)
     case "ended": reportEnded(id: id)
     // The phone stopped: its calls are over; a pushed call waits on.
     case "reset":
@@ -242,7 +248,9 @@ final class CallSystem: NSObject, CXProviderDelegate {
   }
 
   /// The phone's call ringing in: the pushed call it is, or a new one.
-  private func phoneRinging(id: Int64, name: String, number: String, serverCall: String?) {
+  private func phoneRinging(
+    id: Int64, name: String, number: String, video: Bool, serverCall: String?
+  ) {
     if uuids[id] != nil { return }
     if let serverCall = serverCall, declined.removeValue(forKey: serverCall) != nil {
       PhoneLink.act("end", id)
@@ -258,22 +266,25 @@ final class CallSystem: NSObject, CXProviderDelegate {
       match = pushed.first
     }
     guard let from = match, let uuid = uuids[from] else {
-      reportIncoming(id: id, name: name, number: number)
+      reportIncoming(id: id, name: name, number: number, video: video)
       if let serverCall = serverCall { serverCalls[id] = serverCall }
       return
     }
     let answer = adopt(from, as: id)
     // The INVITE says who is calling, where a minimal push did not.
-    provider.reportCall(with: uuid, updated: update(name: name, number: number))
+    provider.reportCall(with: uuid, updated: update(name: name, number: number, video: video))
     if answer { PhoneLink.act("answer", id) }
   }
 
   func reportIncoming(
-    id: Int64, name: String, number: String, completion: (() -> Void)? = nil
+    id: Int64, name: String, number: String, video: Bool = false,
+    completion: (() -> Void)? = nil
   ) {
     let uuid = remember(id)
     incoming.insert(id)
-    provider.reportNewIncomingCall(with: uuid, update: update(name: name, number: number)) {
+    provider.reportNewIncomingCall(
+      with: uuid, update: update(name: name, number: number, video: video)
+    ) {
       error in
       DispatchQueue.main.async {
         defer { completion?() }
@@ -361,10 +372,11 @@ final class CallSystem: NSObject, CXProviderDelegate {
     }
   }
 
-  func reportOutgoing(id: Int64, name: String, number: String) {
+  func reportOutgoing(id: Int64, name: String, number: String, video: Bool = false) {
     let uuid = remember(id)
-    started[id] = (name, number)
+    started[id] = (name, number, video)
     let action = CXStartCallAction(call: uuid, handle: CXHandle(type: .generic, value: number))
+    action.isVideo = video
     controller.request(CXTransaction(action: action)) { error in
       guard error != nil else { return }
       DispatchQueue.main.async {
@@ -385,6 +397,14 @@ final class CallSystem: NSObject, CXProviderDelegate {
     } else {
       provider.reportOutgoingCall(with: uuid, connectedAt: nil)
     }
+  }
+
+  /// The call became a video call, or stopped being one.
+  func reportVideo(id: Int64, on: Bool) {
+    guard let uuid = uuids[id] else { return }
+    let update = CXCallUpdate()
+    update.hasVideo = on
+    provider.reportCall(with: uuid, updated: update)
   }
 
   func reportHeld(id: Int64, on: Bool) {
@@ -417,7 +437,9 @@ final class CallSystem: NSObject, CXProviderDelegate {
       return
     }
     try? AppDelegate.prepareAudio()
-    provider.reportCall(with: action.callUUID, updated: update(name: call.name, number: call.number))
+    provider.reportCall(
+      with: action.callUUID,
+      updated: update(name: call.name, number: call.number, video: call.video))
     provider.reportOutgoingCall(with: action.callUUID, startedConnectingAt: nil)
     action.fulfill()
     emit("shown", id)

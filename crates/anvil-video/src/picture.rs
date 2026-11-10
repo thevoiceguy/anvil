@@ -178,11 +178,17 @@ impl Picture {
     }
 
     /// The largest size within `max` with this picture's shape, in even
-    /// numbers, never larger than the picture.
+    /// numbers, never larger than the picture. A limit is a size either
+    /// way up: an upright picture (a phone's) fits it turned.
     pub fn fit(&self, max: Resolution) -> (u32, u32) {
         let (w, h) = (self.width.max(1), self.height.max(1));
-        let scale = (f64::from(max.width) / f64::from(w))
-            .min(f64::from(max.height) / f64::from(h))
+        let (mw, mh) = if (h > w) == (max.height > max.width) {
+            (max.width, max.height)
+        } else {
+            (max.height, max.width)
+        };
+        let scale = (f64::from(mw) / f64::from(w))
+            .min(f64::from(mh) / f64::from(h))
             .min(1.0);
         let even = |v: f64| ((v as u32) & !1).max(2);
         (even(f64::from(w) * scale), even(f64::from(h) * scale))
@@ -407,6 +413,14 @@ mod tests {
             }),
             (1280, 720),
             "never upscaled"
+        );
+        assert_eq!(
+            Picture::black(720, 1280).fit(Resolution {
+                width: 640,
+                height: 360
+            }),
+            (360, 640),
+            "upright"
         );
         let half = Picture::pattern(1280, 720, 0).scaled(640, 360);
         assert_eq!((half.width, half.height), (640, 360));

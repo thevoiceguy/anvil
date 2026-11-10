@@ -3,7 +3,8 @@
 // shows as dialling, connected, held and over as the phone has it; and what
 // the user does there (answer, end, hold, mute, a key) reaches the phone.
 // Also where a call's audio goes (shared with the screens through
-// `MobileScope`), and the proximity sensor while a call is at the ear.
+// `MobileScope`), the proximity sensor while a call is at the ear, and the
+// camera stopped while the app is out of sight.
 
 import 'dart:async';
 
@@ -41,6 +42,7 @@ class _Told {
 class _MobileBridgeState extends State<MobileBridge> {
   StreamSubscription<SystemCallEvent>? _events;
   StreamSubscription<AudioRoutes>? _routeChanges;
+  late final AppLifecycleListener _lifecycle;
   final Map<int, _Told> _told = {};
   final ValueNotifier<AudioRoutes?> _routes = ValueNotifier(null);
   bool? _proximity;
@@ -55,12 +57,29 @@ class _MobileBridgeState extends State<MobileBridge> {
     // Android's call screen follows the phone itself (platform.dart).
     if (!mobile.systemFollowsPhone) _events = mobile.callEvents.listen(_act);
     _routeChanges = mobile.audioRouteChanges.listen(_routed);
+    // A phone's camera is the app's only while it is seen.
+    _lifecycle = AppLifecycleListener(
+      onHide: () => _background(true),
+      onShow: () => _background(false),
+    );
+    // Seen now: the phone (out of sight until told) may use the camera.
+    final now = WidgetsBinding.instance.lifecycleState;
+    if (now == null ||
+        now == AppLifecycleState.resumed ||
+        now == AppLifecycleState.inactive) {
+      _background(false);
+    }
     _sync();
+  }
+
+  void _background(bool on) {
+    unawaited(model.api.setBackground(on).catchError((Object _) {}));
   }
 
   @override
   void dispose() {
     model.removeListener(_sync);
+    _lifecycle.dispose();
     unawaited(_events?.cancel());
     unawaited(_routeChanges?.cancel());
     _routes.dispose();

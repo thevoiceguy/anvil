@@ -53,6 +53,10 @@ fn phone() -> anyhow::Result<Phone> {
         .ok_or_else(|| anyhow::anyhow!("the phone is not running"))
 }
 
+pub(crate) fn running() -> bool {
+    PHONE.lock().is_some()
+}
+
 /// What this install was set up with (`docs/MANAGED_INSTALLS.md`): policy
 /// and the installed profile, read once.
 pub(crate) fn managed() -> &'static anvil_app::managed::Managed {
@@ -444,18 +448,18 @@ pub async fn start_phone(session_path: String) -> anyhow::Result<()> {
         let brand = anvil_fcp::brand_config(Arc::clone(&client), None)?;
         let audio =
             anvil_audio::CpalHost::new().map_err(|e| anyhow::anyhow!("no audio devices: {e}"))?;
-        // A desktop's cameras and codecs; a phone's come with A3.
-        #[cfg(not(any(target_os = "android", target_os = "ios")))]
+        // The platform's cameras and codecs; Android's come later.
+        #[cfg(not(target_os = "android"))]
         let (video, openh264) = {
-            let dir = super::video::desktop::openh264_dir(&session_path_for_video);
-            let host = super::video::desktop::host(&dir);
-            let openh264 = super::video::desktop::openh264(host.clone(), dir);
+            let dir = super::video::native::openh264_dir(&session_path_for_video);
+            let host = super::video::native::host(&dir);
+            let openh264 = super::video::native::openh264(host.clone(), dir);
             (
                 Some(Box::new(host) as Box<dyn anvil_core::video::host::VideoHost>),
                 openh264,
             )
         };
-        #[cfg(any(target_os = "android", target_os = "ios"))]
+        #[cfg(target_os = "android")]
         let (video, openh264) = (None, None);
         let phone = Phone::start(PhoneConfig {
             anvil: anvil_core::AnvilConfig {
@@ -495,7 +499,13 @@ pub async fn start_phone(session_path: String) -> anyhow::Result<()> {
         let _guard = runtime().enter();
         *FOLLOWER.lock() = Some(crate::system::follow(phone.clone()));
     }
-    *PHONE.lock() = Some(phone);
+    *PHONE.lock() = Some(phone.clone());
+    // Started out of sight (a push woke it): the camera waits for the app.
+    if super::video::in_background() {
+        runtime().spawn(async move {
+            let _ = phone.execute(Command::Background { on: true }).await;
+        });
+    }
     Ok(())
 }
 

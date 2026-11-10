@@ -1,10 +1,15 @@
-//! Cameras on macOS, through AVFoundation: listed, opened by unique id,
-//! and captured as NV12 on a dispatch queue of their own, each picture
-//! handed to the source's thread.
+//! Cameras on macOS and iOS, through AVFoundation: listed, opened by
+//! unique id, and captured as NV12 on a dispatch queue of their own, each
+//! picture handed to the source's thread.
 //!
-//! Access is the user's to give (the app's `NSCameraUsageDescription` and
-//! camera entitlement): asked the first time a call sends video, on the
-//! source's thread, so the call goes on while the system asks.
+//! Access is the user's to give (the app's `NSCameraUsageDescription`, and
+//! on macOS its camera entitlement): asked the first time a call sends
+//! video, on the source's thread, so the call goes on while the system
+//! asks.
+//!
+//! On an iPhone the cameras are the built-in front and back ones, the
+//! front one by default; pictures come upright for a phone held upright,
+//! and the capture leaves the app's audio session to the call.
 
 use std::sync::mpsc::{self, Receiver, RecvTimeoutError, SyncSender};
 use std::time::{Duration, Instant};
@@ -40,7 +45,7 @@ const ASKING: Duration = Duration::from_secs(120);
 /// A camera that has sent nothing for this long has gone.
 const SILENT: Duration = Duration::from_secs(5);
 
-/// The Mac's cameras.
+/// The device's cameras.
 #[derive(Debug, Clone, Copy, Default)]
 pub struct AvfCameras;
 
@@ -49,6 +54,7 @@ fn video() -> Option<&'static NSString> {
     unsafe { AVMediaTypeVideo }
 }
 
+#[cfg(target_os = "macos")]
 fn devices() -> Vec<Retained<AVCaptureDevice>> {
     let Some(video) = video() else {
         return Vec::new();
@@ -61,6 +67,52 @@ fn devices() -> Vec<Retained<AVCaptureDevice>> {
     let list = unsafe { AVCaptureDevice::devicesWithMediaType(video) };
     list.to_vec()
 }
+
+/// The built-in wide-angle cameras, front first.
+#[cfg(target_os = "ios")]
+fn devices() -> Vec<Retained<AVCaptureDevice>> {
+    use objc2_av_foundation::{
+        AVCaptureDeviceDiscoverySession, AVCaptureDevicePosition,
+        AVCaptureDeviceTypeBuiltInWideAngleCamera,
+    };
+    use objc2_foundation::NSArray;
+    // SAFETY: a constant AVFoundation exports, and a discovery session
+    // over it.
+    let mut list = unsafe {
+        let types = NSArray::from_slice(&[AVCaptureDeviceTypeBuiltInWideAngleCamera]);
+        AVCaptureDeviceDiscoverySession::discoverySessionWithDeviceTypes_mediaType_position(
+            &types,
+            video(),
+            AVCaptureDevicePosition::Unspecified,
+        )
+        .devices()
+        .to_vec()
+    };
+    // SAFETY: a property of a device.
+    list.sort_by_key(|d| unsafe { d.position() } != AVCaptureDevicePosition::Front);
+    list
+}
+
+/// The camera a call opens unless told: the Mac's default, an iPhone's
+/// front one.
+fn default_device(video: &NSString) -> Option<Retained<AVCaptureDevice>> {
+    #[cfg(target_os = "macos")]
+    // SAFETY: a class method with a media type.
+    let device = unsafe { AVCaptureDevice::defaultDeviceWithMediaType(video) };
+    #[cfg(target_os = "ios")]
+    let device = {
+        let _ = video;
+        devices().into_iter().next()
+    };
+    device
+}
+
+/// Where the user allows the camera.
+const ALLOW_AT: &str = if cfg!(target_os = "ios") {
+    "Settings → Privacy & Security → Camera"
+} else {
+    "System Settings → Privacy & Security → Camera"
+};
 
 impl Cameras for AvfCameras {
     fn list(&self) -> Vec<CameraInfo> {
@@ -81,20 +133,16 @@ impl Cameras for AvfCameras {
         _fps: u32,
     ) -> Result<Box<dyn Capture>, String> {
         let video = video().ok_or("no video media type")?;
-        // SAFETY: class methods with a media type or an id.
-        let device = unsafe {
-            match id {
-                Some(id) => AVCaptureDevice::deviceWithUniqueID(&NSString::from_str(id)),
-                None => AVCaptureDevice::defaultDeviceWithMediaType(video),
-            }
+        let device = match id {
+            // SAFETY: a class method with an id.
+            Some(id) => unsafe { AVCaptureDevice::deviceWithUniqueID(&NSString::from_str(id)) },
+            None => default_device(video),
         }
         .ok_or_else(|| format!("no camera {}", id.unwrap_or("here")))?;
         // SAFETY: a class method with a media type.
         let status = unsafe { AVCaptureDevice::authorizationStatusForMediaType(video) };
         if status == AVAuthorizationStatus::Denied || status == AVAuthorizationStatus::Restricted {
-            return Err(
-                "the camera is not allowed (System Settings → Privacy & Security → Camera)".into(),
-            );
+            return Err(format!("the camera is not allowed ({ALLOW_AT})"));
         }
         Ok(Box::new(AvfCapture {
             device: Some(Unsent(device)),
@@ -171,6 +219,10 @@ impl AvfCapture {
         unsafe {
             let session = AVCaptureSession::new();
             session.beginConfiguration();
+            // The call's audio session is CallKit's and the phone's: the
+            // camera must not reconfigure it.
+            #[cfg(target_os = "ios")]
+            session.setAutomaticallyConfiguresApplicationAudioSession(false);
             let preset = if self.want.height >= 720 {
                 AVCaptureSessionPreset1280x720
             } else {
@@ -205,6 +257,8 @@ impl AvfCapture {
                 return Err("the camera's pictures cannot be taken".into());
             }
             session.addOutput(&output);
+            #[cfg(target_os = "ios")]
+            upright(&output);
             session.commitConfiguration();
             session.startRunning();
             self.running = Some(Unsent(Running {
@@ -216,6 +270,27 @@ impl AvfCapture {
         }
         self.pictures = Some(rx);
         Ok(())
+    }
+}
+
+/// An iPhone's pictures upright for the phone held upright (a sensor's
+/// are landscape).
+#[cfg(target_os = "ios")]
+#[allow(deprecated)]
+unsafe fn upright(output: &AVCaptureVideoDataOutput) {
+    use objc2_av_foundation::AVCaptureVideoOrientation;
+    let Some(video) = video() else {
+        return;
+    };
+    // SAFETY: the output's connection, set before the session runs. The
+    // orientation is deprecated for a rotation angle from iOS 17; the app
+    // runs on 15.
+    unsafe {
+        if let Some(connection) = output.connectionWithMediaType(video) {
+            if connection.isVideoOrientationSupported() {
+                connection.setVideoOrientation(AVCaptureVideoOrientation::Portrait);
+            }
+        }
     }
 }
 

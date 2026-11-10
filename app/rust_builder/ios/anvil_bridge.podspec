@@ -38,8 +38,9 @@ A new Flutter FFI plugin project.
   }
   # The Rust library is static: the system frameworks its crates call
   # (cpal's audio units, hickory's resolver configuration, rustls'
-  # trust store) are linked by the pod that carries it.
-  s.frameworks = 'AVFoundation', 'CoreAudio', 'AudioToolbox', 'CoreFoundation', 'SystemConfiguration', 'Security'
+  # trust store, VideoToolbox's codecs and AVFoundation's cameras) are
+  # linked by the pod that carries it.
+  s.frameworks = 'AVFoundation', 'CoreAudio', 'AudioToolbox', 'CoreFoundation', 'SystemConfiguration', 'Security', 'VideoToolbox', 'CoreMedia', 'CoreVideo'
   s.pod_target_xcconfig = {
     'DEFINES_MODULE' => 'YES',
     # Flutter.framework does not contain a i386 slice.

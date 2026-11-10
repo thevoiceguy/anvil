@@ -1,7 +1,8 @@
 // On a phone the app asks for the microphone and sets the audio up before
 // the phone starts, and says so when the microphone is refused; and the
 // system's call screen follows the phone's calls, and what the user does
-// there reaches the phone.
+// there reaches the phone; and the camera stops while the app is out of
+// sight.
 
 import 'package:anvil/src/app.dart';
 import 'package:anvil/src/mobile/platform.dart';
@@ -85,6 +86,30 @@ void main() {
       isEmpty,
     );
     expect(phone.log, isNot(contains('answer 1')));
+  });
+
+  testWidgets('the camera stops while the app is out of sight', (tester) async {
+    final (phone, _) = await signedIn(tester);
+    expect(phone.log, contains('background off'), reason: 'seen at start');
+    phone.log.clear();
+    for (final state in [
+      AppLifecycleState.inactive,
+      AppLifecycleState.hidden,
+      AppLifecycleState.paused,
+    ]) {
+      tester.binding.handleAppLifecycleStateChanged(state);
+    }
+    await tester.pump();
+    expect(phone.log, ['background on']);
+    for (final state in [
+      AppLifecycleState.hidden,
+      AppLifecycleState.inactive,
+      AppLifecycleState.resumed,
+    ]) {
+      tester.binding.handleAppLifecycleStateChanged(state);
+    }
+    await tester.pump();
+    expect(phone.log, ['background on', 'background off']);
   });
 
   testWidgets('ending a call ringing in at the system declines it', (

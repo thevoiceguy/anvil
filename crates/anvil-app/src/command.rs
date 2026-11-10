@@ -50,6 +50,9 @@ pub enum Command {
     /// Allow H.264 from Cisco's OpenH264 (fetched from Cisco if need be),
     /// or not: where it is fetched (Linux).
     H264 { on: bool },
+    /// The app went to the background (a phone's), or came back: our
+    /// camera stops while it is away and starts again on its return.
+    Background { on: bool },
     Decline {
         #[serde(default)]
         call: Option<u64>,
@@ -380,6 +383,9 @@ impl Command {
             // `camera /dev/video2`, `camera default`.
             "camera" => Command::Camera {
                 camera: rest(&words, 1).filter(|c| !c.eq_ignore_ascii_case("default")),
+            },
+            "background" => Command::Background {
+                on: on_off(words.get(1)).ok_or("background needs on or off")?,
             },
             "h264" => Command::H264 {
                 on: on_off(words.get(1)).ok_or("h264 needs on or off")?,
@@ -734,6 +740,10 @@ mod tests {
         assert_eq!(
             Command::parse_line("h264 off").unwrap(),
             Command::H264 { on: false }
+        );
+        assert_eq!(
+            Command::parse_line("background on").unwrap(),
+            Command::Background { on: true }
         );
         assert_eq!(
             Command::parse_line("rename-line own My desk").unwrap(),

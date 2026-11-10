@@ -6,8 +6,10 @@
 //! `linux/runner/video_texture.cc`) makes a texture and hands Dart its id
 //! with a C function and its argument; Dart hands those here
 //! ([`attach_tile`]), and the video host's threads call the function with
-//! each picture, as RGBA (BGRA on macOS: `macos/Runner`), at the moment it
-//! is to be seen.
+//! each picture, as RGBA (BGRA on macOS and iOS: `macos/Runner`,
+//! `ios/Runner`), at the moment it is to be seen.
+
+use std::sync::atomic::{AtomicBool, Ordering};
 
 use anvil_app::Command;
 use flutter_rust_bridge::frb;
@@ -29,15 +31,35 @@ pub async fn allow_h264(on: bool) -> anyhow::Result<()> {
     run_command(Command::H264 { on }).await.map(|_| ())
 }
 
+/// Whether the app is out of sight: a phone's is until its app says it is
+/// shown, as a push starts the phone with no app on the screen.
+static BACKGROUND: AtomicBool =
+    AtomicBool::new(cfg!(any(target_os = "android", target_os = "ios")));
+
+pub(crate) fn in_background() -> bool {
+    BACKGROUND.load(Ordering::Relaxed)
+}
+
+/// The app went to the background (a phone's) or came back: our camera
+/// stops while it is away and starts again on its return. Kept for a phone
+/// started later.
+pub async fn set_background(on: bool) -> anyhow::Result<()> {
+    BACKGROUND.store(on, Ordering::Relaxed);
+    if super::phone::running() {
+        run_command(Command::Background { on }).await?;
+    }
+    Ok(())
+}
+
 /// Show a tile on a texture: an incoming stream by id, or (`None`) the
 /// self-view. `present` is the texture plugin's
 /// `void present(void* texture, const uint8_t* rgba, uint32_t width,
-/// uint32_t height)` (BGRA on macOS) and `texture` its argument; it is called on the
+/// uint32_t height)` (BGRA on macOS and iOS) and `texture` its argument; it is called on the
 /// video host's threads, never after [`detach_tile`] returns. The
 /// attachment's id.
 #[frb(sync)]
 pub fn attach_tile(stream: Option<u32>, present: usize, texture: usize) -> anyhow::Result<u64> {
-    desktop::attach(stream, present, texture)
+    native::attach(stream, present, texture)
 }
 
 /// What a tile shows: its picture's size, and whether it is frozen (the
@@ -51,17 +73,17 @@ pub struct TileInfo {
 /// A tile's picture, once it has one.
 #[frb(sync)]
 pub fn tile_info(stream: Option<u32>) -> Option<TileInfo> {
-    desktop::info(stream)
+    native::info(stream)
 }
 
 /// Stop showing an attachment; its function is not called again.
 #[frb(sync)]
 pub fn detach_tile(attachment: u64) {
-    desktop::detach(attachment);
+    native::detach(attachment);
 }
 
-#[cfg(not(any(target_os = "android", target_os = "ios")))]
-pub(crate) mod desktop {
+#[cfg(not(target_os = "android"))]
+pub(crate) mod native {
     use super::*;
 
     use std::collections::HashMap;
@@ -148,10 +170,10 @@ pub(crate) mod desktop {
             let Some(rgba) = buffer.as_mut() else {
                 return;
             };
-            // Core Video's order on macOS, the pixel buffer's elsewhere.
-            #[cfg(target_os = "macos")]
+            // Core Video's order on Apple's, the pixel buffer's elsewhere.
+            #[cfg(target_vendor = "apple")]
             picture.write_bgra(rgba);
-            #[cfg(not(target_os = "macos"))]
+            #[cfg(not(target_vendor = "apple"))]
             picture.write_rgba(rgba);
             // SAFETY: the plugin's function, with the texture it gave for
             // it, called only until it is detached (the texture plugin
@@ -233,8 +255,8 @@ pub(crate) mod desktop {
     }
 }
 
-#[cfg(any(target_os = "android", target_os = "ios"))]
-pub(crate) mod desktop {
+#[cfg(target_os = "android")]
+pub(crate) mod native {
     pub(crate) fn attach(_: Option<u32>, _: usize, _: usize) -> anyhow::Result<u64> {
         anyhow::bail!("no video on this platform yet")
     }
@@ -279,7 +301,7 @@ mod tests {
             }),
             SoftwareCodecs::default(),
         );
-        assert!(desktop::install(host.clone()), "the first host");
+        assert!(native::install(host.clone()), "the first host");
         let seen: &'static Seen = Box::leak(Box::default());
         let present = record as unsafe extern "C" fn(*mut c_void, *const u8, u32, u32) as usize;
         let attachment = attach_tile(None, present, seen as *const Seen as usize).unwrap();

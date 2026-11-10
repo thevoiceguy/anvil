@@ -1275,6 +1275,10 @@ abstract class PhoneApi {
   /// Allow H.264 from Cisco's OpenH264 (fetched now if need be), or not.
   Future<void> allowH264(bool on);
 
+  /// The app went to the background (a phone's) or came back: our camera
+  /// stops while it is away and starts again on its return.
+  Future<void> setBackground(bool on);
+
   /// Where a call's pictures are shown.
   VideoTiles get videoTiles;
   Future<void> decline([int? call]);

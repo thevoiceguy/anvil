@@ -30,6 +30,8 @@
 	<string>$(DEVELOPMENT_TEAM)</string>
 	<key>NSMicrophoneUsageDescription</key>
 	<string>Anvil uses the microphone so the people you call can hear you.</string>
+	<key>NSCameraUsageDescription</key>
+	<string>Anvil uses the camera so the people you video call can see you.</string>
 	<key>UIApplicationSceneManifest</key>
 	<dict>
 		<key>UIApplicationSupportsMultipleScenes</key>

@@ -78,9 +78,13 @@ jobs:
       - uses: dtolnay/rust-toolchain@1.97.1
         with:
           components: clippy
+          targets: aarch64-apple-ios
       - uses: Swatinem/rust-cache@v2
       - run: cargo clippy --workspace --all-targets -- -D warnings
       - run: cargo test -p anvil-video
+      # The same cameras and codecs on an iPhone (the app's iOS job links
+      # them; neither runner has a camera).
+      - run: cargo clippy -p anvil-video --target aarch64-apple-ios --all-targets -- -D warnings
 
   # Anvil against FCP: FCP's compose stack from its nightly images, and
   # the tests against it (users made through the admin API, calls through

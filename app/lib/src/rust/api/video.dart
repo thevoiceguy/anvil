@@ -7,6 +7,8 @@ import '../frb_generated.dart';
 
 import 'package:flutter_rust_bridge/flutter_rust_bridge_for_generated.dart';
 
+// These functions are ignored because they are not marked as `pub`: `in_background`
+
 /// Our camera on or off in a call (the connected one when `None`).
 Future<void> setVideo({BigInt? call, required bool on_}) =>
     RustLib.instance.api.crateApiVideoSetVideo(call: call, on_: on_);
@@ -19,10 +21,16 @@ Future<void> chooseCamera({String? camera}) =>
 Future<void> allowH264({required bool on_}) =>
     RustLib.instance.api.crateApiVideoAllowH264(on_: on_);
 
+/// The app went to the background (a phone's) or came back: our camera
+/// stops while it is away and starts again on its return. Kept for a phone
+/// started later.
+Future<void> setBackground({required bool on_}) =>
+    RustLib.instance.api.crateApiVideoSetBackground(on_: on_);
+
 /// Show a tile on a texture: an incoming stream by id, or (`None`) the
 /// self-view. `present` is the texture plugin's
 /// `void present(void* texture, const uint8_t* rgba, uint32_t width,
-/// uint32_t height)` (BGRA on macOS) and `texture` its argument; it is called on the
+/// uint32_t height)` (BGRA on macOS and iOS) and `texture` its argument; it is called on the
 /// video host's threads, never after [`detach_tile`] returns. The
 /// attachment's id.
 BigInt attachTile({

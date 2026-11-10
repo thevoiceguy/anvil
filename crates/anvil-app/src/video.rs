@@ -126,27 +126,82 @@ impl Phone {
         }
     }
 
-    /// What a call is placed with: video when asked and there is any.
+    /// What a call is placed or answered with: video when asked and there
+    /// is any, and not while the app is in the background (a phone's
+    /// camera is not its there).
     pub(crate) async fn media_for(&self, video: bool) -> Result<CallMedia, PhoneError> {
+        let away = self.inner.background.lock().is_some();
         Ok(CallMedia {
-            video: video && self.anvil().await?.has_video(),
+            video: video && !away && self.anvil().await?.has_video(),
         })
     }
 
-    /// What `id` is answered with: as asked, else video when it offers
-    /// some and there is any here.
-    pub(crate) async fn answer_media(
-        &self,
-        id: u64,
-        video: Option<bool>,
-    ) -> Result<CallMedia, PhoneError> {
+    /// Whether `id` is answered with video: as asked, else when it offers
+    /// some.
+    pub(crate) fn answer_wants_video(&self, id: u64, video: Option<bool>) -> bool {
         let offered = self
             .inner
             .state
             .lock()
             .call(id)
             .is_some_and(|c| c.video.offered);
-        self.media_for(video.unwrap_or(offered) && offered).await
+        video.unwrap_or(offered) && offered
+    }
+
+    /// `call` was placed or answered wanting video while the app was in
+    /// the background: our camera starts when it comes back.
+    pub(crate) async fn camera_later(&self, call: u64, video: bool) {
+        let can = video && self.anvil().await.is_ok_and(|a| a.has_video());
+        if let (true, Some(later)) = (can, self.inner.background.lock().as_mut()) {
+            if !later.contains(&call) {
+                later.push(call);
+            }
+        }
+    }
+
+    /// The app went to the background, or came back. Away, every call
+    /// sending our camera stops sending it (a phone's camera stops with
+    /// the app); back, each starts again, if it is still up and not held.
+    pub(crate) async fn set_background(&self, on: bool) {
+        if on {
+            let sending: Vec<u64> = {
+                let mut background = self.inner.background.lock();
+                if background.is_some() {
+                    return;
+                }
+                let sending = self
+                    .inner
+                    .state
+                    .lock()
+                    .calls
+                    .iter()
+                    .filter(|c| c.video.camera)
+                    .map(|c| c.id)
+                    .collect();
+                *background = Some(Vec::new());
+                sending
+            };
+            for id in sending {
+                match self.set_video(Some(id), false).await {
+                    Ok(()) => self.camera_later(id, true).await,
+                    Err(e) => tracing::warn!(call = id, %e, "the camera did not stop"),
+                }
+            }
+        } else {
+            let Some(later) = self.inner.background.lock().take() else {
+                return;
+            };
+            for id in later {
+                let up = self.inner.state.lock().call(id).is_some_and(|c| {
+                    c.state == crate::CallState::Connected && !c.held && !c.video.camera
+                });
+                if up {
+                    if let Err(e) = self.set_video(Some(id), true).await {
+                        tracing::warn!(call = id, %e, "the camera did not start again");
+                    }
+                }
+            }
+        }
     }
 
     /// Our camera on or off in `call`.

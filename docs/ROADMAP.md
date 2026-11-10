@@ -213,6 +213,15 @@ every recommendation:
             size nearest the one asked; access is the user's Privacy
             setting, a refused camera failing to open with a message)
   - [ ] **A3** Mobile video
+    - [x] **A3a** iOS: AVFoundation's front and back cameras (front by
+          default, upright, the call's audio session left alone) and
+          VideoToolbox through `anvil-video`, the runner's texture plugin,
+          CallKit told a call's video (`hasVideo`, `isVideo`), and the
+          camera stopped while the app is out of sight (`background`),
+          a video call answered there getting it on the app's return
+    - [ ] **A3b** Android: Camera2 and MediaCodec, the texture plugin,
+          `ConnectionService` video state
+    - [ ] **A3c** Picture-in-picture, and video only on Wi-Fi
   - [ ] **A4** Anvil in FCP's rooms
   - [ ] **A5** Mobile screen share
 - [ ] **U6** Accessibility, localisation, store listings

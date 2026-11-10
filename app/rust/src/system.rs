@@ -96,17 +96,25 @@ pub(crate) enum SystemEvent {
         name: String,
         number: String,
         server_call: Option<String>,
+        /// It offers video.
+        video: bool,
     },
     /// A call placed, or one already up when the screen first hears of it.
     Outgoing {
         id: u64,
         name: String,
         number: String,
+        video: bool,
     },
     Connected {
         id: u64,
     },
     Held {
+        id: u64,
+        on: bool,
+    },
+    /// The call became a video call, or stopped being one.
+    Video {
         id: u64,
         on: bool,
     },
@@ -121,6 +129,17 @@ pub(crate) enum SystemEvent {
 struct Told {
     connected: bool,
     held: bool,
+    video: bool,
+}
+
+/// Whether the screen shows `call` as a video call: ringing in, as it
+/// offers; else while either side's picture is in it.
+fn video_of(call: &anvil_app::CallView) -> bool {
+    if call.direction == Direction::Incoming && call.state != CallState::Connected {
+        call.video.offered
+    } else {
+        call.video.camera || !call.video.streams.is_empty()
+    }
 }
 
 /// The calls as the system's call screen has them, kept in step with the
@@ -137,6 +156,7 @@ impl SystemCalls {
         let mut said = Vec::new();
         for call in &state.calls {
             let connected = call.state == CallState::Connected;
+            let video = video_of(call);
             let Some(told) = self.told.get_mut(&call.id) else {
                 let name = name_for(state, call);
                 let number = short_address(&call.remote);
@@ -146,12 +166,14 @@ impl SystemCalls {
                         name,
                         number,
                         server_call: call.server_call.clone(),
+                        video,
                     });
                 } else {
                     said.push(SystemEvent::Outgoing {
                         id: call.id,
                         name,
                         number,
+                        video,
                     });
                     if connected {
                         said.push(SystemEvent::Connected { id: call.id });
@@ -168,6 +190,7 @@ impl SystemCalls {
                     Told {
                         connected,
                         held: call.held,
+                        video,
                     },
                 );
                 continue;
@@ -181,6 +204,13 @@ impl SystemCalls {
                 said.push(SystemEvent::Held {
                     id: call.id,
                     on: call.held,
+                });
+            }
+            if video != told.video {
+                told.video = video;
+                said.push(SystemEvent::Video {
+                    id: call.id,
+                    on: video,
                 });
             }
         }
@@ -369,6 +399,7 @@ mod tests {
                 name: "Ann Lee".into(),
                 number: "1002".into(),
                 server_call: Some("6f1c".into()),
+                video: false,
             }]
         );
         assert!(
@@ -420,10 +451,39 @@ mod tests {
                     id: 3,
                     name: "Carol".into(),
                     number: "2001".into(),
+                    video: false,
                 },
                 SystemEvent::Connected { id: 3 },
             ]
         );
+    }
+
+    #[test]
+    fn a_video_call_is_told_as_one() {
+        let mut calls = SystemCalls::default();
+        let mut call = ringing_in(9);
+        call.video.offered = true;
+        assert!(matches!(
+            calls.sync(&state(vec![call.clone()]))[..],
+            [SystemEvent::Incoming { video: true, .. }]
+        ));
+        // Answered with audio only: no picture either way.
+        call.state = CallState::Connected;
+        assert_eq!(
+            calls.sync(&state(vec![call.clone()])),
+            vec![
+                SystemEvent::Connected { id: 9 },
+                SystemEvent::Video { id: 9, on: false }
+            ]
+        );
+        // The far end's picture arrives.
+        call.video.streams.push(4);
+        assert_eq!(
+            calls.sync(&state(vec![call.clone()])),
+            vec![SystemEvent::Video { id: 9, on: true }]
+        );
+        call.video.camera = true;
+        assert!(calls.sync(&state(vec![call])).is_empty(), "still video");
     }
 
     fn action(json: &str) -> Action {
