@@ -1297,6 +1297,7 @@ async fn run(
         tracing::info!(%target, "placing call");
         let media = anvil_core::CallMedia {
             video: video.is_some() && cli.video_at.is_none(),
+            receive_only: false,
         };
         match anvil.place_call_with_media(&target, media).await {
             Ok(id) => {
@@ -1336,7 +1337,7 @@ async fn run(
                         println!("[event] IncomingCall from {label}");
                         if cli.auto_answer && active_call.is_none() {
                             tracing::info!(?call, "auto-answering");
-                            let media = anvil_core::CallMedia { video: video.is_some() };
+                            let media = anvil_core::CallMedia { video: video.is_some(), receive_only: false };
                             if let Err(e) = anvil.answer_with_media(call, media).await {
                                 tracing::warn!(%e, "answer failed");
                             } else {

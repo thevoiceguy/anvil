@@ -13,6 +13,7 @@ use std::time::Duration;
 use anvil_app::{CallState, Command, OpenH264, Phone, PhoneConfig};
 use anvil_core::audio::{AudioFormat, AudioFrame, AudioHost, AudioSink, AudioSource, DeviceInfo};
 use anvil_core::config::{AccountConfig, MediaConfig};
+use anvil_core::video::host::Resolution;
 use anvil_core::video::synthetic::SyntheticVideoHost;
 use anvil_core::{AnvilConfig, AnvilError, BrandConfig, Transport};
 use async_trait::async_trait;
@@ -404,6 +405,71 @@ async fn a_phone_in_the_background_stops_its_camera_until_it_comes_back() {
         s.calls[0].video.streams.len() == 1
     })
     .await;
+
+    run(&alice, "hangup").await;
+    until(&bob, "the call ends", |s| s.calls.is_empty()).await;
+    alice.shutdown().await;
+    bob.shutdown().await;
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn on_cellular_a_phone_sends_at_most_360p_and_with_wifi_only_none_until_wifi() {
+    log();
+    let alice_host = SyntheticVideoHost::default();
+    let alice = phone("alice", "127.0.0.140", Some(alice_host.clone()), None).await;
+    let bob = phone(
+        "bob",
+        "127.0.0.141",
+        Some(SyntheticVideoHost::default()),
+        None,
+    )
+    .await;
+    let run = |p: &Phone, line: &str| {
+        let (p, command) = (p.clone(), Command::parse_line(line).unwrap());
+        async move { p.execute(command).await.unwrap() }
+    };
+
+    // Alice is on cellular and sends video only on Wi-Fi: she answers Bob's
+    // video call seeing him, sending nothing.
+    run(&alice, "network cellular").await;
+    run(&alice, "wifi-only on").await;
+    let video = alice.state().video;
+    assert!(video.cellular && video.wifi_only, "{video:?}");
+    run(&bob, &format!("vcall sip:alice@{}", alice.sip_address())).await;
+    until(&alice, "Alice rings with video", |s| {
+        s.calls
+            .iter()
+            .any(|c| c.state == CallState::Ringing && c.video.offered)
+    })
+    .await;
+    run(&alice, "answer").await;
+    until(&alice, "Alice sees Bob", |s| {
+        s.calls
+            .first()
+            .is_some_and(|c| c.state == CallState::Connected && c.video.streams.len() == 1)
+    })
+    .await;
+    assert!(!call(&alice).video.camera, "{:?}", call(&alice));
+    assert!(alice_host.record().sent.is_empty(), "nothing sent");
+
+    // On Wi-Fi: her camera starts, at the size the call allows.
+    run(&alice, "network wifi").await;
+    until(&bob, "Bob sees Alice", |s| {
+        s.calls[0].video.streams.len() == 1
+    })
+    .await;
+    assert_eq!(alice_host.record().sent[0].config.max, Resolution::P720);
+
+    // Back on cellular with Wi-Fi only off: she keeps sending, at most
+    // 360p from her next frame.
+    run(&alice, "wifi-only off").await;
+    run(&alice, "network cellular").await;
+    tokio::time::sleep(Duration::from_millis(300)).await;
+    let sent = &alice_host.record().sent[0];
+    assert!(!sent.stopped);
+    let (_, max, _) = *sent.targets.last().expect("a target set");
+    assert_eq!((max.width, max.height), (640, 360), "{:?}", sent.targets);
+    assert!(call(&alice).video.camera);
 
     run(&alice, "hangup").await;
     until(&bob, "the call ends", |s| s.calls.is_empty()).await;

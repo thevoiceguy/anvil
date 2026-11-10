@@ -756,7 +756,10 @@ Windows) and the phones (A3a the iPhone, A3b Android). On a Mac and an iPhone
 the system asks for the camera the first time a call sends video; the call goes
 on meanwhile, and a camera refused leaves it receiving only. Android asks before
 a call first uses it (placed or answered with video, or the camera turned on);
-refused, the call goes on receiving only and the app says where to allow it. On Windows camera
+refused, the call goes on receiving only and the app says where to allow it.
+On a phone on cellular, calls send at most 360p; **Send video only on Wi-Fi**
+(Settings → Video, phones only) sends none there instead, showing the other
+person's picture, and starts the camera when the phone is back on Wi-Fi. On Windows camera
 access is the Privacy setting, and a refused camera does the same:
 - **Placing.** The keypad has **Video call** beside **Call** where the
   device has video (a camera need not be there: the far end's picture

@@ -423,7 +423,17 @@ off, OpenH264 is neither fetched nor offered. libvpx is linked statically where 
 archive is installed, so the packages need no libvpx of their own.
 
 On a phone the camera is the app's only while it is seen: the app tells the phone
-when it is hidden and shown (`background on|off`). Hidden, every call sending our
+when it is hidden and shown (`background on|off`), and whether it is on cellular
+(`network cellular|wifi`, from Android's `ConnectivityManager` default network and
+iOS's `NWPathMonitor`). On cellular every call sends at most 360p: `Anvil` wraps the
+platform's host (`video/limit.rs`) so each source it opens keeps to
+`set_send_limit`, and a source already sending takes a new limit at its next frame.
+With the user's setting to send video only on Wi-Fi (`wifi-only on|off`), cellular
+withholds our camera as the background does, except that a video call placed or
+answered meanwhile still receives the far end's picture (`CallMedia::receive_only`:
+offered `recvonly`, or an answer's sections made `recvonly`), and the camera starts
+in it back on Wi-Fi. One hold (`CameraHold`) says why the camera is withheld and
+which calls start it again when it no longer is. Hidden, every call sending our
 camera stops sending it (a re-INVITE) and is remembered, and a video call placed or
 answered meanwhile (at the lock screen) goes without our camera; shown, each
 remembered call still up and not held starts it again. The bridge keeps the last

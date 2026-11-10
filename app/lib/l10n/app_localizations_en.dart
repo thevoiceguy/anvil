@@ -158,6 +158,17 @@ class StringsEn extends Strings {
       'Anvil may not use the microphone, so callers won\'t hear you. Allow it in the system\'s settings for Anvil.';
 
   @override
+  String get wifiOnlySetting => 'Send video only on Wi-Fi';
+
+  @override
+  String get wifiOnlyNote =>
+      'On cellular, calls show the other person\'s video without sending yours. Off, video on cellular is sent at up to 360p.';
+
+  @override
+  String get wifiOnlyNow =>
+      'On cellular now: your camera starts when you\'re back on Wi-Fi.';
+
+  @override
   String get cameraRefused =>
       'Anvil may not use the camera, so callers won\'t see you. Allow it in the system\'s settings for Anvil.';
 

@@ -54,6 +54,10 @@ pub(crate) struct LocalSettings {
     /// off.
     #[serde(default = "on", skip_serializing_if = "is_on")]
     pub h264: bool,
+    /// Send video only on Wi-Fi (a phone's): on cellular, calls receive
+    /// video without sending ours.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub wifi_only: bool,
 }
 
 fn is_off(mode: &crate::CaptureMode) -> bool {
@@ -78,6 +82,7 @@ impl Default for LocalSettings {
             capture_calls: crate::CaptureMode::Off,
             camera: None,
             h264: true,
+            wifi_only: false,
         }
     }
 }
@@ -200,6 +205,7 @@ mod tests {
             capture_calls: crate::CaptureMode::EveryCall,
             camera: Some("/dev/video2".into()),
             h264: false,
+            wifi_only: true,
         };
         saved.save(&path).unwrap();
         assert_eq!(LocalSettings::load(&path), saved);

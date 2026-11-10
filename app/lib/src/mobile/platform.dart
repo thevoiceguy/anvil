@@ -173,6 +173,11 @@ abstract class MobilePlatform {
   /// Send the call's audio this way.
   Future<void> setAudioRoute(AudioRoute route);
 
+  /// Whether the phone's network is cellular now (null: not known), and
+  /// each change to it.
+  Future<bool?> cellular();
+  Stream<bool> get cellularChanges;
+
   /// Turn the screen off when the phone is held to the ear (a call up on
   /// the earpiece), or stop.
   Future<void> setProximity(bool on);
@@ -192,6 +197,7 @@ class NativeMobile implements MobilePlatform {
   static const _channel = MethodChannel('anvil/mobile');
   final _events = StreamController<SystemCallEvent>.broadcast();
   final _routes = StreamController<AudioRoutes>.broadcast();
+  final _cellular = StreamController<bool>.broadcast();
 
   static bool get supported =>
       !kIsWeb && (Platform.isAndroid || Platform.isIOS);
@@ -260,8 +266,25 @@ class NativeMobile implements MobilePlatform {
   Future<void> setProximity(bool on) =>
       _channel.invokeMethod<void>('setProximity', {'on': on});
 
+  @override
+  Future<bool?> cellular() async {
+    try {
+      return await _channel.invokeMethod<bool>('cellular');
+    } on MissingPluginException {
+      return null;
+    }
+  }
+
+  @override
+  Stream<bool> get cellularChanges => _cellular.stream;
+
   /// `callEvent` from the native side: `{action, id, on?, digits?, reason?}`.
   Future<void> _fromSystem(MethodCall call) async {
+    if (call.method == 'network') {
+      final cellular = (call.arguments as Map?)?['cellular'];
+      if (cellular is bool) _cellular.add(cellular);
+      return;
+    }
     if (call.method == 'audioRoutes') {
       final routes = AudioRoutes.fromMap(call.arguments);
       if (routes != null) _routes.add(routes);

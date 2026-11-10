@@ -682,6 +682,18 @@ class _Video extends StatelessWidget {
             value: allowed,
             onChanged: (on) => model.run(() => model.api.allowH264(on)),
           ),
+        // A phone's: on cellular a call sends at most 360p, or none.
+        if (model.mobile != null && video.available)
+          SwitchListTile(
+            key: const Key('wifiOnly'),
+            secondary: const Icon(Icons.wifi),
+            title: Text(s.wifiOnlySetting),
+            subtitle: Text(
+              video.cellular && video.wifiOnly ? s.wifiOnlyNow : s.wifiOnlyNote,
+            ),
+            value: video.wifiOnly,
+            onChanged: (on) => model.run(() => model.api.setWifiOnly(on)),
+          ),
       ],
     );
   }

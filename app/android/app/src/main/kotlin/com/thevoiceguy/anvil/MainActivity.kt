@@ -14,6 +14,7 @@ import io.flutter.plugin.common.MethodChannel
 class MainActivity : FlutterActivity() {
     private var microphoneAnswer: MethodChannel.Result? = null
     private var cameraAnswer: MethodChannel.Result? = null
+    private var network: NetworkWatch? = null
 
     override fun onCreate(savedInstanceState: Bundle?) {
         // Before Dart opens the library: its audio needs the JVM. The
@@ -59,6 +60,7 @@ class MainActivity : FlutterActivity() {
         VideoTextures.register(flutterEngine)
         val channel = MethodChannel(flutterEngine.dartExecutor.binaryMessenger, "anvil/mobile")
         CallSystem.channel = channel
+        network = NetworkWatch(this, channel)
         channel.setMethodCallHandler { call, result ->
             when (call.method) {
                 "requestMicrophone" -> requestMicrophone(result)
@@ -83,6 +85,7 @@ class MainActivity : FlutterActivity() {
                     result.success(null)
                 }
                 "audioRoutes" -> result.success(CallSystem.audioRoutes())
+                "cellular" -> result.success(network?.cellular())
                 "setAudioRoute" -> {
                     CallSystem.setAudioRoute(call.text("route"))
                     result.success(null)
@@ -114,6 +117,8 @@ class MainActivity : FlutterActivity() {
     override fun cleanUpFlutterEngine(flutterEngine: FlutterEngine) {
         CallSystem.channel = null
         VideoTextures.clear()
+        network?.stop()
+        network = null
         super.cleanUpFlutterEngine(flutterEngine)
     }
 

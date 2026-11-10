@@ -53,6 +53,11 @@ pub enum Command {
     /// The app went to the background (a phone's), or came back: our
     /// camera stops while it is away and starts again on its return.
     Background { on: bool },
+    /// The phone's network: cellular or not (Wi-Fi, a wire). On cellular
+    /// a call sends at most 360p, and none with video only on Wi-Fi.
+    Network { cellular: bool },
+    /// Send video only on Wi-Fi (a phone's setting), or on cellular too.
+    WifiOnly { on: bool },
     Decline {
         #[serde(default)]
         call: Option<u64>,
@@ -386,6 +391,17 @@ impl Command {
             },
             "background" => Command::Background {
                 on: on_off(words.get(1)).ok_or("background needs on or off")?,
+            },
+            // `network cellular`, `network wifi`.
+            "network" => Command::Network {
+                cellular: match words.get(1).map(|w| w.to_ascii_lowercase()).as_deref() {
+                    Some("cellular") => true,
+                    Some("wifi") => false,
+                    _ => return Err("network needs cellular or wifi".into()),
+                },
+            },
+            "wifi-only" => Command::WifiOnly {
+                on: on_off(words.get(1)).ok_or("wifi-only needs on or off")?,
             },
             "h264" => Command::H264 {
                 on: on_off(words.get(1)).ok_or("h264 needs on or off")?,
@@ -744,6 +760,18 @@ mod tests {
         assert_eq!(
             Command::parse_line("background on").unwrap(),
             Command::Background { on: true }
+        );
+        assert_eq!(
+            Command::parse_line("network cellular").unwrap(),
+            Command::Network { cellular: true }
+        );
+        assert_eq!(
+            Command::parse_line("network wifi").unwrap(),
+            Command::Network { cellular: false }
+        );
+        assert_eq!(
+            Command::parse_line("wifi-only on").unwrap(),
+            Command::WifiOnly { on: true }
         );
         assert_eq!(
             Command::parse_line("rename-line own My desk").unwrap(),

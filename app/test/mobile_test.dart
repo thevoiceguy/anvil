@@ -2,7 +2,8 @@
 // the phone starts, and says so when the microphone is refused; and the
 // system's call screen follows the phone's calls, and what the user does
 // there reaches the phone; and the camera stops while the app is out of
-// sight, and is asked for before a call first uses it.
+// sight, and is asked for before a call first uses it; and the phone hears
+// when it is on cellular, where the user may keep video to Wi-Fi.
 
 import 'package:anvil/src/app.dart';
 import 'package:anvil/src/mobile/platform.dart';
@@ -11,7 +12,7 @@ import 'package:flutter_test/flutter_test.dart';
 
 import 'fake_mobile.dart';
 import 'fake_phone.dart';
-import 'screens_test.dart' show tapKey;
+import 'screens_test.dart' show go, tapKey;
 import 'video_test.dart' show withVideo;
 
 void main() {
@@ -312,5 +313,45 @@ void main() {
     expect(mobile.log, contains('requestCamera'));
     expect(phone.log, contains('answer 2 video=true'));
     expect(find.textContaining('may not use the camera'), findsOneWidget);
+  });
+
+  testWidgets('the phone hears its network, and video may be kept to Wi-Fi', (
+    tester,
+  ) async {
+    tester.view.physicalSize = const Size(1000, 1400);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.reset);
+    final phone = FakePhone()
+      ..saved = const SignedInAccountFake()
+      ..seed = withVideo;
+    final mobile = FakeMobile()..onCellular = true;
+    await tester.pumpWidget(AnvilApp(phone: phone, mobile: mobile));
+    await tester.pumpAndSettle();
+    expect(phone.log, contains('network cellular'), reason: 'at start');
+
+    mobile.network(cellular: false);
+    await tester.pump();
+    expect(phone.log.last, 'network wifi');
+
+    await go(tester, 'Settings');
+    expect(find.text('Send video only on Wi-Fi'), findsOneWidget);
+    await tapKey(tester, 'wifiOnly');
+    expect(phone.log.last, 'wifi-only on');
+    mobile.network(cellular: true);
+    await tester.pumpAndSettle();
+    expect(find.textContaining('back on Wi-Fi'), findsOneWidget);
+  });
+
+  testWidgets('a desktop has no Wi-Fi only setting', (tester) async {
+    tester.view.physicalSize = const Size(1000, 1400);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.reset);
+    final phone = FakePhone()
+      ..saved = const SignedInAccountFake()
+      ..seed = withVideo;
+    await tester.pumpWidget(AnvilApp(phone: phone));
+    await tester.pumpAndSettle();
+    await go(tester, 'Settings');
+    expect(find.byKey(const Key('wifiOnly')), findsNothing);
   });
 }

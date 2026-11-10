@@ -497,9 +497,16 @@ pub async fn start_phone(session_path: String) -> anyhow::Result<()> {
     }
     *PHONE.lock() = Some(phone.clone());
     // Started out of sight (a push woke it): the camera waits for the app.
-    if super::video::in_background() {
+    // On cellular, as the app last said: at most 360p, or none.
+    let (background, cellular) = (super::video::in_background(), super::video::on_cellular());
+    if background || cellular {
         runtime().spawn(async move {
-            let _ = phone.execute(Command::Background { on: true }).await;
+            if background {
+                let _ = phone.execute(Command::Background { on: true }).await;
+            }
+            if cellular {
+                let _ = phone.execute(Command::Network { cellular: true }).await;
+            }
         });
     }
     Ok(())
@@ -614,6 +621,11 @@ pub struct VideoInfo {
     pub h264_allowed: Option<bool>,
     pub h264_ready: bool,
     pub h264_notice: Option<String>,
+    /// Video is sent only on Wi-Fi (a phone's setting).
+    pub wifi_only: bool,
+    /// The phone is on cellular: calls send at most 360p, or none with
+    /// `wifi_only`.
+    pub cellular: bool,
 }
 
 pub struct Camera {
@@ -1195,6 +1207,8 @@ pub fn phone_state() -> anyhow::Result<PhoneState> {
             h264_allowed: s.video.h264.as_ref().map(|h| h.allowed),
             h264_ready: s.video.h264.as_ref().is_some_and(|h| h.ready),
             h264_notice: s.video.h264.as_ref().map(|h| h.notice.clone()),
+            wifi_only: s.video.wifi_only,
+            cellular: s.video.cellular,
         },
         directory_listed: s.directory.map(|d| d.listed),
         may_change_directory_listing: s.directory.is_some_and(|d| d.may_change),

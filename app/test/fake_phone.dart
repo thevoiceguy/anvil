@@ -332,19 +332,7 @@ class FakePhone implements PhoneApi {
   @override
   Future<void> chooseCamera(String? id) async {
     log.add('camera ${id ?? 'default'}');
-    set(
-      state.copyWith(
-        video: VideoSettings(
-          available: state.video.available,
-          cameras: state.video.cameras,
-          camera: id,
-          h264Allowed: state.video.h264Allowed,
-          h264Ready: state.video.h264Ready,
-          h264Notice: state.video.h264Notice,
-        ),
-      ),
-      'video',
-    );
+    set(state.copyWith(video: state.video.copyWith(camera: () => id)), 'video');
   }
 
   @override
@@ -353,18 +341,26 @@ class FakePhone implements PhoneApi {
   }
 
   @override
+  Future<void> setNetwork({required bool cellular}) async {
+    log.add('network ${cellular ? 'cellular' : 'wifi'}');
+    set(
+      state.copyWith(video: state.video.copyWith(cellular: cellular)),
+      'video',
+    );
+  }
+
+  @override
+  Future<void> setWifiOnly(bool on) async {
+    log.add('wifi-only ${on ? 'on' : 'off'}');
+    set(state.copyWith(video: state.video.copyWith(wifiOnly: on)), 'video');
+  }
+
+  @override
   Future<void> allowH264(bool on) async {
     log.add('h264 ${on ? 'on' : 'off'}');
     set(
       state.copyWith(
-        video: VideoSettings(
-          available: state.video.available,
-          cameras: state.video.cameras,
-          camera: state.video.camera,
-          h264Allowed: on,
-          h264Ready: on,
-          h264Notice: state.video.h264Notice,
-        ),
+        video: state.video.copyWith(h264Allowed: on, h264Ready: on),
       ),
       'video',
     );

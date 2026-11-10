@@ -501,11 +501,15 @@ pub(crate) async fn send_answer_and_start_media(
     };
 
     // Without the video offered: every section declined, and the answer
-    // made again to say so.
-    if !media_wanted.video {
+    // made again to say so. Receiving only: each section taken says so.
+    if !media_wanted.video || media_wanted.receive_only {
         let sections = calls.get_mut(&call).and_then(|mut e| {
             let v = e.video.as_mut()?;
-            v.decline_all();
+            if media_wanted.video {
+                v.receive_only();
+            } else {
+                v.decline_all();
+            }
             Some(v.sdp_sections())
         });
         if let Some(sections) = sections {

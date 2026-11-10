@@ -230,6 +230,14 @@ every recommendation:
             for when a call first uses it, Telecom told a call's video
             state
     - [ ] **A3c** Picture-in-picture, and video only on Wi-Fi
+      - [x] **A3c1** Video on cellular: at most 360p (a limit the core
+            keeps across every call, taken by a source already sending at
+            its next frame), and a setting to send only on Wi-Fi — calls
+            then receive video without sending ours (`recvonly`) and start
+            the camera on Wi-Fi; the network from `ConnectivityManager` and
+            `NWPathMonitor`
+      - [ ] **A3c2** Picture-in-picture: Android's PiP mode, AVKit's
+            video-call PiP on iOS
   - [ ] **A4** Anvil in FCP's rooms
   - [ ] **A5** Mobile screen share
 - [ ] **U6** Accessibility, localisation, store listings

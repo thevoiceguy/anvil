@@ -42,6 +42,7 @@ class _Told {
 class _MobileBridgeState extends State<MobileBridge> {
   StreamSubscription<SystemCallEvent>? _events;
   StreamSubscription<AudioRoutes>? _routeChanges;
+  StreamSubscription<bool>? _networkChanges;
   late final AppLifecycleListener _lifecycle;
   final Map<int, _Told> _told = {};
   final ValueNotifier<AudioRoutes?> _routes = ValueNotifier(null);
@@ -57,6 +58,13 @@ class _MobileBridgeState extends State<MobileBridge> {
     // Android's call screen follows the phone itself (platform.dart).
     if (!mobile.systemFollowsPhone) _events = mobile.callEvents.listen(_act);
     _routeChanges = mobile.audioRouteChanges.listen(_routed);
+    // On cellular a call sends less video, or none (the user's setting).
+    _networkChanges = mobile.cellularChanges.listen(_network);
+    unawaited(
+      mobile.cellular().then((on) {
+        if (on != null) _network(on);
+      }),
+    );
     // A phone's camera is the app's only while it is seen.
     _lifecycle = AppLifecycleListener(
       onHide: () => _background(true),
@@ -76,12 +84,19 @@ class _MobileBridgeState extends State<MobileBridge> {
     unawaited(model.api.setBackground(on).catchError((Object _) {}));
   }
 
+  void _network(bool cellular) {
+    unawaited(
+      model.api.setNetwork(cellular: cellular).catchError((Object _) {}),
+    );
+  }
+
   @override
   void dispose() {
     model.removeListener(_sync);
     _lifecycle.dispose();
     unawaited(_events?.cancel());
     unawaited(_routeChanges?.cancel());
+    unawaited(_networkChanges?.cancel());
     _routes.dispose();
     super.dispose();
   }

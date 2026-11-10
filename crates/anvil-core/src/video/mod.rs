@@ -13,6 +13,7 @@
 
 pub(crate) mod bwe;
 pub mod host;
+pub(crate) mod limit;
 pub(crate) mod playout;
 pub(crate) mod sdp;
 pub(crate) mod session;
@@ -42,11 +43,26 @@ use crate::CallId;
 pub struct CallMedia {
     /// Offer (or accept) video, where the softphone has a video host.
     pub video: bool,
+    /// With video, receive it without sending ours (`recvonly`): the
+    /// camera is withheld for now (a phone's app away, or on cellular
+    /// with video only on Wi-Fi), and `set_video` turns it on later.
+    pub receive_only: bool,
 }
 
 impl CallMedia {
-    pub const AUDIO: CallMedia = CallMedia { video: false };
-    pub const VIDEO: CallMedia = CallMedia { video: true };
+    pub const AUDIO: CallMedia = CallMedia {
+        video: false,
+        receive_only: false,
+    };
+    pub const VIDEO: CallMedia = CallMedia {
+        video: true,
+        receive_only: false,
+    };
+    /// Video received, ours withheld for now.
+    pub const VIDEO_RECEIVE_ONLY: CallMedia = CallMedia {
+        video: true,
+        receive_only: true,
+    };
 }
 
 /// Which way a stream goes.
@@ -275,18 +291,24 @@ impl CallVideo {
         ))
     }
 
-    /// The sections of an offer of ours: a camera, sending and receiving.
+    /// The sections of an offer of ours: a camera, sending and receiving
+    /// (or only receiving, `receive_only`, until the camera is turned on).
     pub(crate) async fn offer(
         host: Arc<dyn VideoHost>,
         media_ip: IpAddr,
         srtp: SrtpMode,
         capture: crate::capture::CaptureSlot,
+        receive_only: bool,
     ) -> Option<Self> {
         let setup = SectionSetup { media_ip, srtp };
-        let (local, sockets) =
-            Self::camera_offer(host.as_ref(), setup, MediaDirection::Sendrecv).await?;
+        let want = if receive_only {
+            MediaDirection::Recvonly
+        } else {
+            MediaDirection::Sendrecv
+        };
+        let (local, sockets) = Self::camera_offer(host.as_ref(), setup, want).await?;
         let mut v = Self::empty(host, capture);
-        let mut section = CallSection::new(local, MediaDirection::Sendrecv);
+        let mut section = CallSection::new(local, want);
         section.sockets = Some(sockets);
         v.sections.push(section);
         Some(v)
@@ -398,6 +420,15 @@ impl CallVideo {
         self.sections
             .iter()
             .any(|s| s.live() && s.local.kind == VideoKind::Camera && s.want.sends())
+    }
+
+    /// Our answer receiving only: our camera withheld for now, each
+    /// section taken still receives (`set_video` turns it on later).
+    pub(crate) fn receive_only(&mut self) {
+        for s in self.sections.iter_mut().filter(|s| s.local.port != 0) {
+            s.want = s.want.and(MediaDirection::Recvonly);
+            s.local.direction = s.local.direction.and(MediaDirection::Recvonly);
+        }
     }
 
     /// Decline every section (an audio-only answer).
