@@ -144,7 +144,9 @@ mod tests {
         let (mut worst, mut worst_at) = (f64::MAX, 0);
         // The pictures sent lately: a codec running behind hands back an
         // earlier one's frame, which is judged against that picture (when
-        // it came is the keyframes' to say).
+        // it came is the keyframes' to say). The emulator's encoder has run
+        // five behind.
+        const RECENT: usize = 8;
         let mut recent: VecDeque<Picture> = VecDeque::new();
         for n in 0..40u32 {
             let size = if n < 30 { (640, 360) } else { (320, 180) };
@@ -153,7 +155,7 @@ mod tests {
                 recent.clear();
             }
             recent.push_back(sent.clone());
-            if recent.len() > 4 {
+            if recent.len() > RECENT {
                 recent.pop_front();
             }
             if n == 20 {

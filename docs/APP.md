@@ -759,7 +759,9 @@ a call first uses it (placed or answered with video, or the camera turned on);
 refused, the call goes on receiving only and the app says where to allow it.
 On a phone on cellular, calls send at most 360p; **Send video only on Wi-Fi**
 (Settings → Video, phones only) sends none there instead, showing the other
-person's picture, and starts the camera when the phone is back on Wi-Fi. On Windows camera
+person's picture, and starts the camera when the phone is back on Wi-Fi.
+Leaving the app during a call showing the other person's picture keeps that
+picture in a small window of its own (picture-in-picture), on Android and iOS. On Windows camera
 access is the Privacy setting, and a refused camera does the same:
 - **Placing.** The keypad has **Video call** beside **Call** where the
   device has video (a camera need not be there: the far end's picture

@@ -212,7 +212,7 @@ every recommendation:
             link, read through a source reader converting to NV12 at the
             size nearest the one asked; access is the user's Privacy
             setting, a refused camera failing to open with a message)
-  - [ ] **A3** Mobile video
+  - [x] **A3** Mobile video
     - [x] **A3a** iOS: AVFoundation's front and back cameras (front by
           default, upright, the call's audio session left alone) and
           VideoToolbox through `anvil-video`, the runner's texture plugin,
@@ -229,15 +229,18 @@ every recommendation:
             bridge drawing on its surface), the camera permission asked
             for when a call first uses it, Telecom told a call's video
             state
-    - [ ] **A3c** Picture-in-picture, and video only on Wi-Fi
+    - [x] **A3c** Picture-in-picture, and video only on Wi-Fi
       - [x] **A3c1** Video on cellular: at most 360p (a limit the core
             keeps across every call, taken by a source already sending at
             its next frame), and a setting to send only on Wi-Fi — calls
             then receive video without sending ours (`recvonly`) and start
             the camera on Wi-Fi; the network from `ConnectivityManager` and
             `NWPathMonitor`
-      - [ ] **A3c2** Picture-in-picture: Android's PiP mode, AVKit's
-            video-call PiP on iOS
+      - [x] **A3c2** Picture-in-picture while a call shows the other
+            side's picture: Android's PiP mode (entered by itself from
+            Android 12, on leaving the app before; only their picture shown
+            meanwhile), AVKit's video-call PiP on iOS fed from the texture
+            the call's stage shows them on
   - [ ] **A4** Anvil in FCP's rooms
   - [ ] **A5** Mobile screen share
 - [ ] **U6** Accessibility, localisation, store listings

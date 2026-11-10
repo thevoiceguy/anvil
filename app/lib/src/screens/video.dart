@@ -33,6 +33,10 @@ class VideoTile extends StatefulWidget {
 
   @override
   State<VideoTile> createState() => _VideoTileState();
+
+  /// The texture each incoming stream is shown on now, by stream: what a
+  /// phone's picture-in-picture shows (`mobile/bridge.dart`).
+  static final showing = ValueNotifier<Map<int, int>>(const {});
 }
 
 class _VideoTileState extends State<VideoTile> {
@@ -58,6 +62,13 @@ class _VideoTileState extends State<VideoTile> {
       return;
     }
     setState(() => _texture = texture);
+    final stream = widget.stream;
+    if (texture != null && stream != null) {
+      VideoTile.showing.value = {
+        ...VideoTile.showing.value,
+        stream: texture.textureId,
+      };
+    }
   }
 
   void _read() {
@@ -69,7 +80,13 @@ class _VideoTileState extends State<VideoTile> {
   void dispose() {
     _gone = true;
     _poll?.cancel();
-    _texture?.close();
+    final (texture, stream) = (_texture, widget.stream);
+    if (texture != null &&
+        stream != null &&
+        VideoTile.showing.value[stream] == texture.textureId) {
+      VideoTile.showing.value = {...VideoTile.showing.value}..remove(stream);
+    }
+    texture?.close();
     super.dispose();
   }
 
