@@ -69,7 +69,7 @@ fn err(what: &str) -> impl Fn(windows::core::Error) -> String + '_ {
 
 /// COM on this thread (the multithreaded apartment), and Media Foundation
 /// in the process.
-fn start() -> Result<(), String> {
+pub(crate) fn start() -> Result<(), String> {
     static STARTED: std::sync::OnceLock<Result<(), String>> = std::sync::OnceLock::new();
     // SAFETY: joining the multithreaded apartment; a thread already in
     // one (or in another) keeps it.

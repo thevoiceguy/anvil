@@ -186,7 +186,7 @@ every recommendation:
         sync, `set_video` and upgrades, independent of the transport, the
         synthetic host, the C interface and the CLI; proved Anvil to Anvil
         and through FCP
-  - [ ] **A2** Desktop video
+  - [x] **A2** Desktop video
     - [x] **A2a** `anvil-video` on Linux: V4L2 cameras, VP8 (libvpx), H.264
           through Cisco's OpenH264 fetched at first use, decoding and
           showing each stream on time in its tile; the CLI's `--video
@@ -204,11 +204,14 @@ every recommendation:
       - [x] **A2c2** Cameras through AVFoundation (NV12 on a dispatch
             queue; access asked at the first video call, on the source's
             thread), with the camera entitlement and usage description
-    - [ ] **A2d** Windows
+    - [x] **A2d** Windows
       - [x] **A2d1** H.264 through Media Foundation's transforms (low
             latency, CBR, baseline, keyframes when asked; NV12 each way),
             and the runner's texture plugin (`PixelBufferTexture`)
-      - [ ] **A2d2** Cameras through Media Foundation
+      - [x] **A2d2** Cameras through Media Foundation (listed by device
+            link, read through a source reader converting to NV12 at the
+            size nearest the one asked; access is the user's Privacy
+            setting, a refused camera failing to open with a message)
   - [ ] **A3** Mobile video
   - [ ] **A4** Anvil in FCP's rooms
   - [ ] **A5** Mobile screen share

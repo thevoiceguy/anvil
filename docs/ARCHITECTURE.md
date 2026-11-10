@@ -364,7 +364,12 @@ transforms (`mf.rs`; Windows' licence covers H.264, so nothing is fetched): made
 the thread that uses each, in the multithreaded apartment; the encoder set for low
 latency, CBR and baseline, a keyframe forced through its codec API; NV12 each way, the
 decoder's output cropped from its coded size to the picture's. A Windows without them
-(an N edition without the Media Feature Pack) offers no video. Its cameras follow. `anvil-cli
+(an N edition without the Media Feature Pack) offers no video. Its cameras come through Media Foundation (`mfcam.rs`): listed
+by device link with their friendly names, read synchronously through a source reader
+whose video processing turns whatever the camera sends (YUY2, MJPEG, NV12) into NV12
+at the camera's largest size not above the one asked. Windows asks nothing at the
+call: access is the user's setting (Privacy & security → Camera), and a camera it
+refuses fails to open, saying where to allow it. `anvil-cli
 --video camera` films with the computer's camera, `--video pattern` a moving test
 pattern through the same codecs, and `--video-snapshot` writes the last picture
 received as a PNG. The ladder steps the picture down only when the network is the

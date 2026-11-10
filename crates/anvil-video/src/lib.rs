@@ -17,8 +17,8 @@
 //!
 //! **Linux**: V4L2 cameras; VP8 through libvpx; H.264 through Cisco's
 //! OpenH264, fetched at first use ([`openh264_fetch`]). **macOS**:
-//! AVFoundation cameras; H.264 through VideoToolbox. **Windows**: H.264
-//! through Media Foundation (cameras next).
+//! AVFoundation cameras; H.264 through VideoToolbox. **Windows**: Media
+//! Foundation cameras; H.264 through Media Foundation.
 
 #[cfg(target_os = "macos")]
 pub mod avf;
@@ -27,6 +27,8 @@ pub mod codec;
 mod h264;
 #[cfg(windows)]
 mod mf;
+#[cfg(windows)]
+pub mod mfcam;
 pub mod openh264_fetch;
 pub mod picture;
 pub mod png;
@@ -158,7 +160,9 @@ pub fn platform_cameras() -> Box<dyn Cameras> {
     let cameras = Box::new(v4l2::V4l2Cameras);
     #[cfg(target_os = "macos")]
     let cameras = Box::new(avf::AvfCameras);
-    #[cfg(not(any(target_os = "linux", target_os = "macos")))]
+    #[cfg(windows)]
+    let cameras = Box::new(mfcam::MfCameras);
+    #[cfg(not(any(target_os = "linux", target_os = "macos", windows)))]
     let cameras = Box::new(NoCameras);
     cameras
 }
