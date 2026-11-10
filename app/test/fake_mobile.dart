@@ -18,6 +18,22 @@ class FakeMobile implements MobilePlatform {
   final log = <String>[];
   final _events = StreamController<SystemCallEvent>.broadcast();
   final _routes = StreamController<AudioRoutes>.broadcast();
+  final _cellular = StreamController<bool>.broadcast();
+
+  /// The phone's network: set by a test, changed with [network].
+  bool? onCellular;
+
+  /// The phone moves between cellular and Wi-Fi.
+  void network({required bool cellular}) {
+    onCellular = cellular;
+    _cellular.add(cellular);
+  }
+
+  @override
+  Future<bool?> cellular() async => onCellular;
+
+  @override
+  Stream<bool> get cellularChanges => _cellular.stream;
 
   /// The routes the system has now: set by a test, changed with [route].
   AudioRoutes? routes;

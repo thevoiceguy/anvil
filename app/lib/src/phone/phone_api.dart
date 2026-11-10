@@ -278,6 +278,8 @@ class VideoSettings {
     this.h264Allowed,
     this.h264Ready = false,
     this.h264Notice,
+    this.wifiOnly = false,
+    this.cellular = false,
   });
 
   /// Calls can carry video here.
@@ -293,6 +295,30 @@ class VideoSettings {
   final bool? h264Allowed;
   final bool h264Ready;
   final String? h264Notice;
+
+  /// Video is sent only on Wi-Fi (a phone's setting).
+  final bool wifiOnly;
+
+  /// The phone is on cellular: calls send at most 360p, or none with
+  /// [wifiOnly].
+  final bool cellular;
+
+  VideoSettings copyWith({
+    String? Function()? camera,
+    bool? h264Allowed,
+    bool? h264Ready,
+    bool? wifiOnly,
+    bool? cellular,
+  }) => VideoSettings(
+    available: available,
+    cameras: cameras,
+    camera: camera == null ? this.camera : camera(),
+    h264Allowed: h264Allowed ?? this.h264Allowed,
+    h264Ready: h264Ready ?? this.h264Ready,
+    h264Notice: h264Notice,
+    wifiOnly: wifiOnly ?? this.wifiOnly,
+    cellular: cellular ?? this.cellular,
+  );
 }
 
 /// A tile's picture: its size, and whether it is frozen (broken until the
@@ -1278,6 +1304,13 @@ abstract class PhoneApi {
   /// The app went to the background (a phone's) or came back: our camera
   /// stops while it is away and starts again on its return.
   Future<void> setBackground(bool on);
+
+  /// The phone moved between cellular and Wi-Fi (or a wire): on cellular a
+  /// call sends at most 360p, and none with video only on Wi-Fi.
+  Future<void> setNetwork({required bool cellular});
+
+  /// Send video only on Wi-Fi (a phone's setting), or on cellular too.
+  Future<void> setWifiOnly(bool on);
 
   /// Where a call's pictures are shown.
   VideoTiles get videoTiles;

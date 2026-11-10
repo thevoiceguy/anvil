@@ -133,9 +133,10 @@ struct Inner {
     /// capture is uploaded under.
     device_id: Mutex<Option<String>>,
     openh264: Option<Arc<dyn OpenH264>>,
-    /// In the background (a phone's app), with the calls whose camera
-    /// starts again on its return; `None` in the foreground.
-    background: Mutex<Option<Vec<u64>>>,
+    /// Why our camera is withheld now (a phone's app away, or on cellular
+    /// with video only on Wi-Fi), and the calls whose camera starts again
+    /// when it no longer is.
+    camera_hold: Mutex<video::CameraHold>,
 }
 
 impl Phone {
@@ -234,7 +235,7 @@ impl Phone {
             fallback_brand: cfg.fallback_brand,
             device_id: Mutex::new(None),
             openh264: cfg.openh264,
-            background: Mutex::new(None),
+            camera_hold: Mutex::default(),
         });
         if let Some(fallback) = &inner.fallback_brand {
             inner.set_brand(fallback);
@@ -323,7 +324,7 @@ impl Phone {
                     |c| {
                         c.remote = target.clone();
                         c.line = line.clone();
-                        c.video.camera = media.video;
+                        c.video.camera = media.video && !media.receive_only;
                     },
                     || CallView {
                         line: line.clone(),
@@ -351,7 +352,11 @@ impl Phone {
                     .await
                     .map(|_| ());
                 if answered.is_ok() {
-                    self.update_call(id, |c| c.video.camera = media.video, || outgoing(id));
+                    self.update_call(
+                        id,
+                        |c| c.video.camera = media.video && !media.receive_only,
+                        || outgoing(id),
+                    );
                     self.camera_later(id, video).await;
                 }
                 self.inner.sound().await;
@@ -1062,6 +1067,14 @@ impl Phone {
             }
             Command::Background { on } => {
                 self.set_background(on).await;
+                Ok(Response::ok())
+            }
+            Command::Network { cellular } => {
+                self.set_network(cellular).await;
+                Ok(Response::ok())
+            }
+            Command::WifiOnly { on } => {
+                self.set_wifi_only(on).await;
                 Ok(Response::ok())
             }
             Command::Status => Ok(Response {

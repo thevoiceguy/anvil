@@ -74,8 +74,10 @@ pub struct Anvil {
     events: mpsc::Sender<Event>,
     calls: Arc<DashMap<CallId, CallEntry>>,
     audio: Arc<dyn AudioHost>,
-    /// The platform's video, when it has any.
+    /// The platform's video, when it has any, kept within `send_limit`.
     video: Option<Arc<dyn video::host::VideoHost>>,
+    /// The most we send, across every call (`None`: what each call asks).
+    send_limit: tokio::sync::watch::Sender<Option<video::host::Resolution>>,
     /// IP used in SDP offers: STUN's answer, `AccountConfig::bind_addr`'s
     /// host, else this machine's address on the route to the registrar.
     media_ip: IpAddr,
@@ -290,7 +292,11 @@ impl Anvil {
             .max(1);
 
         let audio: Arc<dyn AudioHost> = Arc::from(cfg.audio);
-        let video: Option<Arc<dyn video::host::VideoHost>> = cfg.video.map(Arc::from);
+        let (send_limit, limit) = tokio::sync::watch::channel(None);
+        let video: Option<Arc<dyn video::host::VideoHost>> = cfg.video.map(|h| {
+            Arc::new(video::limit::LimitedHost::new(Arc::from(h), limit))
+                as Arc<dyn video::host::VideoHost>
+        });
         let watched: Arc<DashMap<String, ()>> = Arc::new(DashMap::new());
         let branding = brand::Branding::new(
             cfg.brand,
@@ -373,6 +379,7 @@ impl Anvil {
                 calls,
                 audio,
                 video,
+                send_limit,
                 media_ip,
                 local_user,
                 advertised,
@@ -742,6 +749,13 @@ impl Anvil {
         self.video.as_ref().map(|h| h.cameras()).unwrap_or_default()
     }
 
+    /// The most any call sends (`None`: no more than each asks): a phone on
+    /// cellular sends at most 360p. Calls sending now step down or back at
+    /// their next frame.
+    pub fn set_send_limit(&self, max: Option<video::host::Resolution>) {
+        self.send_limit.send_replace(max);
+    }
+
     /// The camera video calls use (`None`, the host's default): one
     /// already sending switches to it.
     pub fn set_camera(&self, camera: Option<&str>) {
@@ -825,6 +839,7 @@ impl Anvil {
                     self.media_ip,
                     self.srtp,
                     rtp_socket.capture_slot(),
+                    media.receive_only,
                 )
                 .await
             }

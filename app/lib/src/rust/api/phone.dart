@@ -1754,6 +1754,13 @@ class VideoInfo {
   final bool h264Ready;
   final String? h264Notice;
 
+  /// Video is sent only on Wi-Fi (a phone's setting).
+  final bool wifiOnly;
+
+  /// The phone is on cellular: calls send at most 360p, or none with
+  /// `wifi_only`.
+  final bool cellular;
+
   const VideoInfo({
     required this.available,
     required this.cameras,
@@ -1761,6 +1768,8 @@ class VideoInfo {
     this.h264Allowed,
     required this.h264Ready,
     this.h264Notice,
+    required this.wifiOnly,
+    required this.cellular,
   });
 
   @override
@@ -1770,7 +1779,9 @@ class VideoInfo {
       camera.hashCode ^
       h264Allowed.hashCode ^
       h264Ready.hashCode ^
-      h264Notice.hashCode;
+      h264Notice.hashCode ^
+      wifiOnly.hashCode ^
+      cellular.hashCode;
 
   @override
   bool operator ==(Object other) =>
@@ -1782,7 +1793,9 @@ class VideoInfo {
           camera == other.camera &&
           h264Allowed == other.h264Allowed &&
           h264Ready == other.h264Ready &&
-          h264Notice == other.h264Notice;
+          h264Notice == other.h264Notice &&
+          wifiOnly == other.wifiOnly &&
+          cellular == other.cellular;
 }
 
 /// One voicemail message.

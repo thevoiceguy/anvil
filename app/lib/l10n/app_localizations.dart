@@ -357,6 +357,24 @@ abstract class Strings {
   /// **'Anvil may not use the microphone, so callers won\'t hear you. Allow it in the system\'s settings for Anvil.'**
   String get microphoneRefused;
 
+  /// No description provided for @wifiOnlySetting.
+  ///
+  /// In en, this message translates to:
+  /// **'Send video only on Wi-Fi'**
+  String get wifiOnlySetting;
+
+  /// No description provided for @wifiOnlyNote.
+  ///
+  /// In en, this message translates to:
+  /// **'On cellular, calls show the other person\'s video without sending yours. Off, video on cellular is sent at up to 360p.'**
+  String get wifiOnlyNote;
+
+  /// No description provided for @wifiOnlyNow.
+  ///
+  /// In en, this message translates to:
+  /// **'On cellular now: your camera starts when you\'re back on Wi-Fi.'**
+  String get wifiOnlyNow;
+
   /// No description provided for @cameraRefused.
   ///
   /// In en, this message translates to:

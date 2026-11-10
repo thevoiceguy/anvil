@@ -1,12 +1,14 @@
 import AVFoundation
 import CallKit
 import Flutter
+import Network
 import UIKit
 
 @main
 @objc class AppDelegate: FlutterAppDelegate, FlutterImplicitEngineDelegate {
   private let calls = CallSystem()
   private let routes = AudioRoutes()
+  private let network = NetworkWatch()
   private var push: Push?
 
   override func application(
@@ -31,8 +33,10 @@ import UIKit
         name: "anvil/mobile", binaryMessenger: registrar.messenger())
       calls.channel = channel
       routes.channel = channel
+      network.channel = channel
       let calls = self.calls
       let routes = self.routes
+      let network = self.network
       let push = self.push
       channel.setMethodCallHandler { call, result in
         let args = call.arguments as? [String: Any] ?? [:]
@@ -55,6 +59,7 @@ import UIKit
           calls.reportHeld(id: id, on: args["on"] as? Bool ?? false)
           result(nil)
         case "audioRoutes": result(routes.current())
+        case "cellular": result(network.cellular)
         case "setAudioRoute":
           do {
             try routes.set(args["route"] as? String ?? "")
@@ -503,6 +508,44 @@ final class CallSystem: NSObject, CXProviderDelegate {
   func provider(_ provider: CXProvider, didActivate audioSession: AVAudioSession) {}
 
   func provider(_ provider: CXProvider, didDeactivate audioSession: AVAudioSession) {}
+}
+
+/// Whether the phone's network is cellular (not Wi-Fi or a wire), told to
+/// Dart at every change as `network` `{cellular}` (lib/src/mobile): on
+/// cellular a call sends at most 360p, or no video with the user's Wi-Fi
+/// only setting.
+final class NetworkWatch {
+  var channel: FlutterMethodChannel?
+  private let monitor = NWPathMonitor()
+  private let lock = NSLock()
+  private var now: Bool?
+
+  init() {
+    monitor.pathUpdateHandler = { [weak self] path in
+      let cellular = path.usesInterfaceType(.cellular) && !path.usesInterfaceType(.wifi)
+        && !path.usesInterfaceType(.wiredEthernet)
+      self?.update(cellular)
+    }
+    monitor.start(queue: DispatchQueue(label: "anvil.network"))
+  }
+
+  /// Not known until the monitor first says.
+  var cellular: Bool? {
+    lock.lock()
+    defer { lock.unlock() }
+    return now
+  }
+
+  private func update(_ cellular: Bool) {
+    lock.lock()
+    let changed = now != cellular
+    now = cellular
+    lock.unlock()
+    guard changed else { return }
+    DispatchQueue.main.async {
+      self.channel?.invokeMethod("network", arguments: ["cellular": cellular])
+    }
+  }
 }
 
 /// Where a call's audio goes on iOS: the session's route (the earpiece,

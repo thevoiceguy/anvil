@@ -293,6 +293,8 @@ class RustPhone implements PhoneApi {
         h264Allowed: s.video.h264Allowed,
         h264Ready: s.video.h264Ready,
         h264Notice: s.video.h264Notice,
+        wifiOnly: s.video.wifiOnly,
+        cellular: s.video.cellular,
       ),
       directoryListed: s.directoryListed,
       mayChangeDirectoryListing: s.mayChangeDirectoryListing,
@@ -437,6 +439,13 @@ class RustPhone implements PhoneApi {
 
   @override
   Future<void> setBackground(bool on) => rust_video.setBackground(on_: on);
+
+  @override
+  Future<void> setNetwork({required bool cellular}) =>
+      rust_video.setNetwork(cellular: cellular);
+
+  @override
+  Future<void> setWifiOnly(bool on) => rust_video.setWifiOnly(on_: on);
 
   @override
   final VideoTiles videoTiles = TextureTiles();

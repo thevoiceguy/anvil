@@ -7,7 +7,7 @@ import '../frb_generated.dart';
 
 import 'package:flutter_rust_bridge/flutter_rust_bridge_for_generated.dart';
 
-// These functions are ignored because they are not marked as `pub`: `in_background`
+// These functions are ignored because they are not marked as `pub`: `in_background`, `on_cellular`
 
 /// Our camera on or off in a call (the connected one when `None`).
 Future<void> setVideo({BigInt? call, required bool on_}) =>
@@ -26,6 +26,15 @@ Future<void> allowH264({required bool on_}) =>
 /// started later.
 Future<void> setBackground({required bool on_}) =>
     RustLib.instance.api.crateApiVideoSetBackground(on_: on_);
+
+/// The phone moved between cellular and Wi-Fi (or a wire): on cellular a
+/// call sends at most 360p, and none with video only on Wi-Fi.
+Future<void> setNetwork({required bool cellular}) =>
+    RustLib.instance.api.crateApiVideoSetNetwork(cellular: cellular);
+
+/// Send video only on Wi-Fi, or on cellular too.
+Future<void> setWifiOnly({required bool on_}) =>
+    RustLib.instance.api.crateApiVideoSetWifiOnly(on_: on_);
 
 /// Show a tile on a texture: an incoming stream by id, or (`None`) the
 /// self-view. `present` is the texture plugin's

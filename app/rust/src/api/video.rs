@@ -53,6 +53,29 @@ pub async fn set_background(on: bool) -> anyhow::Result<()> {
     Ok(())
 }
 
+/// Whether the phone is on cellular, as the app last said; kept for a
+/// phone started later.
+static CELLULAR: AtomicBool = AtomicBool::new(false);
+
+pub(crate) fn on_cellular() -> bool {
+    CELLULAR.load(Ordering::Relaxed)
+}
+
+/// The phone moved between cellular and Wi-Fi (or a wire): on cellular a
+/// call sends at most 360p, and none with video only on Wi-Fi.
+pub async fn set_network(cellular: bool) -> anyhow::Result<()> {
+    CELLULAR.store(cellular, Ordering::Relaxed);
+    if super::phone::running() {
+        run_command(Command::Network { cellular }).await?;
+    }
+    Ok(())
+}
+
+/// Send video only on Wi-Fi, or on cellular too.
+pub async fn set_wifi_only(on: bool) -> anyhow::Result<()> {
+    run_command(Command::WifiOnly { on }).await.map(|_| ())
+}
+
 /// Show a tile on a texture: an incoming stream by id, or (`None`) the
 /// self-view. `present` is the texture plugin's
 /// `void present(void* texture, const uint8_t* rgba, uint32_t width,

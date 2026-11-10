@@ -79,6 +79,13 @@ pub struct VideoState {
     /// Cisco's OpenH264, where Anvil fetches it from Cisco (Linux);
     /// `None` elsewhere.
     pub h264: Option<H264View>,
+    /// Video is sent only on Wi-Fi (a phone's setting).
+    #[serde(default)]
+    pub wifi_only: bool,
+    /// The phone is on cellular: calls send at most 360p, or none with
+    /// `wifi_only`.
+    #[serde(default)]
+    pub cellular: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

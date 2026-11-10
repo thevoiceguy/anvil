@@ -315,7 +315,10 @@ pub unsafe extern "C" fn anvil_place_call_media(
             Ok(s) => s,
             Err(s) => return s,
         };
-        let media = anvil_core::CallMedia { video: video != 0 };
+        let media = anvil_core::CallMedia {
+            video: video != 0,
+            receive_only: false,
+        };
         match handle.block_on(handle.anvil().place_call_with_media(&target, media)) {
             Ok(call) => {
                 *out_call_id = call.0;
@@ -341,7 +344,10 @@ pub unsafe extern "C" fn anvil_answer_media(
         let Some(handle) = handle.as_mut() else {
             return AnvilStatus::NullArgument;
         };
-        let media = anvil_core::CallMedia { video: video != 0 };
+        let media = anvil_core::CallMedia {
+            video: video != 0,
+            receive_only: false,
+        };
         match handle.block_on(
             handle
                 .anvil()
