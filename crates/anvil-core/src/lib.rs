@@ -1159,7 +1159,9 @@ impl Anvil {
 
     async fn reoffer_video(&self, call: CallId, change: VideoChange) -> Result<(), AnvilError> {
         // Our re-INVITE crossing one of theirs is refused with 491: again
-        // after a random 2.1–4 s (RFC 3261 §14.1), a few times.
+        // after a random 2.1–4 s (RFC 3261 §14.1), a few times. One a
+        // server limits (429: FCP takes three a second in a call) is sent
+        // again after a second, as its Retry-After says.
         for attempt in 0..3 {
             match self.reoffer_video_once(call, change).await {
                 Err(AnvilError::Transport(e))
@@ -1168,6 +1170,12 @@ impl Anvil {
                     let wait: u64 = rand::Rng::gen_range(&mut rand::thread_rng(), 2100..4000);
                     tracing::info!(?call, wait, "re-INVITE crossed theirs; trying again");
                     tokio::time::sleep(std::time::Duration::from_millis(wait)).await;
+                }
+                Err(AnvilError::Transport(e))
+                    if e.starts_with("re-INVITE rejected: 429") && attempt < 2 =>
+                {
+                    tracing::info!(?call, "re-INVITEs limited for a moment; trying again");
+                    tokio::time::sleep(std::time::Duration::from_millis(1100)).await;
                 }
                 done => return done,
             }
