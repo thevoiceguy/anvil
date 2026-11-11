@@ -30,6 +30,10 @@ sha2    = "0.10"
 # X server through x11rb (the protocol in Rust: no library to install).
 [target.'cfg(target_os = "linux")'.dependencies]
 x11rb = { version = "0.14", default-features = false, features = ["randr"] }
+# Wayland: the desktop portal's ScreenCast (D-Bus, in Rust) and the
+# PipeWire stream it opens (libpipewire, linked: the .deb depends on it).
+ashpd    = { version = "0.14", default-features = false, features = ["tokio", "screencast"] }
+pipewire = "0.10"
 v4l            = "0.14"
 zune-jpeg      = "0.5"
 

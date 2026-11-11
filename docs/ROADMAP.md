@@ -276,8 +276,13 @@ every recommendation:
               shares the pattern; CI's tests under Xvfb; the share
               against FCP (granted, released on the stop's re-INVITE,
               granted again)
-        - [ ] **A4c2b** Wayland: the desktop portal's ScreenCast over
-              PipeWire
+        - [x] **A4c2b** Wayland: the desktop portal's ScreenCast (ashpd;
+              the user picks a screen or window in the desktop's dialog, the
+              choice kept for the run) and its PipeWire stream (pipewire-rs,
+              linked: the .deb depends on libpipewire), packed RGB in mapped
+              buffers sized for the frame, the end seen as the node's
+              removal; proved against a PipeWire daemon in CI (the portal
+              itself by hand on a Wayland desktop)
         - [ ] **A4c2c** macOS: ScreenCaptureKit
         - [ ] **A4c2d** Windows: Desktop Duplication
       - [ ] **A4c3** The app: a Share button and the screen's choice; a

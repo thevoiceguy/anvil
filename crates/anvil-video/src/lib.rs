@@ -53,6 +53,8 @@ mod vpx;
 #[cfg(target_vendor = "apple")]
 mod vt;
 #[cfg(target_os = "linux")]
+pub mod wayland;
+#[cfg(target_os = "linux")]
 pub mod x11;
 
 use std::path::{Path, PathBuf};
@@ -211,11 +213,16 @@ pub fn platform_cameras() -> Box<dyn Cameras> {
     cameras
 }
 
-/// The platform's screens: the X server's monitors on Linux (none under
-/// Wayland without XWayland, nor without a display).
+/// The platform's screens: on Linux, the desktop portal's under Wayland
+/// (the user chooses in the desktop's dialog), else the X server's
+/// monitors (none without a display).
 pub fn platform_screens() -> Box<dyn Screens> {
     #[cfg(target_os = "linux")]
-    let screens: Box<dyn Screens> = Box::new(x11::X11Screens);
+    let screens: Box<dyn Screens> = if wayland::is_wayland() {
+        Box::new(wayland::PortalScreens)
+    } else {
+        Box::new(x11::X11Screens)
+    };
     #[cfg(not(target_os = "linux"))]
     let screens: Box<dyn Screens> = Box::new(NoScreens);
     screens

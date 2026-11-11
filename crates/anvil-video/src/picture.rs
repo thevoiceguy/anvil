@@ -287,13 +287,25 @@ impl Picture {
     /// screen as X11, Windows and Core Graphics give one. `stride` is a
     /// row's length in bytes; each chroma sample averages its 2×2 block.
     pub fn from_bgrx(src: &[u8], stride: usize, width: u32, height: u32) -> Self {
+        Self::from_rgb32(src, stride, width, height, [2, 1, 0])
+    }
+
+    /// From 32-bit pixels whose R, G and B are at the byte positions
+    /// `rgb` (`[2, 1, 0]` for BGRx, `[0, 1, 2]` for RGBx, `[1, 2, 3]` for
+    /// xRGB, `[3, 2, 1]` for xBGR); the fourth byte is ignored.
+    pub fn from_rgb32(src: &[u8], stride: usize, width: u32, height: u32, rgb: [usize; 3]) -> Self {
         let mut p = Self::black(width, height);
         let (w, h) = (width as usize, height as usize);
         let cw = p.chroma_width();
         let (py, pu, pv) = p.planes_mut();
+        let order = rgb;
         let rgb = |x: usize, r: usize| {
-            let px = &src[r * stride + x * 4..r * stride + x * 4 + 3];
-            (i32::from(px[2]), i32::from(px[1]), i32::from(px[0]))
+            let px = &src[r * stride + x * 4..r * stride + x * 4 + 4];
+            (
+                i32::from(px[order[0]]),
+                i32::from(px[order[1]]),
+                i32::from(px[order[2]]),
+            )
         };
         // BT.601, limited range, in 16.16 fixed point.
         for r in 0..h {
@@ -474,6 +486,16 @@ mod tests {
         let (u, v) = (p.u().to_vec(), p.v().to_vec());
         let near = |a: &[u8], b: &[u8]| a.iter().zip(b).all(|(x, y)| x.abs_diff(*y) <= 3);
         assert!(near(back.u(), &u) && near(back.v(), &v), "chroma");
+        // The same picture in RGBx order comes back the same.
+        let rgbx: Vec<u8> = bgra
+            .chunks(4)
+            .flat_map(|px| [px[2], px[1], px[0], 0])
+            .collect();
+        let from_rgbx = Picture::from_rgb32(&rgbx, 320 * 4, 320, 180, [0, 1, 2]);
+        assert_eq!(
+            from_rgbx.data,
+            Picture::from_bgrx(&bgra, 320 * 4, 320, 180).data
+        );
         // An odd size has a chroma sample for its last column and row.
         let odd = Picture::from_bgrx(&[255u8; 5 * 3 * 4], 5 * 4, 5, 3);
         assert!(odd.y().iter().all(|&y| y == 235), "white is 235");
