@@ -69,6 +69,15 @@ use crate::config::Codec;
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct CallId(pub u64);
 
+/// What a video re-INVITE of ours changes.
+#[derive(Debug, Clone, Copy)]
+enum VideoChange {
+    /// Our camera on or off.
+    Camera(bool),
+    /// Our screen shared in a room, or not.
+    Share(bool),
+}
+
 /// Softphone runtime handle.
 pub struct Anvil {
     uac: Arc<IntegratedUAC>,
@@ -1112,10 +1121,47 @@ impl Anvil {
     /// sending. Off, the camera section stops (port 0) both ways. A
     /// refused re-INVITE leaves the call as it was.
     pub async fn set_video(&self, call: CallId, on: bool) -> Result<(), AnvilError> {
+        self.reoffer_video(call, VideoChange::Camera(on)).await
+    }
+
+    /// Share a screen in a room, or stop (FCP's `docs/SOFTPHONE_VIDEO.md`
+    /// §2.6): a re-INVITE turning the room's shared-screen section to
+    /// sending, or back to receiving only. The floor is taken by sending:
+    /// [`Event::RoomFloor`] says whether it was granted. A refusal, or the
+    /// room taking it back, stops the screen at once; tell the room with
+    /// `share_screen(call, false)` (a share after that is a new one). The
+    /// screen is [`set_screen`](Self::set_screen)'s. Fails on a call
+    /// without a shared-screen section (not a room joined with video).
+    pub async fn share_screen(&self, call: CallId, on: bool) -> Result<(), AnvilError> {
+        self.reoffer_video(call, VideoChange::Share(on)).await
+    }
+
+    /// Whether we share a screen in `call`.
+    pub fn sharing(&self, call: CallId) -> bool {
+        self.calls
+            .get(&call)
+            .and_then(|e| e.video.as_ref().map(|v| v.sharing()))
+            .unwrap_or(false)
+    }
+
+    /// The screens a share can show (none where the video host cannot).
+    pub fn screens(&self) -> Vec<video::host::ScreenInfo> {
+        self.video.as_ref().map(|h| h.screens()).unwrap_or_default()
+    }
+
+    /// The screen a share captures (`None`, the host's choice): a share
+    /// running switches to it.
+    pub fn set_screen(&self, screen: Option<&str>) {
+        if let Some(h) = &self.video {
+            h.set_screen(screen);
+        }
+    }
+
+    async fn reoffer_video(&self, call: CallId, change: VideoChange) -> Result<(), AnvilError> {
         // Our re-INVITE crossing one of theirs is refused with 491: again
         // after a random 2.1–4 s (RFC 3261 §14.1), a few times.
         for attempt in 0..3 {
-            match self.set_video_once(call, on).await {
+            match self.reoffer_video_once(call, change).await {
                 Err(AnvilError::Transport(e))
                     if e.starts_with("re-INVITE rejected: 491") && attempt < 2 =>
                 {
@@ -1129,12 +1175,19 @@ impl Anvil {
         unreachable!("the last attempt returns")
     }
 
-    async fn set_video_once(&self, call: CallId, on: bool) -> Result<(), AnvilError> {
+    async fn reoffer_video_once(
+        &self,
+        call: CallId,
+        change: VideoChange,
+    ) -> Result<(), AnvilError> {
         let host = self
             .video
             .as_ref()
             .filter(|h| !video::host::usable_codecs(h.as_ref()).is_empty())
             .cloned();
+        let on = match change {
+            VideoChange::Camera(on) | VideoChange::Share(on) => on,
+        };
         if on && host.is_none() {
             return Err(AnvilError::Config("this softphone has no video".into()));
         }
@@ -1176,7 +1229,11 @@ impl Anvil {
             // Off, on a call that never had video: nothing to do.
             return Ok(());
         };
-        if v.camera_on() == on {
+        let already = match change {
+            VideoChange::Camera(_) => v.camera_on() == on,
+            VideoChange::Share(_) => v.sharing() == on,
+        };
+        if already {
             if let Some(mut entry) = self.calls.get_mut(&call) {
                 entry.video = call_video;
             }
@@ -1192,10 +1249,18 @@ impl Anvil {
                 config::SrtpMode::Off
             },
         };
-        let sections = v.offer_camera(on, setup).await;
+        let sections = match change {
+            VideoChange::Camera(_) => Some(v.offer_camera(on, setup).await),
+            VideoChange::Share(_) => v.offer_share(on),
+        };
         if let Some(mut entry) = self.calls.get_mut(&call) {
             entry.video = call_video;
         }
+        let Some(sections) = sections else {
+            return Err(AnvilError::Config(
+                "this call has no shared screen (not a room joined with video)".into(),
+            ));
+        };
 
         let sdp_body = video::sdp::with_sections(
             media::build_sdp(
@@ -2276,6 +2341,15 @@ async fn room_floor(
     let Some(notice) = room::parse_floor(request.body()) else {
         return (400, "Bad Request");
     };
+    // Our share refused, or taken back by a host or the room: the screen
+    // stops now, before a packet claims the floor again.
+    if notice.mine && matches!(notice.state, FloorState::Refused | FloorState::Released) {
+        if let Some(mut entry) = handler.calls.get_mut(&call) {
+            if let Some(v) = entry.video.as_mut() {
+                v.stop_sharing_now();
+            }
+        }
+    }
     let _ = handler.events.send(Event::RoomFloor { call, notice }).await;
     (200, "OK")
 }

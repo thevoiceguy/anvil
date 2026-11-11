@@ -17,8 +17,8 @@ use bytes::{BufMut, Bytes, BytesMut};
 use parking_lot::Mutex;
 
 use super::host::{
-    CameraInfo, CodedFrame, EncodingId, ReceiveConfig, Resolution, SendConfig, StreamId,
-    VideoCodec, VideoCodecCaps, VideoHost, VideoSink, VideoSource,
+    CameraInfo, CodedFrame, EncodingId, ReceiveConfig, Resolution, ScreenInfo, SendConfig,
+    StreamId, VideoCodec, VideoCodecCaps, VideoHost, VideoSink, VideoSource,
 };
 use crate::error::AnvilError;
 
@@ -42,6 +42,8 @@ pub struct SyntheticRecord {
     pub received: BTreeMap<StreamId, ReceivedStream>,
     /// The camera chosen (`set_camera`).
     pub camera: Option<String>,
+    /// The screen chosen (`set_screen`).
+    pub screen: Option<String>,
 }
 
 #[derive(Debug, Clone)]
@@ -137,6 +139,17 @@ impl VideoHost for SyntheticVideoHost {
 
     fn set_camera(&self, camera: Option<&str>) {
         self.record.lock().camera = camera.map(str::to_owned);
+    }
+
+    fn screens(&self) -> Vec<ScreenInfo> {
+        vec![ScreenInfo {
+            id: "synthetic-screen".into(),
+            name: "Synthetic screen".into(),
+        }]
+    }
+
+    fn set_screen(&self, screen: Option<&str>) {
+        self.record.lock().screen = screen.map(str::to_owned);
     }
 
     fn start_send(&self, cfg: SendConfig) -> Result<Box<dyn VideoSource>, AnvilError> {

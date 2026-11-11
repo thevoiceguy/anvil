@@ -255,6 +255,18 @@ every recommendation:
           screen large, the roster and the speaker), meetings and links, a
           host's controls
     - [ ] **A4c** Desktop screen share with the floor by INFO
+      - [x] **A4c1** The core: `Anvil::share_screen` turns a room's
+            shared-screen section sending by re-INVITE (the floor taken by
+            sending, as FCP takes it) and back to receiving only to stop;
+            the screen at 1080p and 10 fps; `VideoHost::screens` and
+            `set_screen`; a refusal or the room taking the floor back
+            stops the screen at once, before the stop is offered (FCP
+            v0.25.547 frees the floor on that re-INVITE, not after its idle
+            timeout)
+      - [ ] **A4c2** Screens captured on Linux, macOS and Windows, and
+            the share proved against FCP
+      - [ ] **A4c3** The app: a Share button and the screen's choice; a
+            refusal or a host's stop ended by `share_screen(call, false)`
   - [ ] **A5** Mobile screen share
 - [ ] **U6** Accessibility, localisation, store listings
 - [ ] **W** The Windows client, finished (the 2026-10-12 survey)
