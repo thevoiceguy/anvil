@@ -182,7 +182,7 @@ dependencies = [
 
 [[package]]
 name = "anvil-app"
-version = "0.2.76"
+version = "0.2.77"
 dependencies = [
  "anvil-core",
  "anvil-fcp",
@@ -210,7 +210,7 @@ dependencies = [
 
 [[package]]
 name = "anvil-audio"
-version = "0.2.76"
+version = "0.2.77"
 dependencies = [
  "anvil-core",
  "async-trait",
@@ -226,7 +226,7 @@ dependencies = [
 
 [[package]]
 name = "anvil-brand"
-version = "0.2.76"
+version = "0.2.77"
 dependencies = [
  "anvil-core",
  "async-trait",
@@ -244,7 +244,7 @@ dependencies = [
 
 [[package]]
 name = "anvil-cli"
-version = "0.2.76"
+version = "0.2.77"
 dependencies = [
  "anvil-app",
  "anvil-audio",
@@ -261,7 +261,7 @@ dependencies = [
 
 [[package]]
 name = "anvil-codec"
-version = "0.2.76"
+version = "0.2.77"
 dependencies = [
  "anvil-core",
  "opus",
@@ -270,7 +270,7 @@ dependencies = [
 
 [[package]]
 name = "anvil-core"
-version = "0.2.76"
+version = "0.2.77"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -312,7 +312,7 @@ dependencies = [
 
 [[package]]
 name = "anvil-fcp"
-version = "0.2.76"
+version = "0.2.77"
 dependencies = [
  "anvil-brand",
  "anvil-core",
@@ -336,7 +336,7 @@ dependencies = [
 
 [[package]]
 name = "anvil-ffi"
-version = "0.2.76"
+version = "0.2.77"
 dependencies = [
  "anvil-core",
  "anvil-fcp",
@@ -353,7 +353,7 @@ dependencies = [
 
 [[package]]
 name = "anvil-update"
-version = "0.2.76"
+version = "0.2.77"
 dependencies = [
  "futures",
  "reqwest",
@@ -368,7 +368,7 @@ dependencies = [
 
 [[package]]
 name = "anvil-video"
-version = "0.2.76"
+version = "0.2.77"
 dependencies = [
  "anvil-audio",
  "anvil-core",
@@ -408,7 +408,7 @@ dependencies = [
 
 [[package]]
 name = "anvil_bridge"
-version = "0.2.76"
+version = "0.2.77"
 dependencies = [
  "anvil-app",
  "anvil-audio",

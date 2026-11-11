@@ -65,6 +65,12 @@ windows = { version = "0.61", features = [
   "Win32_System_Com_StructuredStorage",
   "Win32_System_Ole",
   "Win32_System_Variant",
+  # Screens: DXGI's Desktop Duplication on a Direct3D 11 device.
+  "Win32_Graphics_Direct3D",
+  "Win32_Graphics_Direct3D11",
+  "Win32_Graphics_Dxgi",
+  "Win32_Graphics_Dxgi_Common",
+  "Win32_Graphics_Gdi",
 ] }
 
 # Android: cameras through Camera2 and H.264 and VP8 through MediaCodec,

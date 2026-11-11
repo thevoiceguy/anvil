@@ -290,7 +290,13 @@ every recommendation:
               picture repeated while the screen is still, the share ended
               when the system stops it; weakly linked (the app runs on
               12.0, ScreenCaptureKit came with 12.3)
-        - [ ] **A4c2d** Windows: Desktop Duplication
+        - [x] **A4c2d** Windows: DXGI's Desktop Duplication — each display
+              on the desktop (the primary first) duplicated on a Direct3D
+              11 device of its adapter, on the source's thread; a changed
+              frame copied to a readable texture as BGRA, the last one
+              repeated while the display is still or the secure desktop is
+              up; made again when access is lost (a mode change). The
+              pointer is not drawn
       - [ ] **A4c3** The app: a Share button and the screen's choice; a
             refusal or a host's stop ended by `share_screen(call, false)`
   - [ ] **A5** Mobile screen share
