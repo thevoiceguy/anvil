@@ -52,6 +52,9 @@ pub(crate) struct Camera {
     pub(crate) capture: Box<dyn Capture>,
     pub(crate) want: Resolution,
     pub(crate) fps: u32,
+    /// Where what is captured is shown: the self-view, or our shared
+    /// screen's.
+    pub(crate) view: TileKey,
 }
 
 pub(crate) struct CameraSource {
@@ -175,7 +178,7 @@ fn run(
         let Some(picture) = camera.capture.next() else {
             break;
         };
-        tiles.present(TileKey::SelfView, picture.clone());
+        tiles.present(camera.view, picture.clone());
 
         let ((kbps, max, fps), changed) = {
             let mut t = control.target.lock();
@@ -220,6 +223,6 @@ fn run(
             }
         }
     }
-    tiles.end(TileKey::SelfView);
+    tiles.end(camera.view);
     tracing::debug!("camera closed");
 }

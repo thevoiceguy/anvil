@@ -1386,3 +1386,105 @@ async fn two_anvils_meet_in_a_room_on_fcp() {
     let _ = alice.shutdown().await;
     let _ = bob.shutdown().await;
 }
+
+/// The next floor notice in `call` that `ok` accepts.
+async fn floor_where(
+    events: &mut EventStream,
+    call: CallId,
+    within: Duration,
+    what: &str,
+    ok: impl Fn(&anvil_core::FloorNotice) -> bool,
+) -> anvil_core::FloorNotice {
+    let mut seen = Vec::new();
+    let found = expect(events, within, |e| match e {
+        Event::RoomFloor { call: c, notice } if *c == call => {
+            seen.push(notice.clone());
+            ok(notice).then(|| notice.clone())
+        }
+        _ => None,
+    })
+    .await;
+    found.unwrap_or_else(|| panic!("{what}: the floor said {seen:?}"))
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_screen_shared_in_a_room_on_fcp_takes_the_floor_and_frees_it_on_stop() {
+    use anvil_core::video::host::Resolution;
+    use anvil_core::{CallMedia, FloorState, RoomJoin};
+    use anvil_video::{DesktopVideoHost, PatternCamera, PatternScreen, SoftwareCodecs};
+    let fcp = fcp_or_skip!();
+    let (client, name) = signed_in(&fcp, "share-alice").await;
+    // Real VP8 both ways: the room decodes the shared screen.
+    let host = DesktopVideoHost::new(
+        PatternCamera::new(Resolution {
+            width: 320,
+            height: 180,
+        }),
+        SoftwareCodecs::default(),
+    )
+    .with_screens(PatternScreen::new(Resolution {
+        width: 640,
+        height: 360,
+    }));
+    let (alice, mut events) = softphone_with_video(
+        &client,
+        "127.0.0.72",
+        MediaConfig::default(),
+        Box::new(Quiet),
+        Some(Box::new(host)),
+    )
+    .await;
+    let domain = client.softphone().await.unwrap().account.domain;
+    let (_, room) = fcp.meeting(&name).await;
+    let a = alice
+        .join_room(
+            &format!("sip:{room}@{domain}"),
+            &RoomJoin::default(),
+            CallMedia::VIDEO,
+        )
+        .await
+        .expect("dials the room");
+    let a = established(&mut events, Some(a)).await;
+    room_picture(&mut events, a).await;
+    assert_eq!(alice.screens().len(), 1);
+
+    // She shares: the floor is hers, and the roster says she presents.
+    alice.share_screen(a, true).await.expect("the share");
+    let granted = floor_where(&mut events, a, Duration::from_secs(15), "granted", |n| {
+        n.state == FloorState::Granted && n.mine
+    })
+    .await;
+    assert!(granted.presenter.is_some(), "{granted:?}");
+    roster_where(&mut events, a, "she presents", |m| {
+        m.iter().any(|m| m.presenting)
+    })
+    .await;
+
+    // She stops: the room frees the floor on the re-INVITE, well before
+    // its idle timeout (30 s).
+    let stopped = std::time::Instant::now();
+    alice.share_screen(a, false).await.expect("the stop");
+    let released = floor_where(&mut events, a, Duration::from_secs(10), "released", |n| {
+        n.state == FloorState::Released && n.mine
+    })
+    .await;
+    assert_eq!(released.reason.as_deref(), Some("ended"));
+    assert!(stopped.elapsed() < Duration::from_secs(10));
+    roster_where(&mut events, a, "nobody presents", |m| {
+        m.iter().all(|m| !m.presenting)
+    })
+    .await;
+
+    // A second share is a new one: the floor again.
+    alice.share_screen(a, true).await.expect("shares again");
+    floor_where(
+        &mut events,
+        a,
+        Duration::from_secs(15),
+        "granted again",
+        |n| n.state == FloorState::Granted && n.mine,
+    )
+    .await;
+    alice.hangup(a).await.expect("leaves");
+    let _ = alice.shutdown().await;
+}

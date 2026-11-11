@@ -283,6 +283,46 @@ impl Picture {
         p
     }
 
+    /// From 32-bit pixels in B, G, R order (the fourth byte ignored): a
+    /// screen as X11, Windows and Core Graphics give one. `stride` is a
+    /// row's length in bytes; each chroma sample averages its 2×2 block.
+    pub fn from_bgrx(src: &[u8], stride: usize, width: u32, height: u32) -> Self {
+        let mut p = Self::black(width, height);
+        let (w, h) = (width as usize, height as usize);
+        let cw = p.chroma_width();
+        let (py, pu, pv) = p.planes_mut();
+        let rgb = |x: usize, r: usize| {
+            let px = &src[r * stride + x * 4..r * stride + x * 4 + 3];
+            (i32::from(px[2]), i32::from(px[1]), i32::from(px[0]))
+        };
+        // BT.601, limited range, in 16.16 fixed point.
+        for r in 0..h {
+            for x in 0..w {
+                let (rr, gg, bb) = rgb(x, r);
+                py[r * w + x] =
+                    (((16 << 16) + 16_829 * rr + 33_039 * gg + 6_416 * bb + 32_768) >> 16) as u8;
+            }
+        }
+        for r in (0..h).step_by(2) {
+            for x in (0..w).step_by(2) {
+                let (mut sr, mut sg, mut sb, mut n) = (0, 0, 0, 0);
+                for (dx, dy) in [(0, 0), (1, 0), (0, 1), (1, 1)] {
+                    if x + dx < w && r + dy < h {
+                        let (rr, gg, bb) = rgb(x + dx, r + dy);
+                        (sr, sg, sb, n) = (sr + rr, sg + gg, sb + bb, n + 1);
+                    }
+                }
+                let (rr, gg, bb) = (sr / n, sg / n, sb / n);
+                let c = (r / 2) * cw + x / 2;
+                pu[c] = (((128 << 16) - 9_714 * rr - 19_070 * gg + 28_784 * bb + 32_768) >> 16)
+                    .clamp(16, 240) as u8;
+                pv[c] = (((128 << 16) + 28_784 * rr - 24_103 * gg - 4_681 * bb + 32_768) >> 16)
+                    .clamp(16, 240) as u8;
+            }
+        }
+        p
+    }
+
     /// RGBA, 4 bytes a pixel, rows `width * 4` long.
     pub fn write_rgba(&self, out: &mut Vec<u8>) {
         self.write_rgb32(out, [0, 1, 2]);
@@ -412,6 +452,32 @@ fn scale_plane(src: &[u8], sw: usize, sh: usize, dst: &mut [u8], dw: usize, dh: 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_screens_pixels_come_back_as_they_went() {
+        // A picture to BGRA and back, as a screen gives it: the same
+        // picture, within rounding (and chroma averaged per 2×2 block).
+        let p = Picture::pattern(320, 180, 7);
+        let mut bgra = Vec::new();
+        p.write_bgra(&mut bgra);
+        // A row padded as an X server or a GPU pads one.
+        let stride = 320 * 4 + 64;
+        let mut padded = vec![0u8; stride * 180];
+        for r in 0..180 {
+            padded[r * stride..r * stride + 320 * 4]
+                .copy_from_slice(&bgra[r * 320 * 4..(r + 1) * 320 * 4]);
+        }
+        let back = Picture::from_bgrx(&padded, stride, 320, 180);
+        assert_eq!((back.width, back.height), (320, 180));
+        let psnr = back.psnr(&p);
+        assert!(psnr > 40.0, "{psnr} dB");
+        let (u, v) = (p.u().to_vec(), p.v().to_vec());
+        let near = |a: &[u8], b: &[u8]| a.iter().zip(b).all(|(x, y)| x.abs_diff(*y) <= 3);
+        assert!(near(back.u(), &u) && near(back.v(), &v), "chroma");
+        // An odd size has a chroma sample for its last column and row.
+        let odd = Picture::from_bgrx(&[255u8; 5 * 3 * 4], 5 * 4, 5, 3);
+        assert!(odd.y().iter().all(|&y| y == 235), "white is 235");
+    }
 
     #[test]
     fn colours_survive_the_trip_to_rgba() {

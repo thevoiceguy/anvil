@@ -148,8 +148,9 @@ struct Cli {
     agc: bool,
 
     /// Video: `camera` films with this computer's camera (Linux: V4L2,
-    /// VP8, and H.264 once Cisco's OpenH264 is fetched); `pattern` films
-    /// a moving test pattern through the same codecs; `synthetic` sends
+    /// VP8, and H.264 once Cisco's OpenH264 is fetched) and shares its
+    /// screens (Linux: the X server's monitors); `pattern` films and
+    /// shares a moving test pattern through the same codecs; `synthetic` sends
     /// numbered frames and checks those that arrive, for headless tests.
     /// `--call` then offers video, `--auto-answer` takes it, and the far
     /// end asking to see us turns our camera on. A summary prints at
@@ -1267,6 +1268,7 @@ async fn phone_config(
                     anvil_video::PatternCamera::default(),
                     &dir,
                 )
+                .with_screens(anvil_video::PatternScreen::default())
             } else {
                 anvil_video::DesktopVideoHost::platform(&dir)
             };

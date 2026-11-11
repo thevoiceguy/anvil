@@ -11,11 +11,14 @@
 //! - **Receiving.** Each incoming stream is decoded on a thread of its
 //!   own and its pictures shown, each at the moment the core gives
 //!   (playout and lip sync are the core's), in the stream's tile.
+//! - **Sharing.** A screen ([`Screens`]) is captured and sent as a camera
+//!   is, through the same source, shown in a tile of its own
+//!   ([`TileKey::ShareView`]).
 //! - **Tiles.** [`Tiles`] keeps each stream's last picture and the
 //!   self-view; the app attaches a [`Renderer`] (a Flutter texture) to
 //!   those on its screen. Pictures never cross into Dart.
 //!
-//! **Linux**: V4L2 cameras; VP8 through libvpx; H.264 through Cisco's
+//! **Linux**: V4L2 cameras; the X server's monitors; VP8 through libvpx; H.264 through Cisco's
 //! OpenH264, fetched at first use ([`openh264_fetch`]). **macOS**:
 //! AVFoundation cameras; H.264 through VideoToolbox. **Windows**: Media
 //! Foundation cameras; H.264 through Media Foundation. **Android**:
@@ -39,6 +42,7 @@ pub mod ndkcam;
 pub mod openh264_fetch;
 pub mod picture;
 pub mod png;
+pub mod screen;
 mod sink;
 mod source;
 pub mod tiles;
@@ -48,20 +52,23 @@ pub mod v4l2;
 mod vpx;
 #[cfg(target_vendor = "apple")]
 mod vt;
+#[cfg(target_os = "linux")]
+pub mod x11;
 
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use anvil_core::error::AnvilError;
 use anvil_core::video::host::{
-    CameraInfo, ReceiveConfig, Resolution, SendConfig, StreamId, VideoCodecCaps, VideoHost,
-    VideoKind, VideoSink, VideoSource,
+    CameraInfo, ReceiveConfig, Resolution, ScreenInfo, SendConfig, StreamId, VideoCodecCaps,
+    VideoHost, VideoKind, VideoSink, VideoSource,
 };
 use parking_lot::Mutex;
 
 pub use camera::{Cameras, Capture, NoCameras, PatternCamera};
 pub use codec::{Codecs, Decoder, Encoded, Encoder, SoftwareCodecs};
 pub use picture::Picture;
+pub use screen::{NoScreens, PatternScreen, Screens};
 pub use tiles::{Renderer, TileKey, TileStats, Tiles};
 
 /// The desktop's video host.
@@ -75,6 +82,11 @@ pub struct DesktopVideoHost {
     camera: Arc<Mutex<Option<String>>>,
     /// The sources running, to switch cameras.
     live: Arc<Mutex<Vec<source::Switch>>>,
+    screens: Arc<dyn Screens>,
+    /// The screen a share without one captures.
+    screen: Arc<Mutex<Option<String>>>,
+    /// The shares running, to switch screens.
+    live_screens: Arc<Mutex<Vec<source::Switch>>>,
 }
 
 impl DesktopVideoHost {
@@ -87,14 +99,23 @@ impl DesktopVideoHost {
             tiles: Tiles::default(),
             camera: Arc::default(),
             live: Arc::default(),
+            screens: Arc::new(NoScreens),
+            screen: Arc::default(),
+            live_screens: Arc::default(),
         }
     }
 
-    /// The platform's cameras and codecs. OpenH264 is used from
+    /// The platform's cameras, screens and codecs. OpenH264 is used from
     /// `openh264_dir` if it is there ([`Self::fetch_openh264`] puts it
     /// there).
     pub fn platform(openh264_dir: &Path) -> Self {
-        Self::with_cameras(platform_cameras(), openh264_dir)
+        Self::with_cameras(platform_cameras(), openh264_dir).with_screens(platform_screens())
+    }
+
+    /// The same host sharing `screens` (a test pattern, say).
+    pub fn with_screens(mut self, screens: impl Screens + 'static) -> Self {
+        self.screens = Arc::new(screens);
+        self
     }
 
     /// The platform's codecs with other cameras (a test pattern).
@@ -130,6 +151,9 @@ impl DesktopVideoHost {
             tiles: Tiles::default(),
             camera: Arc::default(),
             live: Arc::default(),
+            screens: Arc::new(NoScreens),
+            screen: Arc::default(),
+            live_screens: Arc::default(),
         }
     }
 
@@ -187,6 +211,16 @@ pub fn platform_cameras() -> Box<dyn Cameras> {
     cameras
 }
 
+/// The platform's screens: the X server's monitors on Linux (none under
+/// Wayland without XWayland, nor without a display).
+pub fn platform_screens() -> Box<dyn Screens> {
+    #[cfg(target_os = "linux")]
+    let screens: Box<dyn Screens> = Box::new(x11::X11Screens);
+    #[cfg(not(target_os = "linux"))]
+    let screens: Box<dyn Screens> = Box::new(NoScreens);
+    screens
+}
+
 impl Cameras for Box<dyn Cameras> {
     fn list(&self) -> Vec<CameraInfo> {
         (**self).list()
@@ -215,29 +249,47 @@ impl VideoHost for DesktopVideoHost {
         self.live.lock().retain(|s| s.to(camera));
     }
 
+    fn screens(&self) -> Vec<ScreenInfo> {
+        self.screens.list()
+    }
+
+    fn set_screen(&self, screen: Option<&str>) {
+        *self.screen.lock() = screen.map(str::to_owned);
+        self.live_screens.lock().retain(|s| s.to(screen));
+    }
+
     fn start_send(&self, cfg: SendConfig) -> Result<Box<dyn VideoSource>, AnvilError> {
-        if cfg.kind == VideoKind::Content {
-            return Err(AnvilError::Codec(
-                "screen share is not supported yet".into(),
-            ));
-        }
         let encoder = self
             .codecs
             .encoder(cfg.codec, cfg.kbps, cfg.fps)
             .map_err(AnvilError::Codec)?;
-        // Opened here so a camera that cannot be opened is an error now,
+        // A screen is captured as a camera is, through the same source.
+        let (devices, id, live, view): (Arc<dyn Cameras>, _, _, _) = match cfg.kind {
+            VideoKind::Camera => (
+                Arc::clone(&self.cameras),
+                cfg.camera.clone().or_else(|| self.camera.lock().clone()),
+                &self.live,
+                TileKey::SelfView,
+            ),
+            VideoKind::Content => (
+                Arc::new(screen::AsCameras(Arc::clone(&self.screens))),
+                self.screen.lock().clone(),
+                &self.live_screens,
+                TileKey::ShareView,
+            ),
+        };
+        // Opened here so a device that cannot be opened is an error now,
         // not a stream that never starts. It takes a moment.
-        let id = cfg.camera.clone().or_else(|| self.camera.lock().clone());
-        let capture = self
-            .cameras
+        let capture = devices
             .open(id.as_deref(), cfg.max, cfg.fps)
             .map_err(AnvilError::Codec)?;
         let camera = source::Camera {
-            cameras: Arc::clone(&self.cameras),
+            cameras: devices,
             id,
             capture,
             want: cfg.max,
             fps: cfg.fps,
+            view,
         };
         let source = source::CameraSource::start(
             camera,
@@ -245,7 +297,7 @@ impl VideoHost for DesktopVideoHost {
             (cfg.kbps, cfg.max, cfg.fps),
             self.tiles.clone(),
         );
-        let mut live = self.live.lock();
+        let mut live = live.lock();
         live.retain(source::Switch::alive);
         live.push(source.switch());
         Ok(Box::new(source))
@@ -382,5 +434,47 @@ mod tests {
             cameras.opened.lock().last().cloned().flatten().as_deref(),
             Some("front")
         );
+    }
+
+    #[tokio::test]
+    async fn a_screen_is_shared_through_the_same_source_and_shown_apart() {
+        let host = DesktopVideoHost::new(TwoCameras::default(), SoftwareCodecs::default())
+            .with_screens(PatternScreen::new(Resolution {
+                width: 320,
+                height: 180,
+            }));
+        assert_eq!(host.screens().len(), 1);
+        host.set_screen(Some("pattern"));
+        let mut share = host
+            .start_send(SendConfig {
+                kind: VideoKind::Content,
+                fps: 10,
+                ..send_config()
+            })
+            .expect("the screen opens");
+        let (_, first) = share.next_frame().await.unwrap();
+        assert!(first.keyframe);
+        for _ in 0..3 {
+            share.next_frame().await.unwrap();
+        }
+        // Shown as our share, not as the camera's self-view.
+        let tiles = host.tiles();
+        let shown = tiles.stats(TileKey::ShareView).expect("the share's tile");
+        assert_eq!((shown.width, shown.height), (320, 180));
+        assert!(tiles.stats(TileKey::SelfView).is_none());
+        // A camera alongside keeps its own tile.
+        let mut camera = host.start_send(send_config()).unwrap();
+        camera.next_frame().await.unwrap();
+        assert!(tiles.stats(TileKey::SelfView).is_some());
+
+        // A host without screens refuses a share.
+        let bare = DesktopVideoHost::new(TwoCameras::default(), SoftwareCodecs::default());
+        assert!(bare.screens().is_empty());
+        assert!(bare
+            .start_send(SendConfig {
+                kind: VideoKind::Content,
+                ..send_config()
+            })
+            .is_err());
     }
 }

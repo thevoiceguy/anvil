@@ -267,8 +267,19 @@ every recommendation:
             stops the screen at once, before the stop is offered (FCP
             v0.25.547 frees the floor on that re-INVITE, not after its idle
             timeout)
-      - [ ] **A4c2** Screens captured on Linux, macOS and Windows, and
-            the share proved against FCP
+      - [ ] **A4c2** Screens captured on the desktops, and the share
+            proved against FCP
+        - [x] **A4c2a** anvil-video's screens (`Screens`, the pattern
+              screen, a share through the camera's source with its own
+              tile, `ShareView`), Linux's X server's monitors through
+              x11rb (RandR), `Picture::from_bgrx`; the CLI's `pattern`
+              shares the pattern; CI's tests under Xvfb; the share
+              against FCP (granted, released on the stop's re-INVITE,
+              granted again)
+        - [ ] **A4c2b** Wayland: the desktop portal's ScreenCast over
+              PipeWire
+        - [ ] **A4c2c** macOS: ScreenCaptureKit
+        - [ ] **A4c2d** Windows: Desktop Duplication
       - [ ] **A4c3** The app: a Share button and the screen's choice; a
             refusal or a host's stop ended by `share_screen(call, false)`
   - [ ] **A5** Mobile screen share

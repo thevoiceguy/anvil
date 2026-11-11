@@ -172,7 +172,7 @@ dependencies = [
 
 [[package]]
 name = "anvil-app"
-version = "0.2.72"
+version = "0.2.73"
 dependencies = [
  "anvil-core",
  "anvil-fcp",
@@ -200,7 +200,7 @@ dependencies = [
 
 [[package]]
 name = "anvil-audio"
-version = "0.2.72"
+version = "0.2.73"
 dependencies = [
  "anvil-core",
  "async-trait",
@@ -216,7 +216,7 @@ dependencies = [
 
 [[package]]
 name = "anvil-brand"
-version = "0.2.72"
+version = "0.2.73"
 dependencies = [
  "anvil-core",
  "async-trait",
@@ -234,7 +234,7 @@ dependencies = [
 
 [[package]]
 name = "anvil-cli"
-version = "0.2.72"
+version = "0.2.73"
 dependencies = [
  "anvil-app",
  "anvil-audio",
@@ -251,7 +251,7 @@ dependencies = [
 
 [[package]]
 name = "anvil-codec"
-version = "0.2.72"
+version = "0.2.73"
 dependencies = [
  "anvil-core",
  "opus",
@@ -260,7 +260,7 @@ dependencies = [
 
 [[package]]
 name = "anvil-core"
-version = "0.2.72"
+version = "0.2.73"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -302,10 +302,11 @@ dependencies = [
 
 [[package]]
 name = "anvil-fcp"
-version = "0.2.72"
+version = "0.2.73"
 dependencies = [
  "anvil-brand",
  "anvil-core",
+ "anvil-video",
  "async-trait",
  "base64 0.22.1",
  "futures-util",
@@ -325,7 +326,7 @@ dependencies = [
 
 [[package]]
 name = "anvil-ffi"
-version = "0.2.72"
+version = "0.2.73"
 dependencies = [
  "anvil-core",
  "anvil-fcp",
@@ -342,7 +343,7 @@ dependencies = [
 
 [[package]]
 name = "anvil-update"
-version = "0.2.72"
+version = "0.2.73"
 dependencies = [
  "futures",
  "reqwest",
@@ -357,7 +358,7 @@ dependencies = [
 
 [[package]]
 name = "anvil-video"
-version = "0.2.72"
+version = "0.2.73"
 dependencies = [
  "anvil-audio",
  "anvil-core",
@@ -387,12 +388,13 @@ dependencies = [
  "tracing-subscriber",
  "v4l",
  "windows 0.61.3",
+ "x11rb",
  "zune-jpeg",
 ]
 
 [[package]]
 name = "anvil_bridge"
-version = "0.2.72"
+version = "0.2.73"
 dependencies = [
  "anvil-app",
  "anvil-audio",
@@ -1625,6 +1627,16 @@ checksum = "85649ca51fd72272d7821adaf274ad91c288277713d9c18820d8499a7ff69e9a"
 dependencies = [
  "typenum",
  "version_check",
+]
+
+[[package]]
+name = "gethostname"
+version = "1.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "1bd49230192a3797a9a4d6abe9b3eed6f7fa4c8a8a4947977c6f80025f92cbd8"
+dependencies = [
+ "rustix 1.1.4",
+ "windows-link 0.2.1",
 ]
 
 [[package]]
@@ -5774,6 +5786,23 @@ name = "writeable"
 version = "0.6.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "1ffae5123b2d3fc086436f8834ae3ab053a283cfac8fe0a0b8eaae044768a4c4"
+
+[[package]]
+name = "x11rb"
+version = "0.14.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "5a8885a854a8bfdf87a301e53e41b17c5f8f33639903131338b997b1eb614f44"
+dependencies = [
+ "gethostname",
+ "rustix 1.1.4",
+ "x11rb-protocol",
+]
+
+[[package]]
+name = "x11rb-protocol"
+version = "0.14.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "acf4d1bc32aa46eec18caa634ec3cf4c05bfa151f12b93b510b15190f69a1ca8"
 
 [[package]]
 name = "x509-parser"

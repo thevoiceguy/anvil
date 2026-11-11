@@ -36,8 +36,9 @@ jobs:
     steps:
       - uses: actions/checkout@v5
       - uses: dtolnay/rust-toolchain@stable
-      - name: Audio and video headers (cpal, libvpx, bindgen's libclang)
-        run: sudo apt-get update && sudo apt-get install -y libasound2-dev libvpx-dev libclang-dev
+      # Xvfb: an X server whose screen anvil-video's X11 capture shares.
+      - name: Audio and video headers (cpal, libvpx, bindgen's libclang), Xvfb
+        run: sudo apt-get update && sudo apt-get install -y libasound2-dev libvpx-dev libclang-dev xvfb
       # Cisco's OpenH264, as the app fetches it at first use, so the H.264
       # tests run here (anvil-video checks it against Cisco's hash).
       - name: Cisco's OpenH264
@@ -47,7 +48,8 @@ jobs:
             | bunzip2 > "$RUNNER_TEMP/openh264/libopenh264-2.6.0-linux64.8.so"
           echo "ANVIL_OPENH264_DIR=$RUNNER_TEMP/openh264" >> "$GITHUB_ENV"
       - uses: Swatinem/rust-cache@v2
-      - run: cargo test --workspace
+      # A 24-bit screen: the default 8-bit one is not shareable.
+      - run: xvfb-run -a -s "-screen 0 1600x900x24" cargo test --workspace
 
   # The workspace on Windows (MSVC): its lints (the Windows-only code —
   # the pipe, DPAPI — is linted nowhere else), it builds, and its tests
@@ -137,7 +139,7 @@ jobs:
         if: env.FCP_READ_TOKEN != ''
       - name: Audio headers for cpal
         if: env.FCP_READ_TOKEN != ''
-        run: sudo apt-get update && sudo apt-get install -y libasound2-dev
+        run: sudo apt-get update && sudo apt-get install -y libasound2-dev libvpx-dev libclang-dev
       - uses: Swatinem/rust-cache@v2
         if: env.FCP_READ_TOKEN != ''
       - name: Anvil against FCP
