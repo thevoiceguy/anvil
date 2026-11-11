@@ -441,12 +441,22 @@ fn video_answer(ip: &str, pt: &str, camera: u16, screen: u16, content: &str) -> 
     )
 }
 
-/// Whether a packet reaches `socket` within `within`.
-async fn arrives(socket: &UdpSocket, within: std::time::Duration) -> bool {
+/// Whether an RTP packet of payload type `pt` reaches `socket` within
+/// `within`. Anything else is noted and passed over.
+async fn arrives(socket: &UdpSocket, pt: u8, within: std::time::Duration) -> bool {
     let mut buf = [0u8; 2048];
-    tokio::time::timeout(within, socket.recv_from(&mut buf))
-        .await
-        .is_ok()
+    let end = tokio::time::Instant::now() + within;
+    loop {
+        match tokio::time::timeout_at(end, socket.recv_from(&mut buf)).await {
+            Err(_) => return false,
+            Ok(Ok((n, _))) if n >= 12 && buf[0] >> 6 == 2 && buf[1] & 0x7f == pt => return true,
+            Ok(Ok((n, from))) => eprintln!(
+                "passed over: {n} bytes from {from}: {:02x?}",
+                &buf[..n.min(4)]
+            ),
+            Ok(Err(e)) => eprintln!("passed over: {e}"),
+        }
+    }
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
@@ -490,6 +500,7 @@ async fn a_share_the_room_refuses_stops_at_once_and_is_ended_by_re_invite() {
     assert_eq!(offered.len(), 2, "{invite}");
     assert!(offered[1].contains("a=recvonly"), "{}", offered[1]);
     let pt = vp8_pt(&offered[1]);
+    let rtp_pt: u8 = pt.parse().unwrap();
     let answer = video_answer("127.0.0.9", &pt, camera_port, screen_port, "sendrecv");
     room.answer(&invite, from, "200 OK", "", "application/sdp", &answer)
         .await;
@@ -501,7 +512,7 @@ async fn a_share_the_room_refuses_stops_at_once_and_is_ended_by_re_invite() {
     .await
     .expect("in the room");
     assert!(
-        !arrives(&screen, Duration::from_millis(300)).await,
+        !arrives(&screen, rtp_pt, Duration::from_millis(300)).await,
         "no screen before a share"
     );
 
@@ -521,7 +532,10 @@ async fn a_share_the_room_refuses_stops_at_once_and_is_ended_by_re_invite() {
         .await;
     room.next("ACK ").await;
     share.await.unwrap().expect("the share is answered");
-    assert!(arrives(&screen, SOON).await, "her screen reaches the room");
+    assert!(
+        arrives(&screen, rtp_pt, SOON).await,
+        "her screen reaches the room"
+    );
 
     // The room refuses it (the floor is held): her screen stops at once,
     // before the stop is offered.
@@ -538,11 +552,17 @@ async fn a_share_the_room_refuses_stops_at_once_and_is_ended_by_re_invite() {
     .expect("the refusal is told");
     assert_eq!(notice.state, FloorState::Refused);
     assert!(notice.mine);
-    // What was in flight drains; then nothing.
-    tokio::time::sleep(Duration::from_millis(200)).await;
-    while arrives(&screen, Duration::from_millis(10)).await {}
+    // What queued in the socket meanwhile is read until 200 ms pass
+    // without a packet (a screen still sent at 50 fps never goes quiet);
+    // a short wait is not enough on Windows, where a ready socket is
+    // told through a poll that can lose the race to a 10 ms timer.
+    let drained = tokio::time::timeout(Duration::from_secs(3), async {
+        while arrives(&screen, rtp_pt, Duration::from_millis(200)).await {}
+    })
+    .await;
+    assert!(drained.is_ok(), "her screen never went quiet");
     assert!(
-        !arrives(&screen, Duration::from_millis(500)).await,
+        !arrives(&screen, rtp_pt, Duration::from_millis(500)).await,
         "her screen still claims the floor"
     );
 
