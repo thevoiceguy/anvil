@@ -1158,4 +1158,107 @@ class StringsEn extends Strings {
 
   @override
   String get h264Off => 'Off; video calls use VP8';
+
+  @override
+  String get meetingsButton => 'Meetings';
+
+  @override
+  String get joinRoomLabel => 'Room number or join link';
+
+  @override
+  String get joinButton => 'Join';
+
+  @override
+  String get joinWithVideoButton => 'Join with video';
+
+  @override
+  String get yourMeetings => 'Your meetings';
+
+  @override
+  String get noMeetings => 'You have no meetings of your own.';
+
+  @override
+  String get copyLinkButton => 'Copy a link';
+
+  @override
+  String get copyHostLinkButton => 'Copy a host\'s link';
+
+  @override
+  String get linkCopied => 'Link copied';
+
+  @override
+  String roomPeople(int count) {
+    return 'People ($count)';
+  }
+
+  @override
+  String roomSpeaking(String name) {
+    return '$name is speaking';
+  }
+
+  @override
+  String roomPresenting(String name) {
+    return '$name is sharing their screen';
+  }
+
+  @override
+  String roomShareStopped(String reason) {
+    return 'Your share stopped: $reason';
+  }
+
+  @override
+  String get roomHost => 'Host';
+
+  @override
+  String get roomYouHost => 'You are a host';
+
+  @override
+  String get roomMuted => 'Muted';
+
+  @override
+  String get roomHeld => 'On hold';
+
+  @override
+  String get roomCameraOff => 'Camera off';
+
+  @override
+  String get roomMuteMember => 'Mute for everyone';
+
+  @override
+  String get roomUnmuteMember => 'Unmute';
+
+  @override
+  String get roomStopCamera => 'Stop their camera';
+
+  @override
+  String get roomAllowCamera => 'Allow their camera';
+
+  @override
+  String get roomPin => 'Pin';
+
+  @override
+  String get roomSpotlight => 'Spotlight';
+
+  @override
+  String get roomRemove => 'Remove from the room';
+
+  @override
+  String get roomGrid => 'Grid';
+
+  @override
+  String get roomSpeakerLayout => 'Speaker';
+
+  @override
+  String get roomUnpin => 'Unpin';
+
+  @override
+  String get roomStopSpotlight => 'Stop the spotlight';
+
+  @override
+  String get roomStopShare => 'Stop the share';
+
+  @override
+  String roomMemberActions(String name) {
+    return 'Host controls for $name';
+  }
 }

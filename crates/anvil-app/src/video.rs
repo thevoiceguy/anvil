@@ -8,7 +8,7 @@ use std::future::Future;
 use std::pin::Pin;
 use std::sync::Arc;
 
-use anvil_core::video::host::Resolution;
+use anvil_core::video::host::{Resolution, VideoKind};
 use anvil_core::video::VideoStreamDirection;
 use anvil_core::{CallId, CallMedia, Event};
 
@@ -301,13 +301,16 @@ pub(crate) fn on_event(inner: &Arc<Inner>, event: &Event) -> bool {
             call,
             stream,
             direction,
+            kind,
             ..
         } if known(call.0) => {
             let (stream, direction) = (stream.0, *direction);
+            let content = *kind == VideoKind::Content;
             update_call(
                 inner,
                 call.0,
                 |c| match direction {
+                    VideoStreamDirection::Incoming if content => c.video.content = Some(stream),
                     VideoStreamDirection::Incoming => {
                         if !c.video.streams.contains(&stream) {
                             c.video.streams.push(stream);
@@ -328,6 +331,9 @@ pub(crate) fn on_event(inner: &Arc<Inner>, event: &Event) -> bool {
                 call.0,
                 |c| {
                     c.video.streams.retain(|s| *s != stream);
+                    if c.video.content == Some(stream) {
+                        c.video.content = None;
+                    }
                     if c.video.sending == Some(stream) {
                         c.video.sending = None;
                     }

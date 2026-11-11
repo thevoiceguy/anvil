@@ -173,6 +173,10 @@ class _DesktopBridgeState extends State<DesktopBridge> {
       case ShellAction.dial:
         await shell.showWindow();
         model.dialRequest.value = event.target;
+      // The meetings sheet with the link, never joined by itself.
+      case ShellAction.join:
+        await shell.showWindow();
+        model.joinRequest.value = event.target;
     }
   }
 

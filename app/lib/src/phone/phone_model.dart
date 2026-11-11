@@ -70,6 +70,21 @@ class PhoneModel extends ChangeNotifier {
   }
 
   /// Our camera on or off in `call`.
+  /// Join an FCP room by its number or a join link.
+  Future<void> joinRoom(String target, {bool video = false}) async {
+    final camera = !video || await _camera();
+    await run(() async => api.joinRoom(target, video: video));
+    _cameraRefused(camera);
+  }
+
+  /// A link to send for one of the user's meetings, or null when FCP made
+  /// none (the notice says why).
+  Future<String?> meetingLink(String meeting, {bool host = false}) async {
+    String? link;
+    await run(() async => link = await api.meetingLink(meeting, host: host));
+    return link;
+  }
+
   Future<void> setVideo(int call, bool on) async {
     final camera = !on || await _camera();
     await run(() => api.setVideo(call, on));
@@ -98,6 +113,10 @@ class PhoneModel extends ChangeNotifier {
   /// A number for the keypad from outside the app (a tel: or sip: link);
   /// the home screen takes it.
   final dialRequest = ValueNotifier<String?>(null);
+
+  /// A join link the system handed the app (`fcp://join/…`): shown in the
+  /// meetings sheet to join, never joined by itself.
+  final joinRequest = ValueNotifier<String?>(null);
 
   StreamSubscription<PhoneEvent>? _events;
 
@@ -318,6 +337,7 @@ class PhoneModel extends ChangeNotifier {
     _disposed = true;
     _stopEvents();
     dialRequest.dispose();
+    joinRequest.dispose();
     super.dispose();
   }
 }

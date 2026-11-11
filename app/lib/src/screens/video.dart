@@ -182,7 +182,13 @@ class _CallVideoStageState extends State<CallVideoStage> {
             return Stack(
               children: [
                 Positioned.fill(
-                  child: streams.isEmpty
+                  child: call.contentStream != null
+                      ? _Shared(
+                          tiles: widget.tiles,
+                          content: call.contentStream!,
+                          streams: streams,
+                        )
+                      : streams.isEmpty
                       ? ColoredBox(
                           key: const Key('videoTheirsOff'),
                           color: Colors.black87,
@@ -249,6 +255,52 @@ class _CallVideoStageState extends State<CallVideoStage> {
     at.dx.clamp(_margin, limit.dx < _margin ? _margin : limit.dx),
     at.dy.clamp(_margin, limit.dy < _margin ? _margin : limit.dy),
   );
+}
+
+/// A shared screen (a room's) large, and the cameras beside it.
+class _Shared extends StatelessWidget {
+  const _Shared({
+    required this.tiles,
+    required this.content,
+    required this.streams,
+  });
+  final VideoTiles tiles;
+  final int content;
+  final List<int> streams;
+
+  @override
+  Widget build(BuildContext context) {
+    final shared = VideoTile(
+      key: ValueKey('content-$content'),
+      tiles: tiles,
+      stream: content,
+    );
+    if (streams.isEmpty) return shared;
+    return Row(
+      key: const Key('sharedStage'),
+      children: [
+        Expanded(flex: 3, child: shared),
+        const SizedBox(width: 2),
+        Expanded(
+          child: Column(
+            children: [
+              for (final stream in streams.take(4))
+                Expanded(
+                  child: Padding(
+                    padding: const EdgeInsets.only(bottom: 2),
+                    child: VideoTile(
+                      key: ValueKey('tile-$stream'),
+                      tiles: tiles,
+                      stream: stream,
+                    ),
+                  ),
+                ),
+            ],
+          ),
+        ),
+      ],
+    );
+  }
 }
 
 /// The streams coming in: one fills the stage; more share it.

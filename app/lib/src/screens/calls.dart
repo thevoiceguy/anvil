@@ -17,6 +17,7 @@ import 'audio_controls.dart';
 import 'call_stats.dart';
 import 'contacts.dart';
 import 'lines.dart';
+import 'room.dart';
 import 'video.dart';
 
 /// The call the in-call screen is about: the one up, else one being placed,
@@ -307,6 +308,7 @@ class _InCallPanelState extends State<InCallPanel> {
                 ),
               const SizedBox(height: 8),
               if (connected) _MediaLine(model: model, call: call),
+              if (call.room != null) RoomPanel(model: model, call: call),
               const SizedBox(height: 24),
               if (_keypad && connected)
                 DigitPad(

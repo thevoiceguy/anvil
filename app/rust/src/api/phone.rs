@@ -606,6 +606,47 @@ pub struct Call {
     pub streams: Vec<u32>,
     /// The far end added video: ours stays off until turned on.
     pub video_requested: bool,
+    /// The shared screen coming in (a room's), apart from the cameras.
+    pub content_stream: Option<u32>,
+    /// The room the call is in, when it joined one.
+    pub room: Option<Room>,
+}
+
+/// The room a call is in (FCP's `docs/SOFTPHONE_VIDEO.md` §2.6).
+pub struct Room {
+    /// The room's number.
+    pub number: String,
+    /// The user has a host's controls in it.
+    pub host: bool,
+    pub members: Vec<RoomMember>,
+    /// Who speaks, or last spoke, by id.
+    pub speaker: Option<String>,
+    /// Who shares their screen, by name, while someone does.
+    pub presenter: Option<String>,
+    /// Our own share was turned down or ended by the room: why.
+    pub floor_refused: Option<String>,
+}
+
+/// One person in a room.
+pub struct RoomMember {
+    /// The room's id for them: what a host's controls name.
+    pub id: String,
+    pub name: String,
+    pub host: bool,
+    /// `sending`, `muted` or `held`.
+    pub audio: String,
+    /// Their camera as the room has it (`on`, `off`, `lost`, …).
+    pub camera: Option<String>,
+    pub speaking: bool,
+    pub presenting: bool,
+}
+
+/// A meeting the user owns on FCP.
+pub struct Meeting {
+    pub id: String,
+    /// The number it is dialed at.
+    pub room_number: String,
+    pub name: String,
 }
 
 /// Video calls on this device.
@@ -953,6 +994,8 @@ pub struct PhoneState {
     /// Capturing calls.
     pub capture: CaptureInfo,
     pub video: VideoInfo,
+    /// The meetings the user owns, signed in to FCP.
+    pub meetings: Vec<Meeting>,
 }
 
 /// A ringtone to choose: `anvil`, `classic`, `brand:` and its name, or
@@ -993,7 +1036,7 @@ pub struct PhoneChange {
     /// `registration`, `call`, `call_ended`, `message_waiting`, `dnd`,
     /// `brand`, `transfer_progress`, `lines`, `calling`, `recents`, `people`,
     /// `person`, `voicemail`, `audio`, `playing`, `push`, `may_record`, `capture`,
-    /// `contacts`.
+    /// `contacts`, `video`, `meetings`.
     pub kind: String,
     /// The call it is about, if any.
     pub call: Option<u64>,
@@ -1100,6 +1143,27 @@ pub fn phone_state() -> anyhow::Result<PhoneState> {
                 sending: c.video.sending,
                 streams: c.video.streams,
                 video_requested: c.video.requested,
+                content_stream: c.video.content,
+                room: c.room.map(|r| Room {
+                    number: r.number,
+                    host: r.host,
+                    members: r
+                        .members
+                        .into_iter()
+                        .map(|m| RoomMember {
+                            id: m.id,
+                            name: m.name,
+                            host: m.host,
+                            audio: m.audio,
+                            camera: m.camera,
+                            speaking: m.speaking,
+                            presenting: m.presenting,
+                        })
+                        .collect(),
+                    speaker: r.speaker,
+                    presenter: r.presenter,
+                    floor_refused: r.floor_refused,
+                }),
             })
             .collect(),
         voicemail_new: s.message_waiting.map(|m| m.new).unwrap_or(0),
@@ -1192,6 +1256,15 @@ pub fn phone_state() -> anyhow::Result<PhoneState> {
             saved_bytes: s.capture.saved_bytes,
             folder: s.capture.folder.clone(),
         },
+        meetings: s
+            .meetings
+            .iter()
+            .map(|m| Meeting {
+                id: m.id.clone(),
+                room_number: m.room_number.clone(),
+                name: m.name.clone(),
+            })
+            .collect(),
         video: VideoInfo {
             available: s.video.available,
             cameras: s
@@ -1332,6 +1405,7 @@ pub fn phone_changes(sink: StreamSink<PhoneChange>) -> anyhow::Result<()> {
                 C::Presence { .. } => kind_only("presence"),
                 C::AudioTest { .. } => kind_only("audio_test"),
                 C::Video { .. } => kind_only("video"),
+                C::Meetings { .. } => kind_only("meetings"),
             };
             if sink.add(out).is_err() {
                 return;
@@ -1410,6 +1484,60 @@ pub async fn place_call(target: String, line: Option<String>, video: bool) -> an
     })
     .await?
     .ok_or_else(|| anyhow::anyhow!("no call was placed"))
+}
+
+/// Join an FCP room by its number or a join link, with video or not; the
+/// new call's id.
+pub async fn join_room(target: String, video: bool) -> anyhow::Result<u64> {
+    execute(Command::Join { target, video })
+        .await?
+        .ok_or_else(|| anyhow::anyhow!("no call was placed"))
+}
+
+/// A link to send for one of the user's meetings (by id or room number):
+/// a guest's, or a host's.
+pub async fn meeting_link(meeting: String, host: bool) -> anyhow::Result<String> {
+    let phone = phone()?;
+    on_runtime(async move {
+        let answer = phone.execute(Command::JoinLink { meeting, host }).await?;
+        answer
+            .link
+            .ok_or_else(|| anyhow::anyhow!("FCP made no link"))
+    })
+    .await
+}
+
+/// A host's control over the room `call` is in: `layout` (`on`, a grid;
+/// off, the speaker large), `pin` and `spotlight` (`member`, or none to
+/// stop), `mute` and `camera` (`member`, `on`), `remove` (`member`),
+/// `stop_share`.
+pub async fn room_control(
+    call: Option<u64>,
+    action: String,
+    member: Option<String>,
+    on: bool,
+) -> anyhow::Result<()> {
+    use anvil_app::RoomAction as A;
+    let need = |m: Option<String>| m.ok_or_else(|| anyhow::anyhow!("{action} needs a member"));
+    let action = match action.as_str() {
+        "layout" => A::Layout { grid: on },
+        "pin" => A::Pin { member },
+        "spotlight" => A::Spotlight { member },
+        "mute" => A::Mute {
+            member: need(member)?,
+            on,
+        },
+        "camera" => A::MemberVideo {
+            member: need(member)?,
+            on,
+        },
+        "remove" => A::Remove {
+            member: need(member)?,
+        },
+        "stop_share" => A::StopShare,
+        other => anyhow::bail!("no room control {other}"),
+    };
+    execute(Command::Room { call, action }).await.map(|_| ())
 }
 
 /// Take appearance `index` of a shared line (by key): pick up the call

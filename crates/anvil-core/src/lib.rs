@@ -26,7 +26,7 @@ pub(crate) mod rtcp;
 pub use rtcp::RemoteReport;
 pub mod quality;
 pub mod room;
-pub use room::{FloorNotice, FloorState, RoomAudio, RoomJoin, RoomMember};
+pub use room::{FloorNotice, FloorState, JoinDetails, RoomAudio, RoomJoin, RoomMember};
 pub mod sca;
 mod srtp;
 pub(crate) mod stun;
