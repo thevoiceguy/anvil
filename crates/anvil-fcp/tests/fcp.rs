@@ -242,6 +242,16 @@ async fn softphone_with(
     media: MediaConfig,
     audio: Box<dyn AudioHost>,
 ) -> (Anvil, EventStream) {
+    softphone_with_video(client, ip, media, audio, None).await
+}
+
+async fn softphone_with_video(
+    client: &FcpClient,
+    ip: &str,
+    media: MediaConfig,
+    audio: Box<dyn AudioHost>,
+    video: Option<Box<dyn anvil_core::video::host::VideoHost>>,
+) -> (Anvil, EventStream) {
     let config = client.softphone().await.expect("/me/softphone");
     let mut account = client.account_config(&config).await.expect("an account");
     account.bind_addr = Some(format!("{ip}:0"));
@@ -249,7 +259,7 @@ async fn softphone_with(
         account,
         media,
         audio,
-        video: None,
+        video,
         brand: BrandConfig::default(),
     })
     .await
@@ -1199,4 +1209,180 @@ async fn anvil_over_tls_is_called_encrypted() {
     alice_phone.hangup(out).await.unwrap();
     let _ = alice_phone.shutdown().await;
     let _ = bob_phone.shutdown().await;
+}
+
+impl Fcp {
+    /// A meeting with video at a fresh number, owned by `owner`: its id
+    /// and number.
+    async fn meeting(&self, owner: &str) -> (String, String) {
+        use rand::Rng;
+        let room = format!("77{}", rand::thread_rng().gen_range(100_000..999_999));
+        let made = self
+            .http
+            .post(format!("{}/api/v1/conferences/meetings", self.admin))
+            .bearer_auth(&self.token)
+            .header("X-FCP-Tenant-Id", &self.tenant)
+            .json(&json!({
+                "room_number": room,
+                "name": format!("Anvil room {room}"),
+                "owner_id": owner,
+                "video_enabled": true,
+                "play_entry_tone": false,
+                "play_exit_tone": false,
+            }))
+            .send()
+            .await
+            .unwrap();
+        let status = made.status();
+        let body: Value = made.json().await.unwrap_or_default();
+        assert!(status.is_success(), "{status} {body}");
+        (body["id"].as_str().expect("a meeting id").to_string(), room)
+    }
+}
+
+/// The next roster `call` is told that `ok` takes.
+async fn roster_where(
+    events: &mut EventStream,
+    call: CallId,
+    what: &str,
+    ok: impl Fn(&[anvil_core::RoomMember]) -> bool,
+) -> Vec<anvil_core::RoomMember> {
+    let mut last = Vec::new();
+    let found = expect(events, Duration::from_secs(15), |e| match e {
+        Event::RoomRoster {
+            call: c, members, ..
+        } if *c == call => {
+            last = members.clone();
+            ok(members).then(|| members.clone())
+        }
+        _ => None,
+    })
+    .await;
+    found.unwrap_or_else(|| panic!("no roster where {what}; last: {last:?}"))
+}
+
+/// The room's picture reaching `call`.
+async fn room_picture(events: &mut EventStream, call: CallId) {
+    use anvil_core::video::host::VideoKind;
+    use anvil_core::video::VideoStreamDirection;
+    expect(events, Duration::from_secs(15), |e| match e {
+        Event::VideoStarted {
+            call: c,
+            direction: VideoStreamDirection::Incoming,
+            kind: VideoKind::Camera,
+            ..
+        } if *c == call => Some(()),
+        _ => None,
+    })
+    .await
+    .expect("the room's picture arrives");
+}
+
+/// Two signed-in Anvils meet in a room on FCP (FCP's
+/// `docs/SOFTPHONE_VIDEO.md` §2.6): its owner dials its number, a guest
+/// follows the join link the owner made, each sees the room's picture and
+/// a roster with both; the owner mutes the guest as the room's host and
+/// the roster says so; the guest may not do the same.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn two_anvils_meet_in_a_room_on_fcp() {
+    use anvil_core::video::synthetic::SyntheticVideoHost;
+    use anvil_core::{CallMedia, RoomAudio, RoomJoin};
+    use anvil_fcp::JoinRole;
+    let fcp = fcp_or_skip!();
+    let (alice_client, alice_name) = signed_in(&fcp, "room-alice").await;
+    let (bob_client, _) = signed_in(&fcp, "room-bob").await;
+    let video = || {
+        Some(Box::new(SyntheticVideoHost::default()) as Box<dyn anvil_core::video::host::VideoHost>)
+    };
+    let (alice, mut alice_events) = softphone_with_video(
+        &alice_client,
+        "127.0.0.70",
+        MediaConfig::default(),
+        Box::new(Quiet),
+        video(),
+    )
+    .await;
+    let (bob, mut bob_events) = softphone_with_video(
+        &bob_client,
+        "127.0.0.71",
+        MediaConfig::default(),
+        Box::new(Quiet),
+        video(),
+    )
+    .await;
+    let domain = alice_client.softphone().await.unwrap().account.domain;
+    let (meeting, room) = fcp.meeting(&alice_name).await;
+
+    // The owner's meetings, and a link for a guest.
+    let mine = alice_client.meetings().await.expect("/me/conferences");
+    assert!(
+        mine.iter()
+            .any(|m| m.id == meeting && m.room_number == room),
+        "{mine:?}"
+    );
+    let link = alice_client
+        .join_link(&meeting, JoinRole::Guest, Some("Bob"), None)
+        .await
+        .expect("a join link");
+    assert_eq!(link.room_number, room);
+
+    // The owner dials in, the guest follows the link.
+    let target = format!("sip:{room}@{domain}");
+    let a = alice
+        .join_room(&target, &RoomJoin::default(), CallMedia::VIDEO)
+        .await
+        .expect("dials the room");
+    let a = established(&mut alice_events, Some(a)).await;
+    let join = RoomJoin::from_link(&link.link()).expect("the link's token");
+    let b = bob
+        .join_room(&target, &join, CallMedia::VIDEO)
+        .await
+        .expect("follows the link");
+    let b = established(&mut bob_events, Some(b)).await;
+    room_picture(&mut alice_events, a).await;
+    room_picture(&mut bob_events, b).await;
+
+    let both = |m: &[anvil_core::RoomMember]| m.len() == 2 && m.iter().any(|m| m.name == "Bob");
+    let members = roster_where(&mut alice_events, a, "both are in", both).await;
+    roster_where(&mut bob_events, b, "both are in", both).await;
+    let bob_id = members
+        .iter()
+        .find(|m| m.name == "Bob")
+        .map(|m| m.id.clone())
+        .unwrap();
+
+    // The owner, as host, mutes the guest; the guest may not.
+    let refused = bob_client
+        .room_host(&room, None)
+        .mute(&bob_id, true)
+        .await
+        .expect_err("a guest is not the host");
+    assert!(
+        matches!(refused, FcpError::Refused { status: 403, .. }),
+        "{refused:?}"
+    );
+    let host = alice_client.room_host(&room, None);
+    let live = host.room().await.expect("the room as it is");
+    assert!(live.to_string().contains(&bob_id), "{live}");
+    host.mute(&bob_id, true)
+        .await
+        .expect("the host mutes the guest");
+    roster_where(&mut alice_events, a, "the guest is muted", |m| {
+        m.iter()
+            .any(|m| m.id == bob_id && m.audio == RoomAudio::Muted)
+    })
+    .await;
+    host.mute(&bob_id, false).await.expect("and unmutes them");
+    roster_where(&mut bob_events, b, "the guest is heard again", |m| {
+        m.iter()
+            .any(|m| m.id == bob_id && m.audio == RoomAudio::Sending)
+    })
+    .await;
+
+    // The guest leaves: the owner's roster lists the owner alone.
+    bob.hangup(b).await.expect("the guest leaves");
+    roster_where(&mut alice_events, a, "the guest left", |m| m.len() == 1).await;
+    alice.hangup(a).await.expect("the owner leaves");
+    let _ = alice.shutdown().await;
+    let _ = bob.shutdown().await;
 }

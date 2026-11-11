@@ -47,6 +47,8 @@ forge-dtmf   = { workspace = true }
 
 anyhow = { workspace = true }
 rand   = "0.8"
+# A room's roster (RFC 4575): the same quick-xml the workspace already has.
+quick-xml = "0.42"
 opus   = { workspace = true }
 
 # TLS client. Pinned to the same versions sip-transport uses to avoid

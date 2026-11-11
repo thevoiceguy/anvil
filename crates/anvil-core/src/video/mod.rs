@@ -265,10 +265,20 @@ impl CallVideo {
         }
     }
 
-    /// A camera section offered on its own sockets: sending and receiving.
+    /// A camera section offered on its own sockets.
     async fn camera_offer(
         host: &dyn VideoHost,
         setup: SectionSetup,
+        direction: MediaDirection,
+    ) -> Option<(LocalSection, MediaSockets)> {
+        Self::section_offer(host, setup, VideoKind::Camera, direction).await
+    }
+
+    /// A section of `kind` offered on its own sockets.
+    async fn section_offer(
+        host: &dyn VideoHost,
+        setup: SectionSetup,
+        kind: VideoKind,
         direction: MediaDirection,
     ) -> Option<(LocalSection, MediaSockets)> {
         let codecs = host::usable_codecs(host);
@@ -286,19 +296,22 @@ impl CallVideo {
         let crypto =
             (setup.srtp != SrtpMode::Off).then(|| Crypto::generate(1, Suite::AesCm128HmacSha1_80));
         Some((
-            LocalSection::offer(VideoKind::Camera, port, &codecs, direction, crypto),
+            LocalSection::offer(kind, port, &codecs, direction, crypto),
             sockets,
         ))
     }
 
     /// The sections of an offer of ours: a camera, sending and receiving
-    /// (or only receiving, `receive_only`, until the camera is turned on).
+    /// (or only receiving, `receive_only`, until the camera is turned on),
+    /// and with `content` a room's shared screen (RFC 4796
+    /// `a=content:slides`), received.
     pub(crate) async fn offer(
         host: Arc<dyn VideoHost>,
         media_ip: IpAddr,
         srtp: SrtpMode,
         capture: crate::capture::CaptureSlot,
         receive_only: bool,
+        content: bool,
     ) -> Option<Self> {
         let setup = SectionSetup { media_ip, srtp };
         let want = if receive_only {
@@ -311,6 +324,16 @@ impl CallVideo {
         let mut section = CallSection::new(local, want);
         section.sockets = Some(sockets);
         v.sections.push(section);
+        if content {
+            let want = MediaDirection::Recvonly;
+            if let Some((local, sockets)) =
+                Self::section_offer(v.host.as_ref(), setup, VideoKind::Content, want).await
+            {
+                let mut section = CallSection::new(local, want);
+                section.sockets = Some(sockets);
+                v.sections.push(section);
+            }
+        }
         Some(v)
     }
 

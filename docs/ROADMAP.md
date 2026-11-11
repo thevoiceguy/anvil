@@ -242,6 +242,19 @@ every recommendation:
             meanwhile), AVKit's video-call PiP on iOS fed from the texture
             the call's stage shows them on
   - [ ] **A4** Anvil in FCP's rooms
+    - [x] **A4a** The core: `Anvil::join_room` by number or a join link's
+          token (`X-FCP-Join`), the floor's notices asked for
+          (`Recv-Info: fcp-content`) and the shared screen's section
+          offered from the start; the roster subscribed to in the call and
+          renewed (RFC 4575: whole, then versioned updates, a gap asking
+          again) as `Event::RoomRoster` with who speaks; the floor's INFOs
+          as `Event::RoomFloor`; `anvil-fcp`'s meetings, join links and a
+          host's controls (`FcpClient::room_host`); proved against a
+          scripted room and on FCP
+    - [ ] **A4b** The app: the room's screen (the picture, the shared
+          screen large, the roster and the speaker), meetings and links, a
+          host's controls
+    - [ ] **A4c** Desktop screen share with the floor by INFO
   - [ ] **A5** Mobile screen share
 - [ ] **U6** Accessibility, localisation, store listings
 - [ ] **W** The Windows client, finished (the 2026-10-12 survey)

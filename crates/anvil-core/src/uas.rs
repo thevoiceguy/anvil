@@ -294,6 +294,7 @@ impl UasRequestHandler for AnvilUasHandler {
                 server_call: server_call.clone(),
                 video,
                 held: false,
+                room: None,
             },
         );
 

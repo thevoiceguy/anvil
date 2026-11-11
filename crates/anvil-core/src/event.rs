@@ -280,6 +280,19 @@ pub enum Event {
         call: CallId,
         stream: crate::video::host::StreamId,
     },
+    /// The room `call` is in lists these people now (RFC 4575): sent
+    /// whole each time, with who speaks (or last spoke), by the room's id.
+    RoomRoster {
+        call: CallId,
+        members: Vec<crate::room::RoomMember>,
+        speaker: Option<String>,
+    },
+    /// The floor of the room `call` is in: someone shares, stopped, or a
+    /// share (ours, when `mine`) was refused.
+    RoomFloor {
+        call: CallId,
+        notice: crate::room::FloorNotice,
+    },
     Error {
         call: Option<CallId>,
         error: AnvilError,

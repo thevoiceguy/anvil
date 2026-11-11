@@ -134,9 +134,9 @@ mod tests {
         round_trip_late(codecs, codec, 0);
     }
 
-    /// As [`round_trip`], an asked-for keyframe coming up to `late`
-    /// pictures after it was asked for (MediaCodec may take a request a
-    /// picture late).
+    /// As [`round_trip`], the first keyframe and an asked-for one coming up
+    /// to `late` pictures after they were due (MediaCodec may take a
+    /// request a picture late, and start a picture behind).
     pub(crate) fn round_trip_late(codecs: &dyn Codecs, codec: VideoCodec, late: u32) {
         let mut enc = codecs.encoder(codec, 1200, 30).unwrap();
         let mut dec = codecs.decoder(codec).unwrap();
@@ -179,11 +179,13 @@ mod tests {
             }
         }
         assert_eq!(keyframes.len(), 3, "{codec:?}: {keyframes:?}");
-        assert_eq!(
-            (keyframes[0], keyframes[2]),
-            (0, 30),
+        // The first frame out is a keyframe: at once, or (MediaCodec on the
+        // emulator) a picture or more behind.
+        assert!(
+            (0..=late).contains(&keyframes[0]),
             "{codec:?}: {keyframes:?}"
         );
+        assert_eq!(keyframes[2], 30, "{codec:?}: {keyframes:?}");
         assert!(
             (10..=10 + late).contains(&keyframes[1]),
             "{codec:?}: {keyframes:?}"

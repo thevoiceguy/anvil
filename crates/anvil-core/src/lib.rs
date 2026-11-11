@@ -25,6 +25,8 @@ mod registration;
 pub(crate) mod rtcp;
 pub use rtcp::RemoteReport;
 pub mod quality;
+pub mod room;
+pub use room::{FloorNotice, FloorState, RoomAudio, RoomJoin, RoomMember};
 pub mod sca;
 mod srtp;
 pub(crate) mod stun;
@@ -734,7 +736,23 @@ impl Anvil {
         target: &str,
         media: CallMedia,
     ) -> Result<CallId, AnvilError> {
-        self.place_call_with(target, None, None, media).await
+        self.place_call_with(target, None, None, media, None).await
+    }
+
+    /// Join a video room on FCP (its `docs/SOFTPHONE_VIDEO.md` §2.6) by
+    /// dialing `target`, its number: with `join`'s token, from a join
+    /// link, the PIN is skipped. The room's shared screen is offered its
+    /// own section from the start (with video), the floor's notices are
+    /// asked for (`Event::RoomFloor`), and once in, the call subscribes to
+    /// the room's roster (`Event::RoomRoster`).
+    pub async fn join_room(
+        &self,
+        target: &str,
+        join: &RoomJoin,
+        media: CallMedia,
+    ) -> Result<CallId, AnvilError> {
+        self.place_call_with(target, None, None, media, Some(join))
+            .await
     }
 
     /// Whether calls can carry video here (a video host with a codec).
@@ -771,7 +789,7 @@ impl Anvil {
         target: &str,
         line: Option<&str>,
     ) -> Result<CallId, AnvilError> {
-        self.place_call_with(target, line, None, CallMedia::AUDIO)
+        self.place_call_with(target, line, None, CallMedia::AUDIO, None)
             .await
     }
 
@@ -782,7 +800,7 @@ impl Anvil {
         line: Option<&str>,
         media: CallMedia,
     ) -> Result<CallId, AnvilError> {
-        self.place_call_with(target, line, None, media).await
+        self.place_call_with(target, line, None, media, None).await
     }
 
     /// Take appearance `index` of the shared line `line` (its address):
@@ -800,6 +818,7 @@ impl Anvil {
             Some(line),
             Some(sca::take(&host, index)),
             CallMedia::AUDIO,
+            None,
         )
         .await
     }
@@ -810,6 +829,7 @@ impl Anvil {
         line: Option<&str>,
         call_info: Option<String>,
         media: CallMedia,
+        room: Option<&RoomJoin>,
     ) -> Result<CallId, AnvilError> {
         let from = line
             .map(|l| {
@@ -840,6 +860,7 @@ impl Anvil {
                     self.srtp,
                     rtp_socket.capture_slot(),
                     media.receive_only,
+                    room.is_some(),
                 )
                 .await
             }
@@ -861,21 +882,32 @@ impl Anvil {
         );
 
         tracing::debug!(%target, rtp_port, video = call_video.is_some(), "sending INVITE");
-        let handle = match call_info {
-            None => {
-                self.uac
-                    .invite_with_from(target_uri, Some(&sdp_body), from)
-                    .await
+        // A shared line's appearance, or a room: the join link's token and
+        // the floor's notices asked for (RFC 6086).
+        let mut extra: Vec<(&str, String)> = Vec::new();
+        if let Some(call_info) = call_info {
+            extra.push(("Call-Info", call_info));
+        }
+        if let Some(room) = room {
+            if let Some(token) = &room.token {
+                extra.push((room::JOIN_HEADER, token.clone()));
             }
-            Some(call_info) => {
-                let mut options = sip_uac::InviteOptions::with_sdp(Some(&sdp_body));
-                options.from = from;
+            extra.push(("Recv-Info", room::INFO_PACKAGE.to_string()));
+        }
+        let handle = if extra.is_empty() {
+            self.uac
+                .invite_with_from(target_uri, Some(&sdp_body), from)
+                .await
+        } else {
+            let mut options = sip_uac::InviteOptions::with_sdp(Some(&sdp_body));
+            options.from = from;
+            for (name, value) in extra {
                 options
                     .extra_headers
-                    .push("Call-Info", call_info)
-                    .map_err(|e| AnvilError::Transport(format!("Call-Info: {e}")))?;
-                self.uac.invite_with_options(target_uri, options).await
+                    .push(name, value)
+                    .map_err(|e| AnvilError::Transport(format!("{name}: {e}")))?;
             }
+            self.uac.invite_with_options(target_uri, options).await
         }
         .map_err(|e| AnvilError::Transport(format!("INVITE: {e}")))?;
 
@@ -897,6 +929,7 @@ impl Anvil {
                 server_call: None,
                 video: call_video,
                 held: false,
+                room: room.map(|_| call::RoomCall::default()),
             },
         );
 
@@ -1349,33 +1382,18 @@ impl Anvil {
     /// The call's dialog as it is now (a copy). In-dialog requests change
     /// it (the CSeq): hand it back with [`store_dialog`](Self::store_dialog).
     async fn dialog_of(&self, call: CallId) -> Result<sip_dialog::Dialog, AnvilError> {
-        let (dialog, handle) = {
-            let entry = self.calls.get(&call).ok_or(AnvilError::NoSuchCall(call))?;
-            (entry.dialog.clone(), entry.outbound_handle.clone())
-        };
-        match (dialog, handle) {
-            (Some(d), _) => Ok(d),
-            (None, Some(h)) => Ok(h.dialog.read().await.clone()),
-            (None, None) => Err(AnvilError::Internal(format!("{call:?} has no dialog"))),
+        if !self.calls.contains_key(&call) {
+            return Err(AnvilError::NoSuchCall(call));
         }
+        call_dialog(&self.calls, call)
+            .await
+            .ok_or_else(|| AnvilError::Internal(format!("{call:?} has no dialog")))
     }
 
     /// Keep a dialog an in-dialog request advanced, so the next request's
     /// CSeq is higher still (RFC 3261 §12.2.1.1).
     async fn store_dialog(&self, call: CallId, dialog: sip_dialog::Dialog) {
-        let handle = {
-            let Some(mut entry) = self.calls.get_mut(&call) else {
-                return;
-            };
-            if entry.dialog.is_some() {
-                entry.dialog = Some(dialog);
-                return;
-            }
-            entry.outbound_handle.clone()
-        };
-        if let Some(h) = handle {
-            *h.dialog.write().await = dialog;
-        }
+        keep_dialog(&self.calls, call, dialog).await;
     }
 
     /// Mute the microphone on a call (`on`), or unmute it. Silence is sent
@@ -2104,6 +2122,8 @@ async fn dispatch_request(
                 // A server's "fetch your settings again": a softphone gets
                 // them from its server's API, so nothing to do.
                 "check-sync" => (200, "OK"),
+                // A room's roster (RFC 4575), in the call we joined it by.
+                "conference" => room_notify(handler, &request).await,
                 // A transfer's progress (RFC 3515 §2.4.5): a sipfrag status
                 // line, about the call whose dialog it arrives in.
                 "refer" => {
@@ -2164,11 +2184,100 @@ async fn dispatch_request(
             let resp = UserAgentServer::create_response(&request, code, reason);
             handle.send_final(resp).await;
         }
+        // A room's floor (RFC 6086's package `fcp-content`), in the call
+        // we joined it by; any other package is not one we take.
+        "INFO" if room::is_floor_info(&request) => {
+            let (code, reason) = room_floor(handler, &request).await;
+            let resp = UserAgentServer::create_response(&request, code, reason);
+            handle.send_final(resp).await;
+        }
+        "INFO" if request.headers().get("Info-Package").is_some() => {
+            let mut resp = UserAgentServer::create_response(&request, 469, "Bad Info Package");
+            let _ = resp.headers_mut().push("Recv-Info", room::INFO_PACKAGE);
+            handle.send_final(resp).await;
+        }
         _ => {
             let resp = UserAgentServer::create_response(&request, 405, "Method Not Allowed");
             handle.send_final(resp).await;
         }
     }
+}
+
+/// The room call a request arrived in, by its Call-ID.
+fn room_call_of(handler: &uas::AnvilUasHandler, request: &sip_core::Request) -> Option<CallId> {
+    let call_id = request.headers().get("Call-ID")?.to_string();
+    uas::find_call_by_dialog_id(&handler.calls, &call_id)
+        .filter(|call| handler.calls.get(call).is_some_and(|e| e.room.is_some()))
+}
+
+/// A roster NOTIFY: applied, and the roster told when it changed. One out
+/// of step, or a subscription ended early, asks for it whole again.
+async fn room_notify(
+    handler: &uas::AnvilUasHandler,
+    request: &sip_core::Request,
+) -> (u16, &'static str) {
+    let Some(call) = room_call_of(handler, request) else {
+        return (481, "Subscription Does Not Exist");
+    };
+    let state = request
+        .headers()
+        .get("Subscription-State")
+        .map(|s| s.to_ascii_lowercase())
+        .unwrap_or_default();
+    let doc = std::str::from_utf8(request.body())
+        .ok()
+        .filter(|b| !b.trim().is_empty())
+        .and_then(room::parse_roster);
+    let told = {
+        let Some(mut entry) = handler.calls.get_mut(&call) else {
+            return (481, "Subscription Does Not Exist");
+        };
+        let Some(room) = entry.room.as_mut() else {
+            return (481, "Subscription Does Not Exist");
+        };
+        let mut told = None;
+        if let Some(doc) = doc {
+            match room.roster.apply(doc) {
+                room::Applied::Changed => {
+                    told = Some(Event::RoomRoster {
+                        call,
+                        members: room.roster.members(),
+                        speaker: room.roster.speaker(),
+                    })
+                }
+                room::Applied::Gap => room.resubscribe.notify_one(),
+                room::Applied::Stale => {}
+            }
+        }
+        // Lapsed or let go by the room while we are still in it: asked for
+        // again. Ended for good (the room is over, or we left): not.
+        if state.starts_with("terminated")
+            && (state.contains("timeout") || state.contains("deactivated"))
+        {
+            room.roster.reset();
+            room.resubscribe.notify_one();
+        }
+        told
+    };
+    if let Some(event) = told {
+        let _ = handler.events.send(event).await;
+    }
+    (200, "OK")
+}
+
+/// A floor INFO: told.
+async fn room_floor(
+    handler: &uas::AnvilUasHandler,
+    request: &sip_core::Request,
+) -> (u16, &'static str) {
+    let Some(call) = room_call_of(handler, request) else {
+        return (481, "Call/Transaction Does Not Exist");
+    };
+    let Some(notice) = room::parse_floor(request.body()) else {
+        return (400, "Bad Request");
+    };
+    let _ = handler.events.send(Event::RoomFloor { call, notice }).await;
+    (200, "OK")
 }
 
 fn map_transport(kind: sip_transport::TransportKind) -> sip_transaction::TransportKind {
@@ -2180,6 +2289,125 @@ fn map_transport(kind: sip_transport::TransportKind) -> sip_transaction::Transpo
         sip_transport::TransportKind::TlsSctp => sip_transaction::TransportKind::TlsSctp,
         sip_transport::TransportKind::Ws => sip_transaction::TransportKind::Ws,
         sip_transport::TransportKind::Wss => sip_transaction::TransportKind::Wss,
+    }
+}
+
+/// `call`'s dialog: an incoming call's, or an outgoing call's from its
+/// handle.
+async fn call_dialog(
+    calls: &DashMap<CallId, CallEntry>,
+    call: CallId,
+) -> Option<sip_dialog::Dialog> {
+    let (dialog, handle) = {
+        let entry = calls.get(&call)?;
+        (entry.dialog.clone(), entry.outbound_handle.clone())
+    };
+    match (dialog, handle) {
+        (Some(d), _) => Some(d),
+        (None, Some(h)) => Some(h.dialog.read().await.clone()),
+        (None, None) => None,
+    }
+}
+
+/// Keep a dialog an in-dialog request advanced (its CSeq).
+async fn keep_dialog(calls: &DashMap<CallId, CallEntry>, call: CallId, dialog: sip_dialog::Dialog) {
+    let handle = {
+        let Some(mut entry) = calls.get_mut(&call) else {
+            return;
+        };
+        if entry.dialog.is_some() {
+            entry.dialog = Some(dialog);
+            return;
+        }
+        entry.outbound_handle.clone()
+    };
+    if let Some(h) = handle {
+        *h.dialog.write().await = dialog;
+    }
+}
+
+/// A room's roster, subscribed to in `call`'s dialog (RFC 4575, RFC 6665)
+/// and renewed before it lapses, or at once when the roster went out of
+/// step. Ends when the room refuses it, after repeated failures, or when
+/// the call ends (it is aborted with the call's entry).
+async fn subscribe_roster(
+    call: CallId,
+    calls: Arc<DashMap<CallId, CallEntry>>,
+    uac: Arc<IntegratedUAC>,
+) {
+    use std::time::Duration;
+    let Some(wake) = calls
+        .get(&call)
+        .and_then(|e| e.room.as_ref().map(|r| Arc::clone(&r.resubscribe)))
+    else {
+        return;
+    };
+    let mut failures = 0u32;
+    loop {
+        let Some(mut dialog) = call_dialog(&calls, call).await else {
+            return;
+        };
+        let request = match room::in_dialog_request(
+            &dialog,
+            sip_core::Method::Subscribe,
+            &[
+                ("Event", "conference".to_string()),
+                ("Expires", room::SUBSCRIBE_EXPIRES.to_string()),
+                ("Accept", room::ROSTER_TYPE.to_string()),
+            ],
+            b"",
+        ) {
+            Ok(r) => r,
+            Err(e) => {
+                tracing::warn!(%e, "the roster SUBSCRIBE could not be built");
+                return;
+            }
+        };
+        let result = uac.send_in_dialog_non_invite(&mut dialog, request).await;
+        keep_dialog(&calls, call, dialog).await;
+        let wait = match result {
+            Ok(resp) if (200..300).contains(&resp.code()) => {
+                failures = 0;
+                let expires = resp
+                    .headers()
+                    .get("Expires")
+                    .and_then(|e| e.trim().parse::<u64>().ok())
+                    .unwrap_or(u64::from(room::SUBSCRIBE_EXPIRES));
+                tracing::debug!(?call, expires, "roster subscribed");
+                // Renewed at four fifths of what was granted.
+                Duration::from_secs((expires * 4 / 5).max(5))
+            }
+            // Not a room that tells its roster, or not to us.
+            Ok(resp) if matches!(resp.code(), 403 | 404 | 405 | 481 | 489 | 501) => {
+                tracing::info!(?call, code = resp.code(), "the room's roster was refused");
+                return;
+            }
+            Ok(resp) => {
+                failures += 1;
+                tracing::info!(
+                    ?call,
+                    code = resp.code(),
+                    failures,
+                    "the roster SUBSCRIBE failed"
+                );
+                Duration::from_secs(5 * u64::from(failures))
+            }
+            Err(e) => {
+                failures += 1;
+                tracing::info!(?call, %e, failures, "the roster SUBSCRIBE failed");
+                Duration::from_secs(5 * u64::from(failures))
+            }
+        };
+        if failures >= 5 {
+            return;
+        }
+        tokio::select! {
+            _ = tokio::time::sleep(wait) => {}
+            _ = wake.notified() => {}
+        }
+        if !calls.contains_key(&call) {
+            return;
+        }
     }
 }
 
@@ -2336,6 +2564,17 @@ async fn drive_outgoing_call(
                     codec,
                 })
                 .await;
+
+            // In a room: its roster, in the call.
+            if let Some(mut entry) = calls.get_mut(&call_id) {
+                if let Some(room) = entry.room.as_mut() {
+                    room.subscription = Some(tokio::spawn(subscribe_roster(
+                        call_id,
+                        Arc::clone(&calls),
+                        Arc::clone(&uac),
+                    )));
+                }
+            }
         }
         Ok(resp) => {
             // Gone already when the user hung up first (a CANCEL's 487).

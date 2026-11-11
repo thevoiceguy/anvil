@@ -12,7 +12,9 @@
 //!   settings (`/me/softphone`), which [`FcpClient::account_config`] turns
 //!   into an [`anvil_core::AccountConfig`];
 //! - and the user's own data through it: call history, the directory,
-//!   voicemail and live events ([`FcpClient::events`]).
+//!   voicemail and live events ([`FcpClient::events`]);
+//! - and the user's video rooms: their meetings, join links, and a host's
+//!   controls over a running room ([`FcpClient::room_host`]).
 //!
 //! `anvil-core` knows SIP and media, not FCP; this crate is FCP's.
 
@@ -28,6 +30,7 @@ mod dpapi;
 mod me;
 mod presence;
 mod remember;
+mod rooms;
 mod session;
 mod signin;
 
@@ -46,6 +49,7 @@ pub use me::{
 };
 pub use presence::{MyPresence, OwnStatus, Presence, PresenceUpdate};
 pub use remember::LastSignIn;
+pub use rooms::{JoinLink, JoinRole, Meeting, RoomHost, RoomLayout};
 pub use session::{AppClient, DeviceCredentials, FileTokenStore, Session, TokenStore};
 pub use signin::{
     begin_password_sign_in, password_sign_in, BrowserSignIn, PasswordStep, SecondFactor,
