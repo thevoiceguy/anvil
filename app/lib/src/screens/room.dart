@@ -63,8 +63,10 @@ class RoomPanel extends StatelessWidget {
                   Icons.cancel_presentation,
                   color: theme.colorScheme.error,
                 ),
-                title: Text(s.roomShareStopped(why)),
+                title: Text(s.roomShareStopped(shareReason(s, why))),
               ),
+            if (call.isConnected && model.snapshot.video.screens.isNotEmpty)
+              _ShareRow(model: model, call: call),
             if (speaking != null && call.isConnected)
               ListTile(
                 key: const Key('roomSpeaking'),
@@ -90,6 +92,70 @@ class RoomPanel extends StatelessWidget {
             ),
           ],
         ),
+      ),
+    );
+  }
+}
+
+/// Why our share stopped, as the room names it, in words.
+String shareReason(Strings s, String why) => switch (why) {
+  'host' => s.roomShareWhyHost,
+  'held' => s.roomShareWhyHeld,
+  'disabled' => s.roomShareWhyDisabled,
+  'participant_disabled' => s.roomShareWhyNotYou,
+  'idle' => s.roomShareWhyIdle,
+  'failed' || 'no_source' => s.roomShareWhyFailed,
+  'budget' => s.roomShareWhyBusy,
+  _ => why,
+};
+
+/// Our own share: on or off, and which screen where there is a choice.
+class _ShareRow extends StatelessWidget {
+  const _ShareRow({required this.model, required this.call});
+  final PhoneModel model;
+  final PhoneCall call;
+
+  @override
+  Widget build(BuildContext context) {
+    final s = Strings.of(context);
+    final video = model.snapshot.video;
+    final sharing = call.room!.sharing;
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
+      child: Wrap(
+        spacing: 8,
+        runSpacing: 8,
+        crossAxisAlignment: WrapCrossAlignment.center,
+        children: [
+          FilledButton.tonalIcon(
+            key: const Key('roomShare'),
+            icon: Icon(
+              sharing ? Icons.cancel_presentation : Icons.present_to_all,
+            ),
+            label: Text(sharing ? s.roomStopSharing : s.roomShare),
+            onPressed: () =>
+                model.run(() => model.api.shareScreen(call.id, !sharing)),
+          ),
+          if (video.screens.length > 1)
+            DropdownButton<String>(
+              key: const Key('roomScreen'),
+              hint: Text(s.roomChooseScreen),
+              value: video.screens.any((d) => d.id == video.screen)
+                  ? video.screen
+                  : null,
+              items: [
+                for (final d in video.screens)
+                  DropdownMenuItem(value: d.id, child: Text(d.name)),
+              ],
+              onChanged: (id) => model.run(() => model.api.chooseScreen(id)),
+            ),
+          if (sharing)
+            Text(
+              s.roomSharing,
+              key: const Key('roomSharing'),
+              style: Theme.of(context).textTheme.bodySmall,
+            ),
+        ],
       ),
     );
   }

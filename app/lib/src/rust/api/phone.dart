@@ -1732,6 +1732,9 @@ class Room {
   /// Our own share was turned down or ended by the room: why.
   final String? floorRefused;
 
+  /// We share our screen in it.
+  final bool sharing;
+
   const Room({
     required this.number,
     required this.host,
@@ -1739,6 +1742,7 @@ class Room {
     this.speaker,
     this.presenter,
     this.floorRefused,
+    required this.sharing,
   });
 
   @override
@@ -1748,7 +1752,8 @@ class Room {
       members.hashCode ^
       speaker.hashCode ^
       presenter.hashCode ^
-      floorRefused.hashCode;
+      floorRefused.hashCode ^
+      sharing.hashCode;
 
   @override
   bool operator ==(Object other) =>
@@ -1760,7 +1765,8 @@ class Room {
           members == other.members &&
           speaker == other.speaker &&
           presenter == other.presenter &&
-          floorRefused == other.floorRefused;
+          floorRefused == other.floorRefused &&
+          sharing == other.sharing;
 }
 
 /// One person in a room.
@@ -1916,6 +1922,11 @@ class VideoInfo {
   /// The camera chosen; `None` is the system's first.
   final String? camera;
 
+  /// The screens a share can show, and the one chosen (`None`: the
+  /// system's main one).
+  final List<Camera> screens;
+  final String? screen;
+
   /// H.264 from Cisco's OpenH264, where Anvil fetches it: whether the
   /// user allows it (`None` where it is not fetched), whether it is
   /// here, and what must be shown about it.
@@ -1934,6 +1945,8 @@ class VideoInfo {
     required this.available,
     required this.cameras,
     this.camera,
+    required this.screens,
+    this.screen,
     this.h264Allowed,
     required this.h264Ready,
     this.h264Notice,
@@ -1946,6 +1959,8 @@ class VideoInfo {
       available.hashCode ^
       cameras.hashCode ^
       camera.hashCode ^
+      screens.hashCode ^
+      screen.hashCode ^
       h264Allowed.hashCode ^
       h264Ready.hashCode ^
       h264Notice.hashCode ^
@@ -1960,6 +1975,8 @@ class VideoInfo {
           available == other.available &&
           cameras == other.cameras &&
           camera == other.camera &&
+          screens == other.screens &&
+          screen == other.screen &&
           h264Allowed == other.h264Allowed &&
           h264Ready == other.h264Ready &&
           h264Notice == other.h264Notice &&

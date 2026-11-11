@@ -122,6 +122,48 @@ impl Phone {
         Ok(fcp.join_link(&id, role, None, None).await?.link())
     }
 
+    /// Share our screen in the room `call` is in, or stop. The floor is
+    /// taken by sending: the room's notice says whether it was granted.
+    pub(crate) async fn share(&self, call: Option<u64>, on: bool) -> Result<(), PhoneError> {
+        let id = self.pick(call, "no call in a room", |c| {
+            c.room.is_some() && c.state == CallState::Connected && !c.held
+        })?;
+        let mark = |sharing: bool| {
+            self.update_call(
+                id,
+                |c| {
+                    if let Some(r) = c.room.as_mut() {
+                        r.sharing = sharing;
+                        if sharing {
+                            r.floor_refused = None;
+                        }
+                    }
+                },
+                || crate::outgoing(id),
+            )
+        };
+        // Marked before the re-INVITE: the room's notice can come before
+        // its answer does. Our stop's notice is then not read as the room
+        // ending the share, and a refusal of our share is acted on.
+        let was = self
+            .inner
+            .state
+            .lock()
+            .call(id)
+            .and_then(|c| c.room.as_ref().map(|r| r.sharing))
+            .unwrap_or(false);
+        mark(on);
+        let done = self
+            .anvil()
+            .await?
+            .share_screen(anvil_core::CallId(id), on)
+            .await;
+        if done.is_err() {
+            mark(was);
+        }
+        Ok(done?)
+    }
+
     /// A host's control over the room `call` is in.
     pub(crate) async fn room_control(
         &self,
@@ -231,6 +273,20 @@ fn member_view(m: &RoomMember) -> RoomMemberView {
     }
 }
 
+/// Tell the room our share is over (a re-INVITE receiving only), off the
+/// event loop.
+fn stop_share(inner: &Arc<Inner>, call: u64) {
+    let inner = Arc::clone(inner);
+    tokio::spawn(async move {
+        let anvil = inner.anvil.read().await;
+        if let Some(anvil) = anvil.as_ref() {
+            if let Err(e) = anvil.share_screen(anvil_core::CallId(call), false).await {
+                tracing::info!(call, %e, "the room was not told the share ended");
+            }
+        }
+    });
+}
+
 /// A room's event, on the call it is for; false for any other event.
 pub(crate) fn on_event(inner: &Arc<Inner>, event: &Event) -> bool {
     let in_room = |id: u64| {
@@ -279,7 +335,8 @@ pub(crate) fn on_event(inner: &Arc<Inner>, event: &Event) -> bool {
                     FloorState::Released => {
                         r.presenter = None;
                         if notice.mine {
-                            r.floor_refused = notice.reason.clone();
+                            // Our own stop is not a reason to show.
+                            r.floor_refused = notice.reason.clone().filter(|_| r.sharing);
                         }
                     }
                     FloorState::Refused => {
@@ -288,6 +345,16 @@ pub(crate) fn on_event(inner: &Arc<Inner>, event: &Event) -> bool {
                                 Some(notice.reason.clone().unwrap_or_else(|| "refused".into()));
                         }
                     }
+                }
+                // Our share turned down, or taken back by a host or the
+                // room: Anvil stopped the screen; the room is told, so a
+                // share after this is a new one.
+                if notice.mine
+                    && r.sharing
+                    && matches!(notice.state, FloorState::Refused | FloorState::Released)
+                {
+                    r.sharing = false;
+                    stop_share(inner, call.0);
                 }
             },
             || crate::outgoing(call.0),

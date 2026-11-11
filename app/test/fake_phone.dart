@@ -390,6 +390,27 @@ class FakePhone implements PhoneApi {
   }
 
   @override
+  Future<void> shareScreen(int call, bool on) async {
+    _refuse();
+    log.add('share $call ${on ? 'on' : 'off'}');
+    _replace(
+      call,
+      (c) => c.copyWith(
+        room: c.room?.copyWith(
+          sharing: on,
+          floorRefused: on ? () => null : null,
+        ),
+      ),
+    );
+  }
+
+  @override
+  Future<void> chooseScreen(String? id) async {
+    log.add('screen ${id ?? 'default'}');
+    set(state.copyWith(video: state.video.copyWith(screen: () => id)), 'video');
+  }
+
+  @override
   Future<void> setBackground(bool on) async {
     log.add('background ${on ? 'on' : 'off'}');
   }

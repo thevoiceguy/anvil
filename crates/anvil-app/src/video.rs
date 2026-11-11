@@ -65,6 +65,7 @@ impl Phone {
             let local = self.inner.local.lock();
             (local.camera.clone(), local.h264, local.wifi_only)
         };
+        let screen = self.inner.state.lock().video.screen.clone();
         let cellular = self.inner.camera_hold.lock().cellular;
         let video = VideoState {
             available: anvil.has_video(),
@@ -77,6 +78,15 @@ impl Phone {
                 })
                 .collect(),
             camera,
+            screens: anvil
+                .screens()
+                .into_iter()
+                .map(|s| CameraView {
+                    id: s.id,
+                    name: s.name,
+                })
+                .collect(),
+            screen,
             h264: self.inner.openh264.as_ref().map(|h| H264View {
                 allowed,
                 ready: h.ready(),
@@ -109,6 +119,25 @@ impl Phone {
         drop(anvil);
         self.inner.local.lock().camera = camera;
         self.inner.save_settings();
+        self.read_video().await;
+        Ok(())
+    }
+
+    /// The screen a share shows (`None`, the system's main one); not kept
+    /// across starts (screens come and go).
+    pub(crate) async fn choose_screen(&self, screen: Option<String>) -> Result<(), PhoneError> {
+        let anvil = self.anvil().await?;
+        if let Some(id) = &screen {
+            if !anvil.screens().iter().any(|s| &s.id == id) {
+                return Err(PhoneError::Refused(format!("no screen {id}")));
+            }
+        }
+        anvil.set_screen(screen.as_deref());
+        drop(anvil);
+        self.inner.state.lock().video.screen = screen;
+        // Read again whatever changed, the choice included.
+        let video = self.inner.state.lock().video.clone();
+        let _ = self.inner.changes.send(Change::Video { video });
         self.read_video().await;
         Ok(())
     }
