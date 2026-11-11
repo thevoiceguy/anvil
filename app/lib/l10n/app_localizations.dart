@@ -2161,6 +2161,192 @@ abstract class Strings {
   /// In en, this message translates to:
   /// **'Off; video calls use VP8'**
   String get h264Off;
+
+  /// No description provided for @meetingsButton.
+  ///
+  /// In en, this message translates to:
+  /// **'Meetings'**
+  String get meetingsButton;
+
+  /// No description provided for @joinRoomLabel.
+  ///
+  /// In en, this message translates to:
+  /// **'Room number or join link'**
+  String get joinRoomLabel;
+
+  /// No description provided for @joinButton.
+  ///
+  /// In en, this message translates to:
+  /// **'Join'**
+  String get joinButton;
+
+  /// No description provided for @joinWithVideoButton.
+  ///
+  /// In en, this message translates to:
+  /// **'Join with video'**
+  String get joinWithVideoButton;
+
+  /// No description provided for @yourMeetings.
+  ///
+  /// In en, this message translates to:
+  /// **'Your meetings'**
+  String get yourMeetings;
+
+  /// No description provided for @noMeetings.
+  ///
+  /// In en, this message translates to:
+  /// **'You have no meetings of your own.'**
+  String get noMeetings;
+
+  /// No description provided for @copyLinkButton.
+  ///
+  /// In en, this message translates to:
+  /// **'Copy a link'**
+  String get copyLinkButton;
+
+  /// No description provided for @copyHostLinkButton.
+  ///
+  /// In en, this message translates to:
+  /// **'Copy a host\'s link'**
+  String get copyHostLinkButton;
+
+  /// No description provided for @linkCopied.
+  ///
+  /// In en, this message translates to:
+  /// **'Link copied'**
+  String get linkCopied;
+
+  /// No description provided for @roomPeople.
+  ///
+  /// In en, this message translates to:
+  /// **'People ({count})'**
+  String roomPeople(int count);
+
+  /// No description provided for @roomSpeaking.
+  ///
+  /// In en, this message translates to:
+  /// **'{name} is speaking'**
+  String roomSpeaking(String name);
+
+  /// No description provided for @roomPresenting.
+  ///
+  /// In en, this message translates to:
+  /// **'{name} is sharing their screen'**
+  String roomPresenting(String name);
+
+  /// No description provided for @roomShareStopped.
+  ///
+  /// In en, this message translates to:
+  /// **'Your share stopped: {reason}'**
+  String roomShareStopped(String reason);
+
+  /// No description provided for @roomHost.
+  ///
+  /// In en, this message translates to:
+  /// **'Host'**
+  String get roomHost;
+
+  /// No description provided for @roomYouHost.
+  ///
+  /// In en, this message translates to:
+  /// **'You are a host'**
+  String get roomYouHost;
+
+  /// No description provided for @roomMuted.
+  ///
+  /// In en, this message translates to:
+  /// **'Muted'**
+  String get roomMuted;
+
+  /// No description provided for @roomHeld.
+  ///
+  /// In en, this message translates to:
+  /// **'On hold'**
+  String get roomHeld;
+
+  /// No description provided for @roomCameraOff.
+  ///
+  /// In en, this message translates to:
+  /// **'Camera off'**
+  String get roomCameraOff;
+
+  /// No description provided for @roomMuteMember.
+  ///
+  /// In en, this message translates to:
+  /// **'Mute for everyone'**
+  String get roomMuteMember;
+
+  /// No description provided for @roomUnmuteMember.
+  ///
+  /// In en, this message translates to:
+  /// **'Unmute'**
+  String get roomUnmuteMember;
+
+  /// No description provided for @roomStopCamera.
+  ///
+  /// In en, this message translates to:
+  /// **'Stop their camera'**
+  String get roomStopCamera;
+
+  /// No description provided for @roomAllowCamera.
+  ///
+  /// In en, this message translates to:
+  /// **'Allow their camera'**
+  String get roomAllowCamera;
+
+  /// No description provided for @roomPin.
+  ///
+  /// In en, this message translates to:
+  /// **'Pin'**
+  String get roomPin;
+
+  /// No description provided for @roomSpotlight.
+  ///
+  /// In en, this message translates to:
+  /// **'Spotlight'**
+  String get roomSpotlight;
+
+  /// No description provided for @roomRemove.
+  ///
+  /// In en, this message translates to:
+  /// **'Remove from the room'**
+  String get roomRemove;
+
+  /// No description provided for @roomGrid.
+  ///
+  /// In en, this message translates to:
+  /// **'Grid'**
+  String get roomGrid;
+
+  /// No description provided for @roomSpeakerLayout.
+  ///
+  /// In en, this message translates to:
+  /// **'Speaker'**
+  String get roomSpeakerLayout;
+
+  /// No description provided for @roomUnpin.
+  ///
+  /// In en, this message translates to:
+  /// **'Unpin'**
+  String get roomUnpin;
+
+  /// No description provided for @roomStopSpotlight.
+  ///
+  /// In en, this message translates to:
+  /// **'Stop the spotlight'**
+  String get roomStopSpotlight;
+
+  /// No description provided for @roomStopShare.
+  ///
+  /// In en, this message translates to:
+  /// **'Stop the share'**
+  String get roomStopShare;
+
+  /// No description provided for @roomMemberActions.
+  ///
+  /// In en, this message translates to:
+  /// **'Host controls for {name}'**
+  String roomMemberActions(String name);
 }
 
 class _StringsDelegate extends LocalizationsDelegate<Strings> {

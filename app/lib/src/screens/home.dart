@@ -11,6 +11,7 @@ import 'lines.dart';
 import 'people.dart';
 import 'presence.dart';
 import 'recents.dart';
+import 'room.dart';
 import 'settings.dart';
 import 'voicemail.dart';
 import '../update/update_banner.dart';
@@ -48,12 +49,26 @@ class _HomeScreenState extends State<HomeScreen> {
       _fill(target);
     }
     model.dialRequest.addListener(_take);
+    model.joinRequest.addListener(_takeJoin);
+    // A join link that came before anyone had signed in.
+    if (model.joinRequest.value != null) {
+      WidgetsBinding.instance.addPostFrameCallback((_) => _takeJoin());
+    }
   }
 
   @override
   void dispose() {
     model.dialRequest.removeListener(_take);
+    model.joinRequest.removeListener(_takeJoin);
     super.dispose();
+  }
+
+  /// A join link from outside the app: the meetings sheet, ready to join.
+  void _takeJoin() {
+    final link = model.joinRequest.value;
+    if (link == null || !mounted) return;
+    model.joinRequest.value = null;
+    MeetingsSheet.show(context, model, link: link);
   }
 
   void _take() {
@@ -267,6 +282,14 @@ class _HomeScreenState extends State<HomeScreen> {
             ),
           ),
         PresenceChip(model: model),
+        // Signed in to FCP: its rooms, and the user's meetings.
+        if (snap.hasAccount)
+          IconButton(
+            key: const Key('meetings'),
+            tooltip: s.meetingsButton,
+            icon: const Icon(Icons.video_camera_front_outlined),
+            onPressed: () => MeetingsSheet.show(context, model),
+          ),
         const SizedBox(width: 8),
       ],
     );

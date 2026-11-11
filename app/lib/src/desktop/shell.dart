@@ -61,7 +61,7 @@ class IncomingNotice {
 
 /// What the user did at the tray or a notification, or a start of the app
 /// asked for (`dial`: a tel: or sip: link).
-enum ShellAction { show, answer, decline, toggleDnd, quit, dial }
+enum ShellAction { show, answer, decline, toggleDnd, quit, dial, join }
 
 class ShellEvent {
   const ShellEvent(this.action, {this.call, this.target});
@@ -70,7 +70,7 @@ class ShellEvent {
   /// The call an answer or decline is for.
   final int? call;
 
-  /// What a link asks to call, for the keypad.
+  /// What a link asks to call, for the keypad; or a room's join link.
   final String? target;
 
   @override

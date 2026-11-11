@@ -54,6 +54,7 @@ reqwest = { version = "0.12", default-features = false, features = ["rustls-tls-
 
 [dev-dependencies]
 async-trait = { workspace = true }
+base64 = "0.22"
 tracing-subscriber = { workspace = true }
 reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "json"] }
 rand    = "0.8"

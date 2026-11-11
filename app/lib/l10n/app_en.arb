@@ -674,5 +674,71 @@
   "h264Setting": "H.264",
   "h264Ready": "In use; downloaded from Cisco",
   "h264Fetching": "Downloading from Cisco…",
-  "h264Off": "Off; video calls use VP8"
+  "h264Off": "Off; video calls use VP8",
+  "meetingsButton": "Meetings",
+  "joinRoomLabel": "Room number or join link",
+  "joinButton": "Join",
+  "joinWithVideoButton": "Join with video",
+  "yourMeetings": "Your meetings",
+  "noMeetings": "You have no meetings of your own.",
+  "copyLinkButton": "Copy a link",
+  "copyHostLinkButton": "Copy a host's link",
+  "linkCopied": "Link copied",
+  "roomPeople": "People ({count})",
+  "@roomPeople": {
+    "placeholders": {
+      "count": {
+        "type": "int"
+      }
+    }
+  },
+  "roomSpeaking": "{name} is speaking",
+  "@roomSpeaking": {
+    "placeholders": {
+      "name": {
+        "type": "String"
+      }
+    }
+  },
+  "roomPresenting": "{name} is sharing their screen",
+  "@roomPresenting": {
+    "placeholders": {
+      "name": {
+        "type": "String"
+      }
+    }
+  },
+  "roomShareStopped": "Your share stopped: {reason}",
+  "@roomShareStopped": {
+    "placeholders": {
+      "reason": {
+        "type": "String"
+      }
+    }
+  },
+  "roomHost": "Host",
+  "roomYouHost": "You are a host",
+  "roomMuted": "Muted",
+  "roomHeld": "On hold",
+  "roomCameraOff": "Camera off",
+  "roomMuteMember": "Mute for everyone",
+  "roomUnmuteMember": "Unmute",
+  "roomStopCamera": "Stop their camera",
+  "roomAllowCamera": "Allow their camera",
+  "roomPin": "Pin",
+  "roomSpotlight": "Spotlight",
+  "roomRemove": "Remove from the room",
+  "roomGrid": "Grid",
+  "roomSpeakerLayout": "Speaker",
+  "roomUnpin": "Unpin",
+  "roomStopSpotlight": "Stop the spotlight",
+  "roomStopShare": "Stop the share",
+  "roomMemberActions": "Host controls for {name}",
+  "@roomMemberActions": {
+    "placeholders": {
+      "name": {
+        "type": "String"
+      }
+    }
+  }
 }

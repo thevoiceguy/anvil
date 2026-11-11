@@ -469,6 +469,8 @@ async fn tell_phone(cli: &Cli, command: anvil_app::Command) -> Result<()> {
         println!("calling (call {call})");
     } else if let Some(imported) = answer.imported {
         print_imported(&imported);
+    } else if let Some(link) = answer.link {
+        println!("{link}");
     } else {
         println!("ok");
     }
@@ -530,6 +532,9 @@ fn print_state(state: &anvil_app::State) {
             }
         );
     }
+    for m in &state.meetings {
+        println!("meeting: {} {} ({})", m.room_number, m.name, m.id);
+    }
     if !state.recents.is_empty() {
         let missed = state.recents.iter().filter(|r| r.missed).count();
         println!("recent calls: {}, {missed} missed", state.recents.len());
@@ -565,6 +570,9 @@ fn print_state(state: &anvil_app::State) {
     }
     for c in &state.calls {
         println!("{}", call_line(c));
+        if let Some(room) = &c.room {
+            print_room(room);
+        }
     }
 }
 
@@ -600,6 +608,45 @@ fn call_line(c: &anvil_app::CallView) -> String {
     )
 }
 
+/// The room a call is in: who is there, who speaks and who shares.
+fn print_room(room: &anvil_app::RoomView) {
+    println!(
+        "[room] {}{}{}",
+        room.number,
+        if room.host { " (host)" } else { "" },
+        room.presenter
+            .as_deref()
+            .map(|p| format!("  {p} shares"))
+            .unwrap_or_default()
+    );
+    for m in &room.members {
+        let mut flags = Vec::new();
+        if m.host {
+            flags.push("host");
+        }
+        if m.audio != "sending" {
+            flags.push(m.audio.as_str());
+        }
+        if let Some(camera) = &m.camera {
+            flags.push(if camera == "on" {
+                "camera"
+            } else {
+                "no camera"
+            });
+        }
+        if room.speaker.as_deref() == Some(m.id.as_str()) {
+            flags.push("speaking");
+        }
+        if m.presenting {
+            flags.push("presenting");
+        }
+        println!("  {} {}  ({})", m.id, m.name, flags.join(", "));
+    }
+    if let Some(why) = &room.floor_refused {
+        println!("  our share: {why}");
+    }
+}
+
 fn print_change(change: &anvil_app::Change) {
     use anvil_app::Change as C;
     match change {
@@ -623,7 +670,12 @@ fn print_change(change: &anvil_app::Change) {
                 )
             }
         }
-        C::Call { call } => println!("[call] {}", call_line(call)),
+        C::Call { call } => {
+            println!("[call] {}", call_line(call));
+            if let Some(room) = &call.room {
+                print_room(room);
+            }
+        }
         C::CallEnded { id, reason } => println!("[call] {id} ended: {reason}"),
         C::MessageWaiting { message_waiting: m } => {
             println!("[voicemail] {} new, {} old", m.new, m.old)
@@ -754,6 +806,7 @@ fn print_change(change: &anvil_app::Change) {
             Some(t) => println!("[test] {:?}", t.stage),
             None => println!("[test] done"),
         },
+        C::Meetings { count } => println!("[meetings] {count}"),
         C::Video { video } => println!(
             "[video] {} camera={} cameras={} h264={}",
             if video.available { "available" } else { "none" },
@@ -820,7 +873,7 @@ async fn run_phone(cli: &Cli) -> Result<()> {
                             (Some(state), _, _) => print_state(&state),
                             (None, Some(call), _) => println!("calling (call {call})"),
                             (None, None, Some(imported)) => print_imported(&imported),
-                            _ => println!("ok"),
+                            _ => println!("{}", answer.link.as_deref().unwrap_or("ok")),
                         },
                         Err(e) => println!("! {e}"),
                     },

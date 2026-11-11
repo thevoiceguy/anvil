@@ -296,6 +296,10 @@ class RustPhone implements PhoneApi {
         wifiOnly: s.video.wifiOnly,
         cellular: s.video.cellular,
       ),
+      meetings: [
+        for (final m in s.meetings)
+          Meeting(id: m.id, roomNumber: m.roomNumber, name: m.name),
+      ],
       directoryListed: s.directoryListed,
       mayChangeDirectoryListing: s.mayChangeDirectoryListing,
       presence: switch (s.presence) {
@@ -398,8 +402,30 @@ class RustPhone implements PhoneApi {
       sending: c.sending,
       streams: c.streams,
       videoRequested: c.videoRequested,
+      contentStream: c.contentStream,
+      room: c.room == null ? null : _room(c.room!),
     );
   }
+
+  static RoomInfo _room(rust.Room r) => RoomInfo(
+    number: r.number,
+    host: r.host,
+    members: [
+      for (final m in r.members)
+        RoomMember(
+          id: m.id,
+          name: m.name,
+          host: m.host,
+          audio: m.audio,
+          camera: m.camera,
+          speaking: m.speaking,
+          presenting: m.presenting,
+        ),
+    ],
+    speaker: r.speaker,
+    presenter: r.presenter,
+    floorRefused: r.floorRefused,
+  );
 
   static AudioDevice _device(rust.AudioDevice d) =>
       AudioDevice(id: d.id, name: d.name, isDefault: d.default_);
@@ -414,6 +440,30 @@ class RustPhone implements PhoneApi {
   @override
   Future<int> call(String target, {String? line, bool video = false}) async =>
       (await rust.placeCall(target: target, line: line, video: video)).toInt();
+
+  @override
+  Future<int> joinRoom(String target, {bool video = false}) async =>
+      (await rust.joinRoom(target: target, video: video)).toInt();
+
+  @override
+  Future<String> meetingLink(String meeting, {bool host = false}) =>
+      rust.meetingLink(meeting: meeting, host: host);
+
+  @override
+  Future<void> roomControl(
+    int call,
+    RoomControl control, {
+    String? member,
+    bool on = false,
+  }) => rust.roomControl(
+    call: _id(call),
+    action: switch (control) {
+      RoomControl.stopShare => 'stop_share',
+      _ => control.name,
+    },
+    member: member,
+    on_: on,
+  );
 
   @override
   Future<int> takeAppearance(String line, int index) async =>

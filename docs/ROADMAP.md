@@ -251,9 +251,13 @@ every recommendation:
           as `Event::RoomFloor`; `anvil-fcp`'s meetings, join links and a
           host's controls (`FcpClient::room_host`); proved against a
           scripted room and on FCP
-    - [ ] **A4b** The app: the room's screen (the picture, the shared
-          screen large, the roster and the speaker), meetings and links, a
-          host's controls
+    - [x] **A4b** The app: the room's panel in the call (who speaks and
+          who shares, the people with their camera and microphone, a
+          host's mute, remove, pin, spotlight and layout), the shared
+          screen large with the cameras beside it, the Meetings sheet
+          (join by number or link, the user's meetings with a guest's or a
+          host's link to copy), `fcp://join/…` links opening it from
+          outside the app; the CLI's `join`, `vjoin`, `link` and `room`
     - [ ] **A4c** Desktop screen share with the floor by INFO
       - [x] **A4c1** The core: `Anvil::share_screen` turns a room's
             shared-screen section sending by re-INVITE (the floor taken by

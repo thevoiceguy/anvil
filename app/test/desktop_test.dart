@@ -226,6 +226,22 @@ void main() {
     expect(find.byKey(const Key('backToCall')), findsOneWidget);
   });
 
+  testWidgets("a room's link opens the meetings sheet, never joined alone", (
+    tester,
+  ) async {
+    final (phone, shell) = await running(tester);
+    shell.started(const ShellEvent(ShellAction.join, target: 'fcp://join/abc'));
+    await tester.pumpAndSettle();
+    expect(shell.log, contains('show'));
+    expect(find.byKey(const Key('meetingsSheet')), findsOneWidget);
+    final field = tester.widget<TextField>(find.byKey(const Key('joinTarget')));
+    expect(field.controller!.text, 'fcp://join/abc');
+    expect(phone.log.where((l) => l.contains('join')), isEmpty);
+    await tester.tap(find.byKey(const Key('join')));
+    await tester.pumpAndSettle();
+    expect(phone.log, contains('join fcp://join/abc'));
+  });
+
   testWidgets('a second start shows the window', (tester) async {
     final (_, shell) = await running(tester);
     shell.log.clear();

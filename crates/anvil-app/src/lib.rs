@@ -21,6 +21,7 @@ pub mod managed;
 #[allow(unsafe_code)]
 mod managed_windows;
 mod ring;
+mod room;
 mod settings;
 mod state;
 #[cfg(any(windows, target_os = "macos", target_os = "linux"))]
@@ -42,12 +43,13 @@ use tokio::sync::{broadcast, RwLock};
 pub use anvil_fcp::{CallingSettings, CallingUpdate};
 pub use capture::{CaptureMode, CaptureState};
 pub use clip::{decode_wav, Clip};
-pub use command::{AudioKind, Command, Imported, Response};
+pub use command::{AudioKind, Command, Imported, Response, RoomAction};
 pub use state::{
     AppearanceView, AudioDevice, AudioDevices, AudioProcessing, AudioTest, AudioTestStage,
     AudioVolume, Brand, CallState, CallVideoView, CallView, CameraView, Change, Contact,
     ContactNumber, Direction, DirectoryListing, H264View, LineView, MessageWaiting, MyPresence,
-    OwnStatus, Person, Push, Quality, Recent, Registration, Ringtone, State, VideoState, Voicemail,
+    OwnStatus, Person, Push, Quality, Recent, Registration, Ringtone, RoomMemberView, RoomView,
+    State, VideoState, Voicemail,
 };
 pub use video::OpenH264;
 
@@ -137,6 +139,9 @@ struct Inner {
     /// with video only on Wi-Fi), and the calls whose camera starts again
     /// when it no longer is.
     camera_hold: Mutex<video::CameraHold>,
+    /// The host link each call joined its room with, by call: what a
+    /// host's controls are sent with when the user does not own the room.
+    room_tokens: Mutex<std::collections::HashMap<u64, String>>,
 }
 
 impl Phone {
@@ -236,6 +241,7 @@ impl Phone {
             device_id: Mutex::new(None),
             openh264: cfg.openh264,
             camera_hold: Mutex::default(),
+            room_tokens: Mutex::default(),
         });
         if let Some(fallback) = &inner.fallback_brand {
             inner.set_brand(fallback);
@@ -1055,6 +1061,18 @@ impl Phone {
             }
             Command::Video { call, on } => {
                 self.set_video(call, on).await?;
+                Ok(Response::ok())
+            }
+            Command::Join { target, video } => Ok(Response {
+                call: Some(self.join(&target, video).await?),
+                ..Response::ok()
+            }),
+            Command::JoinLink { meeting, host } => Ok(Response {
+                link: Some(self.join_link(&meeting, host).await?),
+                ..Response::ok()
+            }),
+            Command::Room { call, action } => {
+                self.room_control(call, action).await?;
                 Ok(Response::ok())
             }
             Command::Camera { camera } => {
@@ -2024,7 +2042,7 @@ fn finished_capture(
 async fn follow(inner: std::sync::Weak<Inner>, mut events: EventStream) {
     while let Some(event) = events.recv().await {
         let Some(inner) = inner.upgrade() else { return };
-        if video::on_event(&inner, &event) {
+        if video::on_event(&inner, &event) || room::on_event(&inner, &event) {
             continue;
         }
         match event {
@@ -2121,6 +2139,7 @@ async fn follow(inner: std::sync::Weak<Inner>, mut events: EventStream) {
                     state.calls.retain(|c| c.id != call.0);
                     ended
                 };
+                inner.room_tokens.lock().remove(&call.0);
                 // The call's final figures, to FCP (CALL_DIAGNOSTICS §2): what
                 // an administrator troubleshoots from, sent for every call.
                 let report = ended

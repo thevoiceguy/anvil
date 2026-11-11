@@ -65,6 +65,9 @@ pub struct State {
     /// Video calls: whether there are any here, the cameras, the codecs.
     #[serde(default)]
     pub video: VideoState,
+    /// The meetings the user owns on FCP, by room number.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub meetings: Vec<anvil_fcp::Meeting>,
 }
 
 /// Video calls on this device.
@@ -124,6 +127,51 @@ pub struct CallVideoView {
     /// until the user turns it on.
     #[serde(default)]
     pub requested: bool,
+    /// The shared screen coming in (a room's), apart from the cameras.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub content: Option<u32>,
+}
+
+/// The room a call is in (FCP's `docs/SOFTPHONE_VIDEO.md` §2.6).
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct RoomView {
+    /// The room's number.
+    pub number: String,
+    /// The user may use a host's controls in it: they own the meeting, or
+    /// joined with a host's link.
+    #[serde(default)]
+    pub host: bool,
+    /// Who is in it, as the room lists them.
+    #[serde(default)]
+    pub members: Vec<RoomMemberView>,
+    /// Who speaks, or last spoke, by id.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub speaker: Option<String>,
+    /// Who shares their screen, by name, while someone does.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub presenter: Option<String>,
+    /// Our own share was turned down or ended by the room: why.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub floor_refused: Option<String>,
+}
+
+/// One person in a room.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct RoomMemberView {
+    /// The room's id for them: what a host's controls name.
+    pub id: String,
+    pub name: String,
+    #[serde(default)]
+    pub host: bool,
+    /// `sending`, `muted` or `held`.
+    pub audio: String,
+    /// Their camera as the room has it (`on`, `off`, `lost`, …).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub camera: Option<String>,
+    #[serde(default)]
+    pub speaking: bool,
+    #[serde(default)]
+    pub presenting: bool,
 }
 
 /// A test of this device's audio, under way.
@@ -299,6 +347,7 @@ impl State {
             audio_test: None,
             capture: crate::CaptureState::default(),
             video: VideoState::default(),
+            meetings: Vec::new(),
         }
     }
 
@@ -403,6 +452,9 @@ pub struct CallView {
     pub capturing: bool,
     #[serde(default)]
     pub video: CallVideoView,
+    /// The room the call is in, when it joined one.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub room: Option<RoomView>,
 }
 
 impl CallView {
@@ -426,6 +478,7 @@ impl CallView {
             silent: false,
             capturing: false,
             video: CallVideoView::default(),
+            room: None,
         }
     }
 }
@@ -848,5 +901,9 @@ pub enum Change {
     /// The cameras, the one chosen, or H.264 changed.
     Video {
         video: VideoState,
+    },
+    /// The user's meetings were read again.
+    Meetings {
+        count: u32,
     },
 }

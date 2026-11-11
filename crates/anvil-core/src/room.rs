@@ -59,6 +59,47 @@ impl RoomJoin {
         (!token.is_empty() && !token.contains(char::is_whitespace))
             .then_some(RoomJoin { token: Some(token) })
     }
+
+    /// What the token says, read without its signature (the room checks
+    /// that): the room to dial, whom it admits and until when. `None`
+    /// without a token, or for one that is not FCP's.
+    pub fn details(&self) -> Option<JoinDetails> {
+        use base64::Engine as _;
+        let (payload, _) = self.token.as_deref()?.split_once('.')?;
+        let payload = base64::engine::general_purpose::URL_SAFE_NO_PAD
+            .decode(payload)
+            .ok()?;
+        let v: serde_json::Value = serde_json::from_slice(&payload).ok()?;
+        let room = v.get("room")?.as_str()?.trim().to_string();
+        let plain = !room.is_empty()
+            && room.len() <= 64
+            && room
+                .bytes()
+                .all(|b| b.is_ascii_alphanumeric() || matches!(b, b'-' | b'_' | b'.' | b'+'));
+        plain.then(|| JoinDetails {
+            room,
+            name: v
+                .get("name")
+                .and_then(|n| n.as_str())
+                .unwrap_or_default()
+                .to_string(),
+            host: v.get("role").and_then(|r| r.as_str()) == Some("host"),
+            expires_at: v.get("exp").and_then(|e| e.as_u64()).unwrap_or(0),
+        })
+    }
+}
+
+/// What a join link's token says (FCP's `JoinToken`), unverified.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct JoinDetails {
+    /// The room's number: what is dialed.
+    pub room: String,
+    /// The name it joins under.
+    pub name: String,
+    /// It admits a host.
+    pub host: bool,
+    /// When it stops admitting, in Unix seconds.
+    pub expires_at: u64,
 }
 
 fn percent_decode(s: &str) -> String {
@@ -496,6 +537,45 @@ pub(crate) fn in_dialog_request(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_tokens_room_and_role_are_read_unverified() {
+        use base64::Engine as _;
+        let payload = r#"{"v":1,"tenant":"tenant-1","room":"3000","name":"Jo","role":"host","exp":1900000000,"nonce":"n"}"#;
+        let token = format!(
+            "{}.c2ln",
+            base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(payload)
+        );
+        let join = RoomJoin::from_link(&format!("fcp://join/{token}")).unwrap();
+        assert_eq!(
+            join.details(),
+            Some(JoinDetails {
+                room: "3000".into(),
+                name: "Jo".into(),
+                host: true,
+                expires_at: 1_900_000_000,
+            })
+        );
+        let guest = payload.replace("\"host\"", "\"guest\"");
+        let guest = RoomJoin {
+            token: Some(format!(
+                "{}.x",
+                base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(guest)
+            )),
+        };
+        assert!(!guest.details().unwrap().host);
+        // A room that is not a plain number is not dialed.
+        let odd = payload.replace("\"3000\"", "\"30 00@evil\"");
+        let odd = RoomJoin {
+            token: Some(format!(
+                "{}.x",
+                base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(odd)
+            )),
+        };
+        assert_eq!(odd.details(), None);
+        assert_eq!(RoomJoin::default().details(), None);
+        assert_eq!(RoomJoin::from_link("plain").unwrap().details(), None);
+    }
 
     /// A roster as FCP's conference server writes one.
     fn fcp_doc(state: &str, version: u32, users: &str) -> String {

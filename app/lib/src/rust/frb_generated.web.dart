@@ -76,6 +76,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   RememberedSignIn dco_decode_box_autoadd_remembered_sign_in(dynamic raw);
 
   @protected
+  Room dco_decode_box_autoadd_room(dynamic raw);
+
+  @protected
   SystemLook dco_decode_box_autoadd_system_look(dynamic raw);
 
   @protected
@@ -160,6 +163,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   List<Line> dco_decode_list_line(dynamic raw);
 
   @protected
+  List<Meeting> dco_decode_list_meeting(dynamic raw);
+
+  @protected
   List<OwnStatus> dco_decode_list_own_status(dynamic raw);
 
   @protected
@@ -178,6 +184,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   List<Ringtone> dco_decode_list_ringtone(dynamic raw);
 
   @protected
+  List<RoomMember> dco_decode_list_room_member(dynamic raw);
+
+  @protected
   List<TrayIcon> dco_decode_list_tray_icon(dynamic raw);
 
   @protected
@@ -185,6 +194,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   ManagedSettings dco_decode_managed_settings(dynamic raw);
+
+  @protected
+  Meeting dco_decode_meeting(dynamic raw);
 
   @protected
   MyPresence dco_decode_my_presence(dynamic raw);
@@ -212,6 +224,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   RememberedSignIn? dco_decode_opt_box_autoadd_remembered_sign_in(dynamic raw);
+
+  @protected
+  Room? dco_decode_opt_box_autoadd_room(dynamic raw);
 
   @protected
   SystemLook? dco_decode_opt_box_autoadd_system_look(dynamic raw);
@@ -263,6 +278,12 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   Ringtone dco_decode_ringtone(dynamic raw);
+
+  @protected
+  Room dco_decode_room(dynamic raw);
+
+  @protected
+  RoomMember dco_decode_room_member(dynamic raw);
 
   @protected
   SignInMethods dco_decode_sign_in_methods(dynamic raw);
@@ -363,6 +384,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   );
 
   @protected
+  Room sse_decode_box_autoadd_room(SseDeserializer deserializer);
+
+  @protected
   SystemLook sse_decode_box_autoadd_system_look(SseDeserializer deserializer);
 
   @protected
@@ -449,6 +473,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   List<Line> sse_decode_list_line(SseDeserializer deserializer);
 
   @protected
+  List<Meeting> sse_decode_list_meeting(SseDeserializer deserializer);
+
+  @protected
   List<OwnStatus> sse_decode_list_own_status(SseDeserializer deserializer);
 
   @protected
@@ -467,6 +494,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   List<Ringtone> sse_decode_list_ringtone(SseDeserializer deserializer);
 
   @protected
+  List<RoomMember> sse_decode_list_room_member(SseDeserializer deserializer);
+
+  @protected
   List<TrayIcon> sse_decode_list_tray_icon(SseDeserializer deserializer);
 
   @protected
@@ -474,6 +504,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   ManagedSettings sse_decode_managed_settings(SseDeserializer deserializer);
+
+  @protected
+  Meeting sse_decode_meeting(SseDeserializer deserializer);
 
   @protected
   MyPresence sse_decode_my_presence(SseDeserializer deserializer);
@@ -507,6 +540,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   RememberedSignIn? sse_decode_opt_box_autoadd_remembered_sign_in(
     SseDeserializer deserializer,
   );
+
+  @protected
+  Room? sse_decode_opt_box_autoadd_room(SseDeserializer deserializer);
 
   @protected
   SystemLook? sse_decode_opt_box_autoadd_system_look(
@@ -562,6 +598,12 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   Ringtone sse_decode_ringtone(SseDeserializer deserializer);
+
+  @protected
+  Room sse_decode_room(SseDeserializer deserializer);
+
+  @protected
+  RoomMember sse_decode_room_member(SseDeserializer deserializer);
 
   @protected
   SignInMethods sse_decode_sign_in_methods(SseDeserializer deserializer);
@@ -675,6 +717,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   );
 
   @protected
+  void sse_encode_box_autoadd_room(Room self, SseSerializer serializer);
+
+  @protected
   void sse_encode_box_autoadd_system_look(
     SystemLook self,
     SseSerializer serializer,
@@ -783,6 +828,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   void sse_encode_list_line(List<Line> self, SseSerializer serializer);
 
   @protected
+  void sse_encode_list_meeting(List<Meeting> self, SseSerializer serializer);
+
+  @protected
   void sse_encode_list_own_status(
     List<OwnStatus> self,
     SseSerializer serializer,
@@ -810,6 +858,12 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   void sse_encode_list_ringtone(List<Ringtone> self, SseSerializer serializer);
 
   @protected
+  void sse_encode_list_room_member(
+    List<RoomMember> self,
+    SseSerializer serializer,
+  );
+
+  @protected
   void sse_encode_list_tray_icon(List<TrayIcon> self, SseSerializer serializer);
 
   @protected
@@ -823,6 +877,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
     ManagedSettings self,
     SseSerializer serializer,
   );
+
+  @protected
+  void sse_encode_meeting(Meeting self, SseSerializer serializer);
 
   @protected
   void sse_encode_my_presence(MyPresence self, SseSerializer serializer);
@@ -868,6 +925,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
     RememberedSignIn? self,
     SseSerializer serializer,
   );
+
+  @protected
+  void sse_encode_opt_box_autoadd_room(Room? self, SseSerializer serializer);
 
   @protected
   void sse_encode_opt_box_autoadd_system_look(
@@ -934,6 +994,12 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   void sse_encode_ringtone(Ringtone self, SseSerializer serializer);
+
+  @protected
+  void sse_encode_room(Room self, SseSerializer serializer);
+
+  @protected
+  void sse_encode_room_member(RoomMember self, SseSerializer serializer);
 
   @protected
   void sse_encode_sign_in_methods(SignInMethods self, SseSerializer serializer);

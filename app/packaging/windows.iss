@@ -4,8 +4,8 @@
 ; and device ended there, not left behind) and also removes start-at-login,
 ; what the notifications registered, and the app's files (the signed-in
 ; session). Anvil offers to open tel:, sip:, sips: and
-; callto: links (Windows' default apps), and takes sip:, sips: and callto:
-; where nothing else does.
+; callto: links (Windows' default apps), and takes sip:, sips:, callto: and
+; fcp: (FCP's room links) where nothing else does.
 ;
 ;   iscc /DVersion=0.1.0 /DLabel=v0.1.0 /DBundle=<release dir> /DOut=<dir> windows.iss
 ;
@@ -123,6 +123,10 @@ Root: HKCU; Subkey: "Software\Classes\sips\shell\open\command"; ValueType: strin
 Root: HKCU; Subkey: "Software\Classes\callto"; ValueType: string; ValueData: "URL:callto"; Flags: uninsdeletekey; Check: Unclaimed('callto')
 Root: HKCU; Subkey: "Software\Classes\callto"; ValueType: string; ValueName: "URL Protocol"; ValueData: ""; Check: Unclaimed('callto')
 Root: HKCU; Subkey: "Software\Classes\callto\shell\open\command"; ValueType: string; ValueData: """{app}\anvil.exe"" ""%1"""; Check: Unclaimed('callto')
+; FCP's room links (fcp://join/<token>) open the meetings sheet.
+Root: HKCU; Subkey: "Software\Classes\fcp"; ValueType: string; ValueData: "URL:FCP"; Flags: uninsdeletekey; Check: Unclaimed('fcp')
+Root: HKCU; Subkey: "Software\Classes\fcp"; ValueType: string; ValueName: "URL Protocol"; ValueData: ""; Check: Unclaimed('fcp')
+Root: HKCU; Subkey: "Software\Classes\fcp\shell\open\command"; ValueType: string; ValueData: """{app}\anvil.exe"" ""%1"""; Check: Unclaimed('fcp')
 
 [UninstallRun]
 ; Before the app's files go: the session ends at FCP, and its device with it

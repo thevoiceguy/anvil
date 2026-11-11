@@ -168,6 +168,8 @@ class PhoneCall {
     this.sending,
     this.streams = const [],
     this.videoRequested = false,
+    this.contentStream,
+    this.room,
   });
 
   final int id;
@@ -213,8 +215,14 @@ class PhoneCall {
   /// until the user turns it on.
   final bool videoRequested;
 
+  /// The shared screen coming in (a room's), apart from the cameras.
+  final int? contentStream;
+
+  /// The room the call is in, when it joined one.
+  final RoomInfo? room;
+
   /// The call shows pictures: ours, theirs or both.
-  bool get hasVideo => camera || streams.isNotEmpty;
+  bool get hasVideo => camera || streams.isNotEmpty || contentStream != null;
 
   /// Who the call is with, as a person reads it.
   String get who => displayName ?? shortAddress(remote);
@@ -238,6 +246,9 @@ class PhoneCall {
     bool clearSending = false,
     List<int>? streams,
     bool? videoRequested,
+    int? contentStream,
+    bool clearContent = false,
+    RoomInfo? room,
   }) => PhoneCall(
     id: id,
     direction: direction,
@@ -259,8 +270,92 @@ class PhoneCall {
     sending: clearSending ? null : sending ?? this.sending,
     streams: streams ?? this.streams,
     videoRequested: videoRequested ?? this.videoRequested,
+    contentStream: clearContent ? null : contentStream ?? this.contentStream,
+    room: room ?? this.room,
   );
 }
+
+/// The room a call is in (FCP's `docs/SOFTPHONE_VIDEO.md` §2.6).
+class RoomInfo {
+  const RoomInfo({
+    required this.number,
+    this.host = false,
+    this.members = const [],
+    this.speaker,
+    this.presenter,
+    this.floorRefused,
+  });
+
+  /// The room's number.
+  final String number;
+
+  /// The user has a host's controls in it.
+  final bool host;
+  final List<RoomMember> members;
+
+  /// Who speaks, or last spoke, by id.
+  final String? speaker;
+
+  /// Who shares their screen, by name, while someone does.
+  final String? presenter;
+
+  /// Our own share was turned down or ended by the room: why.
+  final String? floorRefused;
+
+  RoomMember? get speaking {
+    for (final m in members) {
+      if (m.id == speaker) return m;
+    }
+    return null;
+  }
+}
+
+/// One person in a room.
+class RoomMember {
+  const RoomMember({
+    required this.id,
+    required this.name,
+    this.host = false,
+    this.audio = 'sending',
+    this.camera,
+    this.speaking = false,
+    this.presenting = false,
+  });
+
+  /// The room's id for them: what a host's controls name.
+  final String id;
+  final String name;
+  final bool host;
+
+  /// `sending`, `muted` or `held`.
+  final String audio;
+
+  /// Their camera as the room has it (`on`, `off`, `lost`, …); null in a
+  /// room without video.
+  final String? camera;
+  final bool speaking;
+  final bool presenting;
+
+  bool get muted => audio != 'sending';
+  bool get cameraOn => camera == 'on';
+}
+
+/// A meeting the user owns on FCP.
+class Meeting {
+  const Meeting({
+    required this.id,
+    required this.roomNumber,
+    required this.name,
+  });
+  final String id;
+
+  /// The number it is dialed at.
+  final String roomNumber;
+  final String name;
+}
+
+/// What a room's host can do (`PhoneApi.roomControl`).
+enum RoomControl { layout, pin, spotlight, mute, camera, remove, stopShare }
 
 /// A camera to choose.
 class CameraDevice {
@@ -893,6 +988,7 @@ class PhoneSnapshot {
     this.audioTestLevel = 0,
     this.capture = const CaptureInfo(),
     this.video = const VideoSettings(),
+    this.meetings = const [],
   });
 
   final String aor;
@@ -979,6 +1075,9 @@ class PhoneSnapshot {
 
   /// Video calls: whether there are any here, the cameras, H.264.
   final VideoSettings video;
+
+  /// The meetings the user owns, signed in to FCP.
+  final List<Meeting> meetings;
 
   /// Signed in to FCP, so a contact can be kept on the account.
   bool get hasAccount => calling != null;
@@ -1071,6 +1170,7 @@ class PhoneSnapshot {
     int? audioTestLevel,
     CaptureInfo? capture,
     VideoSettings? video,
+    List<Meeting>? meetings,
   }) => PhoneSnapshot(
     aor: aor,
     registration: registration ?? this.registration,
@@ -1109,6 +1209,7 @@ class PhoneSnapshot {
     audioTestLevel: audioTestLevel ?? this.audioTestLevel,
     capture: capture ?? this.capture,
     video: video ?? this.video,
+    meetings: meetings ?? this.meetings,
   );
 
   static const empty = PhoneSnapshot(
@@ -1311,6 +1412,23 @@ abstract class PhoneApi {
 
   /// Send video only on Wi-Fi (a phone's setting), or on cellular too.
   Future<void> setWifiOnly(bool on);
+
+  /// Join an FCP room by its number or a join link, with video or not.
+  Future<int> joinRoom(String target, {bool video = false});
+
+  /// A link to send for one of the user's meetings: a guest's, or a
+  /// host's.
+  Future<String> meetingLink(String meeting, {bool host = false});
+
+  /// A host's control over the room `call` is in: `layout` (`on`, a
+  /// grid), `pin` and `spotlight` (`member`, or null to stop), `mute` and
+  /// `camera` (`member`, `on`), `remove` (`member`), `stopShare`.
+  Future<void> roomControl(
+    int call,
+    RoomControl control, {
+    String? member,
+    bool on = false,
+  });
 
   /// Where a call's pictures are shown.
   VideoTiles get videoTiles;

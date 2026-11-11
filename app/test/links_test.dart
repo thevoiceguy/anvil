@@ -35,6 +35,18 @@ void main() {
     expect(dialTarget('tel:%zz'), isNull);
   });
 
+  test("a room's join link is kept for the meetings sheet", () {
+    expect(joinLink('fcp://join/abc.def'), 'fcp://join/abc.def');
+    expect(joinLink('FCP://join/abc?x=1'), 'fcp://join/abc');
+    expect(joinLink('fcp://join/'), isNull);
+    expect(joinLink('fcp://other/abc'), isNull);
+    expect(joinLink('sip:3000@example.com'), isNull);
+    expect(dialTarget('fcp://join/abc'), isNull);
+    expect(startEvents(['fcp://join/abc'], handedOn: true), [
+      const ShellEvent(ShellAction.join, target: 'fcp://join/abc'),
+    ]);
+  });
+
   test('a start asks for its links; one handed on also for the window', () {
     const dial = ShellEvent(ShellAction.dial, target: '1002');
     const show = ShellEvent(ShellAction.show);

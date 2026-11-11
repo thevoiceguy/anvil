@@ -177,6 +177,7 @@ dependencies = [
  "anvil-core",
  "anvil-fcp",
  "async-trait",
+ "base64 0.22.1",
  "chrono",
  "dirs",
  "image",
