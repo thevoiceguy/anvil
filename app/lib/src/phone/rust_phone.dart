@@ -289,6 +289,10 @@ class RustPhone implements PhoneApi {
         cameras: [
           for (final c in s.video.cameras) CameraDevice(id: c.id, name: c.name),
         ],
+        screens: [
+          for (final c in s.video.screens) CameraDevice(id: c.id, name: c.name),
+        ],
+        screen: s.video.screen,
         camera: s.video.camera,
         h264Allowed: s.video.h264Allowed,
         h264Ready: s.video.h264Ready,
@@ -425,6 +429,7 @@ class RustPhone implements PhoneApi {
     speaker: r.speaker,
     presenter: r.presenter,
     floorRefused: r.floorRefused,
+    sharing: r.sharing,
   );
 
   static AudioDevice _device(rust.AudioDevice d) =>
@@ -483,6 +488,13 @@ class RustPhone implements PhoneApi {
 
   @override
   Future<void> chooseCamera(String? id) => rust_video.chooseCamera(camera: id);
+
+  @override
+  Future<void> shareScreen(int call, bool on) =>
+      rust_video.shareScreen(call: _id(call), on_: on);
+
+  @override
+  Future<void> chooseScreen(String? id) => rust_video.chooseScreen(screen: id);
 
   @override
   Future<void> allowH264(bool on) => rust_video.allowH264(on_: on);

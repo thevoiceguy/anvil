@@ -17,6 +17,15 @@ Future<void> setVideo({BigInt? call, required bool on_}) =>
 Future<void> chooseCamera({String? camera}) =>
     RustLib.instance.api.crateApiVideoChooseCamera(camera: camera);
 
+/// Share our screen in the room a call is in (the connected one when
+/// `None`), or stop.
+Future<void> shareScreen({BigInt? call, required bool on_}) =>
+    RustLib.instance.api.crateApiVideoShareScreen(call: call, on_: on_);
+
+/// The screen a share shows, by id; `None` is the system's main one.
+Future<void> chooseScreen({String? screen}) =>
+    RustLib.instance.api.crateApiVideoChooseScreen(screen: screen);
+
 /// Allow H.264 from Cisco's OpenH264 (fetched now if need be), or not.
 Future<void> allowH264({required bool on_}) =>
     RustLib.instance.api.crateApiVideoAllowH264(on_: on_);

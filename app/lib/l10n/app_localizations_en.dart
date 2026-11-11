@@ -1207,6 +1207,39 @@ class StringsEn extends Strings {
   }
 
   @override
+  String get roomShare => 'Share your screen';
+
+  @override
+  String get roomStopSharing => 'Stop sharing';
+
+  @override
+  String get roomSharing => 'You are sharing your screen';
+
+  @override
+  String get roomChooseScreen => 'Screen to share';
+
+  @override
+  String get roomShareWhyHost => 'a host stopped it';
+
+  @override
+  String get roomShareWhyHeld => 'someone else is sharing';
+
+  @override
+  String get roomShareWhyDisabled => 'this room does not allow sharing';
+
+  @override
+  String get roomShareWhyNotYou => 'a host has not let you share';
+
+  @override
+  String get roomShareWhyIdle => 'nothing was sent for a while';
+
+  @override
+  String get roomShareWhyFailed => 'the room could not show it';
+
+  @override
+  String get roomShareWhyBusy => 'the room is too busy';
+
+  @override
   String get roomHost => 'Host';
 
   @override

@@ -284,6 +284,7 @@ class RoomInfo {
     this.speaker,
     this.presenter,
     this.floorRefused,
+    this.sharing = false,
   });
 
   /// The room's number.
@@ -301,6 +302,20 @@ class RoomInfo {
 
   /// Our own share was turned down or ended by the room: why.
   final String? floorRefused;
+
+  /// We share our screen in it.
+  final bool sharing;
+
+  RoomInfo copyWith({bool? sharing, String? Function()? floorRefused}) =>
+      RoomInfo(
+        number: number,
+        host: host,
+        members: members,
+        speaker: speaker,
+        presenter: presenter,
+        floorRefused: floorRefused == null ? this.floorRefused : floorRefused(),
+        sharing: sharing ?? this.sharing,
+      );
 
   RoomMember? get speaking {
     for (final m in members) {
@@ -370,6 +385,8 @@ class VideoSettings {
     this.available = false,
     this.cameras = const [],
     this.camera,
+    this.screens = const [],
+    this.screen,
     this.h264Allowed,
     this.h264Ready = false,
     this.h264Notice,
@@ -383,6 +400,11 @@ class VideoSettings {
 
   /// The camera chosen; null is the system's first.
   final String? camera;
+
+  /// The screens a share can show (none where this device cannot share),
+  /// and the one chosen (null: the system's main one).
+  final List<CameraDevice> screens;
+  final String? screen;
 
   /// H.264 from Cisco's OpenH264, where Anvil fetches it: whether the user
   /// allows it (null where it is not fetched), whether it is here, and
@@ -400,6 +422,7 @@ class VideoSettings {
 
   VideoSettings copyWith({
     String? Function()? camera,
+    String? Function()? screen,
     bool? h264Allowed,
     bool? h264Ready,
     bool? wifiOnly,
@@ -408,6 +431,8 @@ class VideoSettings {
     available: available,
     cameras: cameras,
     camera: camera == null ? this.camera : camera(),
+    screens: screens,
+    screen: screen == null ? this.screen : screen(),
     h264Allowed: h264Allowed ?? this.h264Allowed,
     h264Ready: h264Ready ?? this.h264Ready,
     h264Notice: h264Notice,
@@ -1398,6 +1423,14 @@ abstract class PhoneApi {
 
   /// The camera video calls use, by id; null is the system's first.
   Future<void> chooseCamera(String? id);
+
+  /// Share our screen in the room `call` is in, or stop. The room's
+  /// notice says whether the floor was granted ([RoomInfo.presenter]); a
+  /// refusal or a host's stop ends the share ([RoomInfo.floorRefused]).
+  Future<void> shareScreen(int call, bool on);
+
+  /// The screen a share shows, by id; null is the system's main one.
+  Future<void> chooseScreen(String? id);
 
   /// Allow H.264 from Cisco's OpenH264 (fetched now if need be), or not.
   Future<void> allowH264(bool on);

@@ -716,6 +716,17 @@
       }
     }
   },
+  "roomShare": "Share your screen",
+  "roomStopSharing": "Stop sharing",
+  "roomSharing": "You are sharing your screen",
+  "roomChooseScreen": "Screen to share",
+  "roomShareWhyHost": "a host stopped it",
+  "roomShareWhyHeld": "someone else is sharing",
+  "roomShareWhyDisabled": "this room does not allow sharing",
+  "roomShareWhyNotYou": "a host has not let you share",
+  "roomShareWhyIdle": "nothing was sent for a while",
+  "roomShareWhyFailed": "the room could not show it",
+  "roomShareWhyBusy": "the room is too busy",
   "roomHost": "Host",
   "roomYouHost": "You are a host",
   "roomMuted": "Muted",

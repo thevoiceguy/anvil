@@ -214,4 +214,61 @@ void main() {
       findsOneWidget,
     );
   });
+
+  testWidgets('a screen is shared and stopped from the room, and chosen', (
+    tester,
+  ) async {
+    const screens = [
+      CameraDevice(id: 'DP-1', name: 'DP-1 (1920×1080)'),
+      CameraDevice(id: 'HDMI-1', name: 'HDMI-1 (1280×720)'),
+    ];
+    final phone = await signedIn(
+      tester,
+      seed: (s) {
+        final m = withMeetings(s);
+        return m.copyWith(
+          video: VideoSettings(
+            available: true,
+            cameras: m.video.cameras,
+            screens: screens,
+          ),
+        );
+      },
+    );
+    await tapKey(tester, 'meetings');
+    await tapKey(tester, 'meetingJoin-m1');
+    inRoom(phone, 1, const RoomInfo(number: '3000'));
+    await tester.pumpAndSettle();
+    expect(find.text('Share your screen'), findsOneWidget);
+    expect(find.byKey(const Key('roomSharing')), findsNothing);
+
+    await tapKey(tester, 'roomShare');
+    expect(phone.log, contains('share 1 on'));
+    expect(find.text('Stop sharing'), findsOneWidget);
+    expect(find.byKey(const Key('roomSharing')), findsOneWidget);
+
+    // Two screens: one is chosen.
+    await tapKey(tester, 'roomScreen');
+    await tester.tap(find.text('HDMI-1 (1280×720)').last);
+    await tester.pumpAndSettle();
+    expect(phone.log, contains('screen HDMI-1'));
+
+    await tapKey(tester, 'roomShare');
+    expect(phone.log, contains('share 1 off'));
+    expect(find.text('Share your screen'), findsOneWidget);
+
+    // A host stopped it: said in words.
+    inRoom(phone, 1, const RoomInfo(number: '3000', floorRefused: 'host'));
+    await tester.pumpAndSettle();
+    expect(find.text('Your share stopped: a host stopped it'), findsOneWidget);
+  });
+
+  testWidgets('a device without screens offers no share', (tester) async {
+    final phone = await signedIn(tester, seed: withMeetings);
+    await tapKey(tester, 'meetings');
+    await tapKey(tester, 'meetingJoin-m1');
+    inRoom(phone, 1, const RoomInfo(number: '3000'));
+    await tester.pumpAndSettle();
+    expect(find.byKey(const Key('roomShare')), findsNothing);
+  });
 }
