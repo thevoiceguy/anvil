@@ -42,6 +42,8 @@ pub mod ndkcam;
 pub mod openh264_fetch;
 pub mod picture;
 pub mod png;
+#[cfg(target_os = "macos")]
+pub mod sck;
 pub mod screen;
 mod sink;
 mod source;
@@ -215,7 +217,8 @@ pub fn platform_cameras() -> Box<dyn Cameras> {
 
 /// The platform's screens: on Linux, the desktop portal's under Wayland
 /// (the user chooses in the desktop's dialog), else the X server's
-/// monitors (none without a display).
+/// monitors (none without a display); a Mac's displays through
+/// ScreenCaptureKit.
 pub fn platform_screens() -> Box<dyn Screens> {
     #[cfg(target_os = "linux")]
     let screens: Box<dyn Screens> = if wayland::is_wayland() {
@@ -223,7 +226,9 @@ pub fn platform_screens() -> Box<dyn Screens> {
     } else {
         Box::new(x11::X11Screens)
     };
-    #[cfg(not(target_os = "linux"))]
+    #[cfg(target_os = "macos")]
+    let screens: Box<dyn Screens> = Box::new(sck::SckScreens);
+    #[cfg(not(any(target_os = "linux", target_os = "macos")))]
     let screens: Box<dyn Screens> = Box::new(NoScreens);
     screens
 }

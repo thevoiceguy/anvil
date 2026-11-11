@@ -37,10 +37,13 @@ A new Flutter FFI plugin project.
   }
   # The Rust library is static: the system frameworks its crates call
   # (cpal's audio units, hickory's resolver configuration, rustls'
-  # trust store, anvil-video's VideoToolbox and AVFoundation) are linked by the pod that
-  # carries it.
+  # trust store, anvil-video's VideoToolbox, AVFoundation, CoreGraphics and
+  # ScreenCaptureKit) are linked by the pod that carries it.
   s.frameworks = 'CoreAudio', 'AudioToolbox', 'CoreFoundation', 'SystemConfiguration', 'Security',
-                 'VideoToolbox', 'CoreMedia', 'CoreVideo', 'AVFoundation'
+                 'VideoToolbox', 'CoreMedia', 'CoreVideo', 'AVFoundation', 'CoreGraphics'
+  # ScreenCaptureKit came with macOS 12.3; the app runs on 12.0, where a
+  # share is refused (anvil-video looks for the class first).
+  s.weak_frameworks = 'ScreenCaptureKit'
   s.pod_target_xcconfig = {
     'DEFINES_MODULE' => 'YES',
     # Flutter.framework does not contain a i386 slice.

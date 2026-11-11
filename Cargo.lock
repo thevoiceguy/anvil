@@ -182,7 +182,7 @@ dependencies = [
 
 [[package]]
 name = "anvil-app"
-version = "0.2.75"
+version = "0.2.76"
 dependencies = [
  "anvil-core",
  "anvil-fcp",
@@ -210,7 +210,7 @@ dependencies = [
 
 [[package]]
 name = "anvil-audio"
-version = "0.2.75"
+version = "0.2.76"
 dependencies = [
  "anvil-core",
  "async-trait",
@@ -226,7 +226,7 @@ dependencies = [
 
 [[package]]
 name = "anvil-brand"
-version = "0.2.75"
+version = "0.2.76"
 dependencies = [
  "anvil-core",
  "async-trait",
@@ -244,7 +244,7 @@ dependencies = [
 
 [[package]]
 name = "anvil-cli"
-version = "0.2.75"
+version = "0.2.76"
 dependencies = [
  "anvil-app",
  "anvil-audio",
@@ -261,7 +261,7 @@ dependencies = [
 
 [[package]]
 name = "anvil-codec"
-version = "0.2.75"
+version = "0.2.76"
 dependencies = [
  "anvil-core",
  "opus",
@@ -270,7 +270,7 @@ dependencies = [
 
 [[package]]
 name = "anvil-core"
-version = "0.2.75"
+version = "0.2.76"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -312,7 +312,7 @@ dependencies = [
 
 [[package]]
 name = "anvil-fcp"
-version = "0.2.75"
+version = "0.2.76"
 dependencies = [
  "anvil-brand",
  "anvil-core",
@@ -336,7 +336,7 @@ dependencies = [
 
 [[package]]
 name = "anvil-ffi"
-version = "0.2.75"
+version = "0.2.76"
 dependencies = [
  "anvil-core",
  "anvil-fcp",
@@ -353,7 +353,7 @@ dependencies = [
 
 [[package]]
 name = "anvil-update"
-version = "0.2.75"
+version = "0.2.76"
 dependencies = [
  "futures",
  "reqwest",
@@ -368,7 +368,7 @@ dependencies = [
 
 [[package]]
 name = "anvil-video"
-version = "0.2.75"
+version = "0.2.76"
 dependencies = [
  "anvil-audio",
  "anvil-core",
@@ -384,9 +384,11 @@ dependencies = [
  "objc2",
  "objc2-av-foundation",
  "objc2-core-foundation",
+ "objc2-core-graphics",
  "objc2-core-media",
  "objc2-core-video",
  "objc2-foundation",
+ "objc2-screen-capture-kit",
  "objc2-video-toolbox",
  "openh264",
  "openh264-sys2",
@@ -406,7 +408,7 @@ dependencies = [
 
 [[package]]
 name = "anvil_bridge"
-version = "0.2.75"
+version = "0.2.76"
 dependencies = [
  "anvil-app",
  "anvil-audio",
@@ -2023,7 +2025,7 @@ dependencies = [
  "libc",
  "percent-encoding",
  "pin-project-lite",
- "socket2 0.5.10",
+ "socket2 0.6.5",
  "tokio",
  "tower-service",
  "tracing",
@@ -2829,10 +2831,13 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "e022c9d066895efa1345f8e33e584b9f958da2fd4cd116792e15e07e4720a807"
 dependencies = [
  "bitflags 2.13.2",
+ "block2",
  "dispatch2",
+ "libc",
  "objc2",
  "objc2-core-foundation",
  "objc2-io-surface",
+ "objc2-metal",
 ]
 
 [[package]]
@@ -2952,12 +2957,41 @@ dependencies = [
 ]
 
 [[package]]
+name = "objc2-screen-capture-kit"
+version = "0.3.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "74b7c5390f477482f001bc354d6571a70db7e4f8d5288e860c45521fbce11394"
+dependencies = [
+ "bitflags 2.13.2",
+ "block2",
+ "dispatch2",
+ "libc",
+ "objc2",
+ "objc2-av-foundation",
+ "objc2-core-foundation",
+ "objc2-core-graphics",
+ "objc2-core-media",
+ "objc2-foundation",
+ "objc2-uniform-type-identifiers",
+]
+
+[[package]]
 name = "objc2-system-configuration"
 version = "0.3.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7216bd11cbda54ccabcab84d523dc93b858ec75ecfb3a7d89513fa22464da396"
 dependencies = [
  "objc2-core-foundation",
+]
+
+[[package]]
+name = "objc2-uniform-type-identifiers"
+version = "0.3.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "7902ac02859fc1f7045f8b598c63f1ae0cc7efeaa06a9bc9f3d9a3c955974fa4"
+dependencies = [
+ "objc2",
+ "objc2-foundation",
 ]
 
 [[package]]
@@ -3356,7 +3390,7 @@ dependencies = [
  "quinn-udp",
  "rustc-hash 2.1.2",
  "rustls",
- "socket2 0.5.10",
+ "socket2 0.6.5",
  "thiserror 2.0.18",
  "tokio",
  "tracing",
@@ -3393,7 +3427,7 @@ dependencies = [
  "cfg_aliases",
  "libc",
  "once_cell",
- "socket2 0.5.10",
+ "socket2 0.6.5",
  "tracing",
  "windows-sys 0.60.2",
 ]

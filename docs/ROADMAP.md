@@ -283,7 +283,13 @@ every recommendation:
               buffers sized for the frame, the end seen as the node's
               removal; proved against a PipeWire daemon in CI (the portal
               itself by hand on a Wayland desktop)
-        - [ ] **A4c2c** macOS: ScreenCaptureKit
+        - [x] **A4c2c** macOS: ScreenCaptureKit — displays listed by
+              CoreGraphics without asking, the user asked to allow
+              recording at the first share, an `SCStream` per share
+              (BGRA, within the size asked, the cursor shown), the last
+              picture repeated while the screen is still, the share ended
+              when the system stops it; weakly linked (the app runs on
+              12.0, ScreenCaptureKit came with 12.3)
         - [ ] **A4c2d** Windows: Desktop Duplication
       - [ ] **A4c3** The app: a Share button and the screen's choice; a
             refusal or a host's stop ended by `share_screen(call, false)`

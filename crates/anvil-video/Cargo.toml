@@ -50,6 +50,12 @@ objc2-av-foundation   = "0.3"
 dispatch2             = "0.3"
 block2                = "0.6"
 
+# macOS: screens through ScreenCaptureKit (12.3 and later; the app weakly
+# links it, since it runs on 12.0) and CoreGraphics' display list.
+[target.'cfg(target_os = "macos")'.dependencies]
+objc2-screen-capture-kit = "0.3"
+objc2-core-graphics      = "0.3"
+
 # Windows: H.264 through Media Foundation (Windows' licence covers it).
 [target.'cfg(windows)'.dependencies]
 windows = { version = "0.61", features = [
