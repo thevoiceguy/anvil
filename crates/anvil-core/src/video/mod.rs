@@ -172,6 +172,8 @@ impl VideoEvents {
 /// What a camera sends until the network (REMB) or the server says less.
 const DEFAULT_KBPS: u32 = 1500;
 const DEFAULT_FPS: u32 = 30;
+/// A shared screen's frame rate: a screen changes less than a face.
+const CONTENT_FPS: u32 = 10;
 
 /// Whether incoming tiles stay while a section does not receive: a hold
 /// (ours, or theirs: `inactive`) freezes them; the far end receiving only
@@ -567,6 +569,65 @@ impl CallVideo {
         self.sdp_sections()
     }
 
+    /// Whether we share a screen: a room's shared-screen section the user
+    /// lets send.
+    pub(crate) fn sharing(&self) -> bool {
+        self.content()
+            .is_some_and(|i| self.sections[i].want.sends())
+    }
+
+    /// The live shared-screen section (a room's, RFC 4796).
+    fn content(&self) -> Option<usize> {
+        self.sections
+            .iter()
+            .position(|s| s.live() && s.local.kind == VideoKind::Content)
+    }
+
+    /// Our offer starting or stopping a share (FCP's
+    /// `docs/SOFTPHONE_VIDEO.md` §2.6): the shared-screen section sends,
+    /// or goes back to receiving only, so others' shares still reach us
+    /// and the room frees the floor. `None` when the call has no such
+    /// section (not a room, or one without shared screens).
+    pub(crate) fn offer_share(&mut self, on: bool) -> Option<Vec<LocalSection>> {
+        let i = self.content()?;
+        self.before_offer = Some((
+            self.sections.len(),
+            self.sections
+                .iter()
+                .map(|s| (s.want, s.local.direction))
+                .collect(),
+        ));
+        let held = self.held;
+        let s = &mut self.sections[i];
+        s.want = if on {
+            MediaDirection::Sendrecv
+        } else {
+            MediaDirection::Recvonly
+        };
+        s.local.direction = if held {
+            MediaDirection::Inactive
+        } else {
+            s.want
+        };
+        if !on {
+            // The screen goes now, not when the room answers.
+            self.stop_sharing_now();
+        }
+        Some(self.sdp_sections())
+    }
+
+    /// Stop sending the shared screen at once, the section kept (the room
+    /// refused our share or took it back: packets now would claim the
+    /// floor again). What we offer is unchanged until `offer_share`.
+    pub(crate) fn stop_sharing_now(&mut self) {
+        if let Some(i) = self.content() {
+            if let Some(session) = &self.sections[i].session {
+                session
+                    .set_direction_keeping(session.direction().and(MediaDirection::Recvonly), true);
+            }
+        }
+    }
+
     /// An offer of ours awaits its answer being taken (`answered`) or
     /// refused: a re-INVITE from the far end now would cross it.
     pub(crate) fn offer_pending(&self) -> bool {
@@ -726,14 +787,21 @@ impl CallVideo {
             pt: codec.pt,
             direction,
             feedback: codec.feedback,
-            send: encodes.then(|| SendConfig {
-                codec: codec.codec,
-                kind: s.local.kind,
-                camera: None,
-                max: Resolution::P720,
-                kbps: DEFAULT_KBPS,
-                fps: DEFAULT_FPS,
-                encodings: vec![EncodingId(0)],
+            send: encodes.then(|| {
+                // A screen is text: sharper and slower than a camera.
+                let (max, fps) = match s.local.kind {
+                    VideoKind::Camera => (Resolution::P720, DEFAULT_FPS),
+                    VideoKind::Content => (Resolution::P1080, CONTENT_FPS),
+                };
+                SendConfig {
+                    codec: codec.codec,
+                    kind: s.local.kind,
+                    camera: None,
+                    max,
+                    kbps: DEFAULT_KBPS,
+                    fps,
+                    encodings: vec![EncodingId(0)],
+                }
             }),
         };
         let (tx, rx) = mpsc::channel(transport::INBOUND_QUEUE);

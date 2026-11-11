@@ -9,7 +9,7 @@ mod common;
 use std::time::Duration;
 
 use anvil_core::config::{MediaConfig, SrtpMode};
-use anvil_core::video::host::{StreamId, VideoKind};
+use anvil_core::video::host::{Resolution, StreamId, VideoKind};
 use anvil_core::video::synthetic::{ReceivedStream, SyntheticRecord, SyntheticVideoHost};
 use anvil_core::video::{VideoStreamDirection, VideoStreamStats};
 use anvil_core::{Anvil, CallId, CallMedia, Event, EventStream};
@@ -644,4 +644,159 @@ async fn both_cameras_turned_on_at_once_both_get_through() {
     hung_up_by_the_other_side(&mut bob_events, incoming).await;
     alice.shutdown().await.unwrap();
     bob.shutdown().await.unwrap();
+}
+
+/// The content source `host` started, once it has sent `frames`.
+async fn content_sent(
+    host: &SyntheticVideoHost,
+    frames: u32,
+) -> anvil_core::video::synthetic::SentSource {
+    let deadline = tokio::time::Instant::now() + SOON;
+    loop {
+        let record = host.record();
+        if let Some(s) = record
+            .sent
+            .iter()
+            .find(|s| s.config.kind == VideoKind::Content && !s.stopped && s.frames >= frames)
+        {
+            return s.clone();
+        }
+        assert!(
+            tokio::time::Instant::now() < deadline,
+            "no shared screen of {frames} frames: {record:?}"
+        );
+        tokio::time::sleep(Duration::from_millis(20)).await;
+    }
+}
+
+/// The content streams `host` receives that are still live.
+fn content_received(r: &SyntheticRecord) -> Vec<ReceivedStream> {
+    r.received
+        .values()
+        .filter(|s| s.config.kind == VideoKind::Content && !s.stopped)
+        .cloned()
+        .collect()
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_screen_shared_in_a_room_is_sent_and_stopped_by_re_invite() {
+    let (a_host, b_host) = (host(), host());
+    let (alice, mut alice_events) =
+        phone("alice", "127.0.2.1", SrtpMode::Off, Some(a_host.clone())).await;
+    let (bob, mut bob_events) =
+        phone("bob", "127.0.2.2", SrtpMode::Off, Some(b_host.clone())).await;
+
+    // Bob stands in for the room: Alice joins with video, so her offer
+    // has a shared-screen section she only receives on.
+    let out = alice
+        .join_room(
+            &format!("sip:bob@{}", bob.sip_address()),
+            &anvil_core::RoomJoin::default(),
+            CallMedia::VIDEO,
+        )
+        .await
+        .expect("the room is dialed");
+    let incoming = expect(&mut bob_events, SOON, |e| match e {
+        Event::IncomingCall { call, .. } => Some(*call),
+        _ => None,
+    })
+    .await
+    .expect("the room rings");
+    bob.answer_with_media(incoming, CallMedia::VIDEO)
+        .await
+        .expect("the room answers");
+    expect(&mut alice_events, SOON, |e| match e {
+        Event::CallEstablished { call, .. } if *call == out => Some(()),
+        _ => None,
+    })
+    .await
+    .expect("alice is in");
+    assert!(!alice.sharing(out));
+    assert!(
+        !a_host
+            .record()
+            .sent
+            .iter()
+            .any(|s| s.config.kind == VideoKind::Content),
+        "no screen before a share"
+    );
+    assert_eq!(alice.screens().len(), 1);
+    alice.set_screen(Some("synthetic-screen"));
+    assert_eq!(a_host.record().screen.as_deref(), Some("synthetic-screen"));
+
+    // She shares: a re-INVITE, then her screen reaches the room, sharper
+    // and slower than a camera.
+    alice
+        .share_screen(out, true)
+        .await
+        .expect("the share is offered");
+    assert!(alice.sharing(out));
+    let sent = content_sent(&a_host, 10).await;
+    assert_eq!(sent.config.max, Resolution::P1080);
+    assert_eq!(sent.config.fps, 10);
+    let deadline = tokio::time::Instant::now() + SOON;
+    while !content_received(&b_host.record())
+        .iter()
+        .any(|s| s.frames.len() >= 5)
+    {
+        assert!(
+            tokio::time::Instant::now() < deadline,
+            "the room never saw her screen: {:?}",
+            b_host.record()
+        );
+        tokio::time::sleep(Duration::from_millis(20)).await;
+    }
+    // Asking again changes nothing.
+    alice.share_screen(out, true).await.unwrap();
+
+    // She stops: her screen at once, the section kept (receiving only),
+    // and nothing more of it reaches the room.
+    alice
+        .share_screen(out, false)
+        .await
+        .expect("the stop is offered");
+    assert!(!alice.sharing(out));
+    let deadline = tokio::time::Instant::now() + SOON;
+    while !a_host
+        .record()
+        .sent
+        .iter()
+        .filter(|s| s.config.kind == VideoKind::Content)
+        .all(|s| s.stopped)
+    {
+        assert!(
+            tokio::time::Instant::now() < deadline,
+            "her screen did not stop: {:?}",
+            a_host.record()
+        );
+        tokio::time::sleep(Duration::from_millis(20)).await;
+    }
+    let shown = |r: &SyntheticRecord| -> usize {
+        r.received
+            .values()
+            .filter(|s| s.config.kind == VideoKind::Content)
+            .map(|s| s.frames.len())
+            .sum()
+    };
+    // What was in flight lands; then the count stands still.
+    tokio::time::sleep(Duration::from_millis(300)).await;
+    let before = shown(&b_host.record());
+    tokio::time::sleep(Duration::from_millis(500)).await;
+    assert_eq!(shown(&b_host.record()), before, "her screen still arrives");
+
+    // A call that is not a room has no screen to share.
+    let (carol, mut carol_events) = phone("carol", "127.0.2.3", SrtpMode::Off, Some(host())).await;
+    let (dave, mut dave_events) = phone("dave", "127.0.2.4", SrtpMode::Off, Some(host())).await;
+    let (plain, _, _, _) = video_call(
+        &carol,
+        &mut carol_events,
+        &dave,
+        &mut dave_events,
+        CallMedia::VIDEO,
+    )
+    .await;
+    assert!(matches!(
+        carol.share_screen(plain, true).await,
+        Err(anvil_core::AnvilError::Config(_))
+    ));
 }

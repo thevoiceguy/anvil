@@ -10,8 +10,8 @@ use parking_lot::Mutex;
 use tokio::sync::watch;
 
 use super::host::{
-    CameraInfo, CodedFrame, EncodingId, ReceiveConfig, Resolution, SendConfig, StreamId,
-    VideoCodecCaps, VideoHost, VideoSink, VideoSource,
+    CameraInfo, CodedFrame, EncodingId, ReceiveConfig, Resolution, ScreenInfo, SendConfig,
+    StreamId, VideoCodecCaps, VideoHost, VideoSink, VideoSource,
 };
 use crate::AnvilError;
 
@@ -50,6 +50,14 @@ impl VideoHost for LimitedHost {
 
     fn set_camera(&self, camera: Option<&str>) {
         self.inner.set_camera(camera);
+    }
+
+    fn screens(&self) -> Vec<ScreenInfo> {
+        self.inner.screens()
+    }
+
+    fn set_screen(&self, screen: Option<&str>) {
+        self.inner.set_screen(screen);
     }
 
     fn start_send(&self, cfg: SendConfig) -> Result<Box<dyn VideoSource>, AnvilError> {

@@ -408,3 +408,180 @@ async fn a_room_dialed_with_video_is_offered_a_section_for_its_shared_screen() {
         "{sdp}"
     );
 }
+
+/// The payload type `section` (an m= section's text) gives VP8.
+fn vp8_pt(section: &str) -> String {
+    section
+        .lines()
+        .find_map(|l| {
+            let rest = l.trim().strip_prefix("a=rtpmap:")?;
+            let (pt, codec) = rest.split_once(' ')?;
+            codec.starts_with("VP8/").then(|| pt.to_string())
+        })
+        .expect("VP8 offered")
+}
+
+/// The video sections of an SDP, in order.
+fn video_sections(sdp: &str) -> Vec<String> {
+    sdp.split("\r\nm=")
+        .filter(|s| s.starts_with("video"))
+        .map(|s| format!("m={s}"))
+        .collect()
+}
+
+/// A room's answer: audio, the camera and the shared screen, each video
+/// section on its own port and as `content` says for the screen.
+fn video_answer(ip: &str, pt: &str, camera: u16, screen: u16, content: &str) -> String {
+    format!(
+        "v=0\r\no=- 1 1 IN IP4 {ip}\r\ns=-\r\nc=IN IP4 {ip}\r\nt=0 0\r\n\
+         m=audio 40010 RTP/AVP 0\r\na=rtpmap:0 PCMU/8000\r\n\
+         m=video {camera} RTP/AVPF {pt}\r\na=rtpmap:{pt} VP8/90000\r\na=sendrecv\r\n\
+         m=video {screen} RTP/AVPF {pt}\r\na=rtpmap:{pt} VP8/90000\r\n\
+         a=content:slides\r\na={content}\r\n"
+    )
+}
+
+/// Whether an RTP packet of payload type `pt` reaches `socket` within
+/// `within`. Anything else is noted and passed over.
+async fn arrives(socket: &UdpSocket, pt: u8, within: std::time::Duration) -> bool {
+    let mut buf = [0u8; 2048];
+    let end = tokio::time::Instant::now() + within;
+    loop {
+        match tokio::time::timeout_at(end, socket.recv_from(&mut buf)).await {
+            Err(_) => return false,
+            Ok(Ok((n, _))) if n >= 12 && buf[0] >> 6 == 2 && buf[1] & 0x7f == pt => return true,
+            Ok(Ok((n, from))) => eprintln!(
+                "passed over: {n} bytes from {from}: {:02x?}",
+                &buf[..n.min(4)]
+            ),
+            Ok(Err(e)) => eprintln!("passed over: {e}"),
+        }
+    }
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_share_the_room_refuses_stops_at_once_and_is_ended_by_re_invite() {
+    use anvil_core::video::host::VideoCodec;
+    use std::time::Duration;
+    let (alice, mut events) = start_with_video(
+        account(
+            "sip:alice@127.0.0.1",
+            "sip:127.0.0.1:9",
+            "alice",
+            "",
+            "127.0.0.1",
+            3600,
+        ),
+        MediaConfig::default(),
+        // One codec keeps the INVITE within UDP's size.
+        Some(SyntheticVideoHost::new(&[VideoCodec::Vp8]).with_fps(50)),
+    )
+    .await;
+    let alice = std::sync::Arc::new(alice);
+    let mut room = Room::bind("127.0.0.9").await;
+    let camera = UdpSocket::bind("127.0.0.9:0").await.unwrap();
+    let screen = UdpSocket::bind("127.0.0.9:0").await.unwrap();
+    let (camera_port, screen_port) = (
+        camera.local_addr().unwrap().port(),
+        screen.local_addr().unwrap().port(),
+    );
+    let call = alice
+        .join_room(
+            &format!("sip:3000@{}", room.addr),
+            &RoomJoin::default(),
+            CallMedia::VIDEO,
+        )
+        .await
+        .expect("the room is dialed");
+    let (invite, from) = room.next("INVITE ").await;
+    room.invite = invite.clone();
+    room.phone = from;
+    let offered = video_sections(body(&invite));
+    assert_eq!(offered.len(), 2, "{invite}");
+    assert!(offered[1].contains("a=recvonly"), "{}", offered[1]);
+    let pt = vp8_pt(&offered[1]);
+    let rtp_pt: u8 = pt.parse().unwrap();
+    let answer = video_answer("127.0.0.9", &pt, camera_port, screen_port, "sendrecv");
+    room.answer(&invite, from, "200 OK", "", "application/sdp", &answer)
+        .await;
+    room.next("ACK ").await;
+    expect(&mut events, SOON, |e| match e {
+        Event::CallEstablished { call: c, .. } if *c == call => Some(()),
+        _ => None,
+    })
+    .await
+    .expect("in the room");
+    assert!(
+        !arrives(&screen, rtp_pt, Duration::from_millis(300)).await,
+        "no screen before a share"
+    );
+
+    // Alice shares: the re-INVITE sends on the screen's section.
+    let share = {
+        let alice = std::sync::Arc::clone(&alice);
+        tokio::spawn(async move { alice.share_screen(call, true).await })
+    };
+    let (reinvite, from) = room.next("INVITE ").await;
+    let offered = video_sections(body(&reinvite));
+    assert!(
+        offered[1].contains("a=content:slides") && offered[1].contains("a=sendrecv"),
+        "{}",
+        offered[1]
+    );
+    room.answer(&reinvite, from, "200 OK", "", "application/sdp", &answer)
+        .await;
+    room.next("ACK ").await;
+    share.await.unwrap().expect("the share is answered");
+    assert!(
+        arrives(&screen, rtp_pt, SOON).await,
+        "her screen reaches the room"
+    );
+
+    // The room refuses it (the floor is held): her screen stops at once,
+    // before the stop is offered.
+    let refused = r#"{"floor":"refused","participant_id":"p1","presenter":"Bob","reason":"held","mine":true}"#;
+    let ok = room
+        .send("INFO", "Info-Package: fcp-content\r\n", FLOOR_TYPE, refused)
+        .await;
+    assert!(ok.starts_with("SIP/2.0 200"), "{ok}");
+    let notice = expect(&mut events, SOON, |e| match e {
+        Event::RoomFloor { call: c, notice } if *c == call => Some(notice.clone()),
+        _ => None,
+    })
+    .await
+    .expect("the refusal is told");
+    assert_eq!(notice.state, FloorState::Refused);
+    assert!(notice.mine);
+    // What queued in the socket meanwhile is read until 200 ms pass
+    // without a packet (a screen still sent at 50 fps never goes quiet);
+    // a short wait is not enough on Windows, where a ready socket is
+    // told through a poll that can lose the race to a 10 ms timer.
+    let drained = tokio::time::timeout(Duration::from_secs(3), async {
+        while arrives(&screen, rtp_pt, Duration::from_millis(200)).await {}
+    })
+    .await;
+    assert!(drained.is_ok(), "her screen never went quiet");
+    assert!(
+        !arrives(&screen, rtp_pt, Duration::from_millis(500)).await,
+        "her screen still claims the floor"
+    );
+
+    // Told, she stops: the section goes back to receiving only.
+    let stop = {
+        let alice = std::sync::Arc::clone(&alice);
+        tokio::spawn(async move { alice.share_screen(call, false).await })
+    };
+    let (reinvite, from) = room.next("INVITE ").await;
+    let offered = video_sections(body(&reinvite));
+    assert!(
+        offered[1].contains("a=content:slides") && offered[1].contains("a=recvonly"),
+        "{}",
+        offered[1]
+    );
+    let answer = video_answer("127.0.0.9", &pt, camera_port, screen_port, "sendonly");
+    room.answer(&reinvite, from, "200 OK", "", "application/sdp", &answer)
+        .await;
+    room.next("ACK ").await;
+    stop.await.unwrap().expect("the stop is answered");
+    assert!(!alice.sharing(call));
+}

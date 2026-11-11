@@ -50,6 +50,13 @@ pub struct CameraInfo {
     pub name: String,
 }
 
+/// A screen (or a window) the host can share.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ScreenInfo {
+    pub id: String,
+    pub name: String,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Resolution {
     pub width: u32,
@@ -60,6 +67,10 @@ impl Resolution {
     pub const P720: Resolution = Resolution {
         width: 1280,
         height: 720,
+    };
+    pub const P1080: Resolution = Resolution {
+        width: 1920,
+        height: 1080,
     };
 }
 
@@ -87,7 +98,8 @@ pub struct StreamId(pub u32);
 pub struct SendConfig {
     pub codec: VideoCodec,
     pub kind: VideoKind,
-    /// The camera to open (`None`, the host's default); ignored for content.
+    /// The camera to open (`None`, the host's default); ignored for
+    /// content, whose screen is [`VideoHost::set_screen`]'s.
     pub camera: Option<String>,
     pub max: Resolution,
     pub kbps: u32,
@@ -124,6 +136,14 @@ pub trait VideoHost: Send + Sync {
     /// default); a camera being captured switches to it, where the host
     /// can, starting again on a keyframe.
     fn set_camera(&self, _camera: Option<&str>) {}
+    /// The screens a share can show (none where the host cannot share).
+    fn screens(&self) -> Vec<ScreenInfo> {
+        Vec::new()
+    }
+    /// The screen a share captures (`None`, the host's choice: the main
+    /// screen, or the system's picker where it has one); a share running
+    /// switches to it, where the host can.
+    fn set_screen(&self, _screen: Option<&str>) {}
     /// A camera or a screen, captured and encoded.
     fn start_send(&self, cfg: SendConfig) -> Result<Box<dyn VideoSource>, AnvilError>;
     /// One per incoming stream: decoded and shown.
