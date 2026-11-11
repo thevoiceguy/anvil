@@ -1485,6 +1485,36 @@ async fn a_screen_shared_in_a_room_on_fcp_takes_the_floor_and_frees_it_on_stop()
         |n| n.state == FloorState::Granted && n.mine,
     )
     .await;
+
+    // The owner, as host, stops the share: she is told, her screen
+    // stops, and once the room hears her stop she may share again.
+    client
+        .room_host(&room, None)
+        .stop_content()
+        .await
+        .expect("a host stops the share");
+    let stopped = floor_where(
+        &mut events,
+        a,
+        Duration::from_secs(10),
+        "a host's stop",
+        |n| n.state == FloorState::Released && n.mine,
+    )
+    .await;
+    assert_eq!(stopped.reason.as_deref(), Some("host"));
+    alice.share_screen(a, false).await.expect("the stop told");
+    alice
+        .share_screen(a, true)
+        .await
+        .expect("shares after the stop");
+    floor_where(
+        &mut events,
+        a,
+        Duration::from_secs(15),
+        "granted after a host's stop",
+        |n| n.state == FloorState::Granted && n.mine,
+    )
+    .await;
     alice.hangup(a).await.expect("leaves");
     let _ = alice.shutdown().await;
 }
