@@ -71,6 +71,26 @@ pub(crate) struct CallEntry {
     pub video: Option<crate::video::CallVideo>,
     /// We hold the call (our last offer said so).
     pub held: bool,
+    /// A call into a video room: its roster as told so far.
+    pub room: Option<RoomCall>,
+}
+
+/// What a call into a room keeps of it.
+#[derive(Default)]
+pub(crate) struct RoomCall {
+    pub roster: crate::room::Roster,
+    /// Wakes the subscription to ask for the whole roster again.
+    pub resubscribe: Arc<tokio::sync::Notify>,
+    /// The roster subscription, kept while the call lasts.
+    pub subscription: Option<tokio::task::JoinHandle<()>>,
+}
+
+impl Drop for RoomCall {
+    fn drop(&mut self) {
+        if let Some(task) = self.subscription.take() {
+            task.abort();
+        }
+    }
 }
 
 /// A call's SRTP keys.

@@ -307,7 +307,7 @@ impl FcpClient {
         .await
     }
 
-    async fn api_request(
+    pub(crate) async fn api_request(
         &self,
         method: reqwest::Method,
         path: &str,
