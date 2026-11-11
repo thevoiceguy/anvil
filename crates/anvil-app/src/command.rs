@@ -34,6 +34,26 @@ pub enum Command {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         video: Option<bool>,
     },
+    /// Join an FCP room by its number or a join link (`fcp://join/…`, the
+    /// browser's join page), with video when asked and there is any.
+    Join {
+        target: String,
+        #[serde(default, skip_serializing_if = "is_false")]
+        video: bool,
+    },
+    /// A link to send for one of the user's meetings (by id or room
+    /// number): a guest's, or with `host` a host's. The answer's `link`.
+    JoinLink {
+        meeting: String,
+        #[serde(default, skip_serializing_if = "is_false")]
+        host: bool,
+    },
+    /// A host's control over the room a call is in.
+    Room {
+        #[serde(default)]
+        call: Option<u64>,
+        action: RoomAction,
+    },
     /// Our camera on or off in a call: a re-INVITE. On, an audio call
     /// becomes a video call.
     Video {
@@ -247,6 +267,94 @@ pub enum Command {
     Subscribe,
 }
 
+/// What a room's host can do to it, and to the people in it (by the
+/// room's id for them).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "action", rename_all = "snake_case")]
+pub enum RoomAction {
+    /// Everyone the same size (`grid`), or the speaker large.
+    Layout { grid: bool },
+    /// Keep one person in the large tile (`None`: no one).
+    Pin {
+        #[serde(default)]
+        member: Option<String>,
+    },
+    /// Show one person alone to everyone (`None`: stop).
+    Spotlight {
+        #[serde(default)]
+        member: Option<String>,
+    },
+    /// Mute one person for the room, or unmute them.
+    Mute { member: String, on: bool },
+    /// Let one person's camera reach the room, or stop it.
+    MemberVideo { member: String, on: bool },
+    /// Put one person out of the room.
+    Remove { member: String },
+    /// End whoever's share is on.
+    StopShare,
+}
+
+/// `room <what> …` at the prompt.
+fn room_line(words: &[&str]) -> Result<Command, String> {
+    let usage = "room layout grid|speaker, room pin|spotlight <id>|off, \
+                 room mute|camera <id> on|off, room remove <id>, room stop-share";
+    let word = |i: usize| words.get(i).map(|w| w.to_string());
+    let call_at = |i: usize| -> Result<Option<u64>, String> {
+        words
+            .get(i)
+            .map(|w| w.parse().map_err(|_| format!("{w:?} is not a call id")))
+            .transpose()
+    };
+    let member_or_off = |i: usize| -> Result<Option<String>, String> {
+        let m = word(i).ok_or(usage)?;
+        Ok((!m.eq_ignore_ascii_case("off")).then_some(m))
+    };
+    let what = word(1).ok_or(usage)?.to_ascii_lowercase();
+    let (action, call) = match what.as_str() {
+        "layout" => (
+            RoomAction::Layout {
+                grid: match word(2).map(|w| w.to_ascii_lowercase()).as_deref() {
+                    Some("grid") => true,
+                    Some("speaker") => false,
+                    _ => return Err(usage.into()),
+                },
+            },
+            call_at(3)?,
+        ),
+        "pin" => (
+            RoomAction::Pin {
+                member: member_or_off(2)?,
+            },
+            call_at(3)?,
+        ),
+        "spotlight" => (
+            RoomAction::Spotlight {
+                member: member_or_off(2)?,
+            },
+            call_at(3)?,
+        ),
+        "mute" | "camera" => {
+            let member = word(2).ok_or(usage)?;
+            let on = on_off(words.get(3)).ok_or(usage)?;
+            let action = if what == "mute" {
+                RoomAction::Mute { member, on }
+            } else {
+                RoomAction::MemberVideo { member, on }
+            };
+            (action, call_at(4)?)
+        }
+        "remove" => (
+            RoomAction::Remove {
+                member: word(2).ok_or(usage)?,
+            },
+            call_at(3)?,
+        ),
+        "stop-share" => (RoomAction::StopShare, call_at(2)?),
+        _ => return Err(usage.into()),
+    };
+    Ok(Command::Room { call, action })
+}
+
 /// A microphone or a speaker.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -270,6 +378,9 @@ pub struct Response {
     /// What `import_contacts` did.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub imported: Option<Imported>,
+    /// The link `join_link` made.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub link: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub error: Option<String>,
 }
@@ -293,6 +404,7 @@ impl Response {
             call: None,
             state: None,
             imported: None,
+            link: None,
             error: None,
         }
     }
@@ -303,6 +415,7 @@ impl Response {
             call: None,
             state: None,
             imported: None,
+            link: None,
             error: Some(message.into()),
         }
     }
@@ -380,6 +493,24 @@ impl Command {
                     video,
                 }
             }
+            // `join 3000`, `join fcp://join/<token> video`.
+            "join" | "vjoin" => Command::Join {
+                target: need(words.get(1), "a room or a link")?,
+                video: verb.eq_ignore_ascii_case("vjoin")
+                    || words
+                        .get(2)
+                        .is_some_and(|w| w.eq_ignore_ascii_case("video")),
+            },
+            // `link 3000`, `link 3000 host`.
+            "link" | "join-link" => Command::JoinLink {
+                meeting: need(words.get(1), "a meeting")?,
+                host: words.get(2).is_some_and(|w| w.eq_ignore_ascii_case("host")),
+            },
+            // `room layout grid`, `room pin p2`, `room pin off`,
+            // `room spotlight p2`, `room mute p2 on`, `room camera p2 off`,
+            // `room remove p2`, `room stop-share`; a trailing call id names
+            // the call.
+            "room" => room_line(&words)?,
             // `video on`, `video off 3`.
             "video" => Command::Video {
                 on: on_off(words.get(1)).ok_or("video needs on or off")?,
@@ -697,6 +828,86 @@ fn rest(words: &[&str], from: usize) -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn rooms_are_joined_linked_and_hosted_from_the_prompt() {
+        let p = |l: &str| Command::parse_line(l).unwrap();
+        assert_eq!(
+            p("join 3000"),
+            Command::Join {
+                target: "3000".into(),
+                video: false
+            }
+        );
+        assert_eq!(
+            p("join fcp://join/abc video"),
+            Command::Join {
+                target: "fcp://join/abc".into(),
+                video: true
+            }
+        );
+        assert_eq!(
+            p("link 3000 host"),
+            Command::JoinLink {
+                meeting: "3000".into(),
+                host: true
+            }
+        );
+        assert_eq!(
+            p("room layout grid"),
+            Command::Room {
+                call: None,
+                action: RoomAction::Layout { grid: true }
+            }
+        );
+        assert_eq!(
+            p("room pin off 4"),
+            Command::Room {
+                call: Some(4),
+                action: RoomAction::Pin { member: None }
+            }
+        );
+        assert_eq!(
+            p("room mute p2 on"),
+            Command::Room {
+                call: None,
+                action: RoomAction::Mute {
+                    member: "p2".into(),
+                    on: true
+                }
+            }
+        );
+        assert_eq!(
+            p("room camera p2 off"),
+            Command::Room {
+                call: None,
+                action: RoomAction::MemberVideo {
+                    member: "p2".into(),
+                    on: false
+                }
+            }
+        );
+        assert_eq!(
+            p("room stop-share"),
+            Command::Room {
+                call: None,
+                action: RoomAction::StopShare
+            }
+        );
+        assert!(Command::parse_line("room mute p2").is_err());
+        assert!(Command::parse_line("room dance").is_err());
+        // As JSON on the control socket.
+        let json = r#"{"cmd":"room","action":{"action":"remove","member":"p3"}}"#;
+        assert_eq!(
+            serde_json::from_str::<Command>(json).unwrap(),
+            Command::Room {
+                call: None,
+                action: RoomAction::Remove {
+                    member: "p3".into()
+                }
+            }
+        );
+    }
 
     #[test]
     fn a_line_is_a_command() {

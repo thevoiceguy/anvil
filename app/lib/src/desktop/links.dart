@@ -1,6 +1,6 @@
 // What a start of the app asks for (Windows hands a second start's arguments
 // to the running app): a link to call — `tel:`, `sip:`, `sips:`, `callto:` —
-// and `--hidden` from start at login.
+// a room's join link (`fcp://join/…`), and `--hidden` from start at login.
 
 import 'shell.dart';
 
@@ -42,13 +42,29 @@ String? dialTarget(String link) {
   }
 }
 
+/// A join link for an FCP room (`fcp://join/<token>`), kept whole for the
+/// meetings sheet, or null when `link` is not one.
+String? joinLink(String link) {
+  final trimmed = link.trim();
+  if (!trimmed.toLowerCase().startsWith('fcp://join/')) return null;
+  final token = trimmed
+      .substring('fcp://join/'.length)
+      .split(RegExp('[?#]'))
+      .first;
+  return token.isEmpty || token.contains(RegExp(r'\s'))
+      ? null
+      : 'fcp://join/$token';
+}
+
 /// What a start's `args` ask of the app. The first start shows its window
 /// itself (unless hidden), so only its links count; a later one, handed
 /// on, also brings the window forward, unless it is start at login.
 List<ShellEvent> startEvents(List<String> args, {required bool handedOn}) {
   final dials = [
     for (final arg in args)
-      if (dialTarget(arg) case final target?)
+      if (joinLink(arg) case final link?)
+        ShellEvent(ShellAction.join, target: link)
+      else if (dialTarget(arg) case final target?)
         ShellEvent(ShellAction.dial, target: target),
   ];
   final show = handedOn && dials.isEmpty && !args.contains(hiddenArgument);

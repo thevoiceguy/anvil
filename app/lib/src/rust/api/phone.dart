@@ -136,6 +136,32 @@ Future<BigInt> placeCall({
   video: video,
 );
 
+/// Join an FCP room by its number or a join link, with video or not; the
+/// new call's id.
+Future<BigInt> joinRoom({required String target, required bool video}) =>
+    RustLib.instance.api.crateApiPhoneJoinRoom(target: target, video: video);
+
+/// A link to send for one of the user's meetings (by id or room number):
+/// a guest's, or a host's.
+Future<String> meetingLink({required String meeting, required bool host}) =>
+    RustLib.instance.api.crateApiPhoneMeetingLink(meeting: meeting, host: host);
+
+/// A host's control over the room `call` is in: `layout` (`on`, a grid;
+/// off, the speaker large), `pin` and `spotlight` (`member`, or none to
+/// stop), `mute` and `camera` (`member`, `on`), `remove` (`member`),
+/// `stop_share`.
+Future<void> roomControl({
+  BigInt? call,
+  required String action,
+  String? member,
+  required bool on_,
+}) => RustLib.instance.api.crateApiPhoneRoomControl(
+  call: call,
+  action: action,
+  member: member,
+  on_: on_,
+);
+
 /// Take appearance `index` of a shared line (by key): pick up the call
 /// held there, or join the one up where the line allows barging in; the
 /// new call's id.
@@ -488,6 +514,12 @@ class Call {
   /// The far end added video: ours stays off until turned on.
   final bool videoRequested;
 
+  /// The shared screen coming in (a room's), apart from the cameras.
+  final int? contentStream;
+
+  /// The room the call is in, when it joined one.
+  final Room? room;
+
   const Call({
     required this.id,
     required this.direction,
@@ -509,6 +541,8 @@ class Call {
     this.sending,
     required this.streams,
     required this.videoRequested,
+    this.contentStream,
+    this.room,
   });
 
   @override
@@ -532,7 +566,9 @@ class Call {
       camera.hashCode ^
       sending.hashCode ^
       streams.hashCode ^
-      videoRequested.hashCode;
+      videoRequested.hashCode ^
+      contentStream.hashCode ^
+      room.hashCode;
 
   @override
   bool operator ==(Object other) =>
@@ -558,7 +594,9 @@ class Call {
           camera == other.camera &&
           sending == other.sending &&
           streams == other.streams &&
-          videoRequested == other.videoRequested;
+          videoRequested == other.videoRequested &&
+          contentStream == other.contentStream &&
+          room == other.room;
 }
 
 /// Where a call is.
@@ -995,6 +1033,33 @@ class ManagedSettings {
           sources == other.sources;
 }
 
+/// A meeting the user owns on FCP.
+class Meeting {
+  final String id;
+
+  /// The number it is dialed at.
+  final String roomNumber;
+  final String name;
+
+  const Meeting({
+    required this.id,
+    required this.roomNumber,
+    required this.name,
+  });
+
+  @override
+  int get hashCode => id.hashCode ^ roomNumber.hashCode ^ name.hashCode;
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is Meeting &&
+          runtimeType == other.runtimeType &&
+          id == other.id &&
+          roomNumber == other.roomNumber &&
+          name == other.name;
+}
+
 /// The user's presence (FCP's `docs/PRESENCE.md`).
 class MyPresence {
   /// What others see: `available`, `away`, `busy`, `dnd`, `ringing`,
@@ -1142,7 +1207,7 @@ class PhoneChange {
   /// `registration`, `call`, `call_ended`, `message_waiting`, `dnd`,
   /// `brand`, `transfer_progress`, `lines`, `calling`, `recents`, `people`,
   /// `person`, `voicemail`, `audio`, `playing`, `push`, `may_record`, `capture`,
-  /// `contacts`.
+  /// `contacts`, `video`, `meetings`.
   final String kind;
 
   /// The call it is about, if any.
@@ -1250,6 +1315,9 @@ class PhoneState {
   final CaptureInfo capture;
   final VideoInfo video;
 
+  /// The meetings the user owns, signed in to FCP.
+  final List<Meeting> meetings;
+
   const PhoneState({
     required this.aor,
     required this.registration,
@@ -1287,6 +1355,7 @@ class PhoneState {
     required this.audioTestLevel,
     required this.capture,
     required this.video,
+    required this.meetings,
   });
 
   @override
@@ -1326,7 +1395,8 @@ class PhoneState {
       audioTest.hashCode ^
       audioTestLevel.hashCode ^
       capture.hashCode ^
-      video.hashCode;
+      video.hashCode ^
+      meetings.hashCode;
 
   @override
   bool operator ==(Object other) =>
@@ -1368,7 +1438,8 @@ class PhoneState {
           audioTest == other.audioTest &&
           audioTestLevel == other.audioTestLevel &&
           capture == other.capture &&
-          video == other.video;
+          video == other.video &&
+          meetings == other.meetings;
 }
 
 /// A connected call's media, as last measured.
@@ -1641,6 +1712,104 @@ class Ringtone {
           runtimeType == other.runtimeType &&
           id == other.id &&
           name == other.name;
+}
+
+/// The room a call is in (FCP's `docs/SOFTPHONE_VIDEO.md` §2.6).
+class Room {
+  /// The room's number.
+  final String number;
+
+  /// The user has a host's controls in it.
+  final bool host;
+  final List<RoomMember> members;
+
+  /// Who speaks, or last spoke, by id.
+  final String? speaker;
+
+  /// Who shares their screen, by name, while someone does.
+  final String? presenter;
+
+  /// Our own share was turned down or ended by the room: why.
+  final String? floorRefused;
+
+  const Room({
+    required this.number,
+    required this.host,
+    required this.members,
+    this.speaker,
+    this.presenter,
+    this.floorRefused,
+  });
+
+  @override
+  int get hashCode =>
+      number.hashCode ^
+      host.hashCode ^
+      members.hashCode ^
+      speaker.hashCode ^
+      presenter.hashCode ^
+      floorRefused.hashCode;
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is Room &&
+          runtimeType == other.runtimeType &&
+          number == other.number &&
+          host == other.host &&
+          members == other.members &&
+          speaker == other.speaker &&
+          presenter == other.presenter &&
+          floorRefused == other.floorRefused;
+}
+
+/// One person in a room.
+class RoomMember {
+  /// The room's id for them: what a host's controls name.
+  final String id;
+  final String name;
+  final bool host;
+
+  /// `sending`, `muted` or `held`.
+  final String audio;
+
+  /// Their camera as the room has it (`on`, `off`, `lost`, …).
+  final String? camera;
+  final bool speaking;
+  final bool presenting;
+
+  const RoomMember({
+    required this.id,
+    required this.name,
+    required this.host,
+    required this.audio,
+    this.camera,
+    required this.speaking,
+    required this.presenting,
+  });
+
+  @override
+  int get hashCode =>
+      id.hashCode ^
+      name.hashCode ^
+      host.hashCode ^
+      audio.hashCode ^
+      camera.hashCode ^
+      speaking.hashCode ^
+      presenting.hashCode;
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is RoomMember &&
+          runtimeType == other.runtimeType &&
+          id == other.id &&
+          name == other.name &&
+          host == other.host &&
+          audio == other.audio &&
+          camera == other.camera &&
+          speaking == other.speaking &&
+          presenting == other.presenting;
 }
 
 /// How a person signs in on a server (`POST /auth/discover`).

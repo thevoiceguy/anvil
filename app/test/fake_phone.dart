@@ -252,6 +252,60 @@ class FakePhone implements PhoneApi {
     return id;
   }
 
+  /// The link `meetingLink` answers with.
+  String link = 'fcp://join/token';
+
+  @override
+  Future<int> joinRoom(String target, {bool video = false}) async {
+    _refuse();
+    log.add('${video ? 'video join' : 'join'} $target');
+    final id = _next++;
+    final camera = video && state.video.available;
+    final number = target.startsWith('fcp://') ? '3000' : target;
+    final owner = state.meetings.any((m) => m.roomNumber == number);
+    set(
+      state.copyWith(
+        calls: [
+          ..._othersHeld(null),
+          PhoneCall(
+            id: id,
+            direction: Direction.outgoing,
+            remote: 'sip:$number@x',
+            displayName: number,
+            state: CallState.dialing,
+            camera: camera,
+            sending: camera ? 100 + id : null,
+            room: RoomInfo(number: number, host: owner),
+          ),
+        ],
+      ),
+      'call',
+      call: id,
+    );
+    return id;
+  }
+
+  @override
+  Future<String> meetingLink(String meeting, {bool host = false}) async {
+    _refuse();
+    log.add('link $meeting${host ? ' host' : ''}');
+    return link;
+  }
+
+  @override
+  Future<void> roomControl(
+    int call,
+    RoomControl control, {
+    String? member,
+    bool on = false,
+  }) async {
+    _refuse();
+    log.add(
+      'room $call ${control.name}${member == null ? '' : ' $member'}'
+      '${control == RoomControl.layout || control == RoomControl.mute || control == RoomControl.camera ? ' ${on ? 'on' : 'off'}' : ''}',
+    );
+  }
+
   @override
   Future<int> takeAppearance(String line, int index) async {
     _refuse();

@@ -176,6 +176,7 @@ pub(crate) async fn refresh_all(inner: &Inner, fcp: &FcpClient) {
         refresh_voicemail(inner, fcp),
         refresh_contacts(inner, fcp),
         refresh_presence(inner, fcp),
+        crate::room::refresh_meetings(inner, fcp),
     );
 }
 

@@ -39,7 +39,7 @@ flutter_rust_bridge::frb_generated_boilerplate!(
     default_rust_auto_opaque = RustAutoOpaqueMoi,
 );
 pub(crate) const FLUTTER_RUST_BRIDGE_CODEGEN_VERSION: &str = "2.13.0";
-pub(crate) const FLUTTER_RUST_BRIDGE_CODEGEN_CONTENT_HASH: i32 = -949355281;
+pub(crate) const FLUTTER_RUST_BRIDGE_CODEGEN_CONTENT_HASH: i32 = 2143332036;
 
 // Section: executor
 
@@ -1081,6 +1081,43 @@ fn wire__crate__api__update__install_update_impl(
         },
     )
 }
+fn wire__crate__api__phone__join_room_impl(
+    port_: flutter_rust_bridge::for_generated::MessagePort,
+    ptr_: flutter_rust_bridge::for_generated::PlatformGeneralizedUint8ListPtr,
+    rust_vec_len_: i32,
+    data_len_: i32,
+) {
+    FLUTTER_RUST_BRIDGE_HANDLER.wrap_async::<flutter_rust_bridge::for_generated::SseCodec, _, _, _>(
+        flutter_rust_bridge::for_generated::TaskInfo {
+            debug_name: "join_room",
+            port: Some(port_),
+            mode: flutter_rust_bridge::for_generated::FfiCallMode::Normal,
+        },
+        move || {
+            let message = unsafe {
+                flutter_rust_bridge::for_generated::Dart2RustMessageSse::from_wire(
+                    ptr_,
+                    rust_vec_len_,
+                    data_len_,
+                )
+            };
+            let mut deserializer =
+                flutter_rust_bridge::for_generated::SseDeserializer::new(message);
+            let api_target = <String>::sse_decode(&mut deserializer);
+            let api_video = <bool>::sse_decode(&mut deserializer);
+            deserializer.end();
+            move |context| async move {
+                transform_result_sse::<_, flutter_rust_bridge::for_generated::anyhow::Error>(
+                    (move || async move {
+                        let output_ok = crate::api::phone::join_room(api_target, api_video).await?;
+                        std::result::Result::Ok(output_ok)
+                    })()
+                    .await,
+                )
+            }
+        },
+    )
+}
 fn wire__crate__api__phone__last_sign_in_impl(
     port_: flutter_rust_bridge::for_generated::MessagePort,
     ptr_: flutter_rust_bridge::for_generated::PlatformGeneralizedUint8ListPtr,
@@ -1203,6 +1240,44 @@ fn wire__crate__api__phone__mark_heard_impl(
                 transform_result_sse::<_, flutter_rust_bridge::for_generated::anyhow::Error>(
                     (move || async move {
                         let output_ok = crate::api::phone::mark_heard(api_id).await?;
+                        std::result::Result::Ok(output_ok)
+                    })()
+                    .await,
+                )
+            }
+        },
+    )
+}
+fn wire__crate__api__phone__meeting_link_impl(
+    port_: flutter_rust_bridge::for_generated::MessagePort,
+    ptr_: flutter_rust_bridge::for_generated::PlatformGeneralizedUint8ListPtr,
+    rust_vec_len_: i32,
+    data_len_: i32,
+) {
+    FLUTTER_RUST_BRIDGE_HANDLER.wrap_async::<flutter_rust_bridge::for_generated::SseCodec, _, _, _>(
+        flutter_rust_bridge::for_generated::TaskInfo {
+            debug_name: "meeting_link",
+            port: Some(port_),
+            mode: flutter_rust_bridge::for_generated::FfiCallMode::Normal,
+        },
+        move || {
+            let message = unsafe {
+                flutter_rust_bridge::for_generated::Dart2RustMessageSse::from_wire(
+                    ptr_,
+                    rust_vec_len_,
+                    data_len_,
+                )
+            };
+            let mut deserializer =
+                flutter_rust_bridge::for_generated::SseDeserializer::new(message);
+            let api_meeting = <String>::sse_decode(&mut deserializer);
+            let api_host = <bool>::sse_decode(&mut deserializer);
+            deserializer.end();
+            move |context| async move {
+                transform_result_sse::<_, flutter_rust_bridge::for_generated::anyhow::Error>(
+                    (move || async move {
+                        let output_ok =
+                            crate::api::phone::meeting_link(api_meeting, api_host).await?;
                         std::result::Result::Ok(output_ok)
                     })()
                     .await,
@@ -1637,6 +1712,48 @@ fn wire__crate__api__phone__rename_line_impl(
                 transform_result_sse::<_, flutter_rust_bridge::for_generated::anyhow::Error>(
                     (move || async move {
                         let output_ok = crate::api::phone::rename_line(api_line, api_label).await?;
+                        std::result::Result::Ok(output_ok)
+                    })()
+                    .await,
+                )
+            }
+        },
+    )
+}
+fn wire__crate__api__phone__room_control_impl(
+    port_: flutter_rust_bridge::for_generated::MessagePort,
+    ptr_: flutter_rust_bridge::for_generated::PlatformGeneralizedUint8ListPtr,
+    rust_vec_len_: i32,
+    data_len_: i32,
+) {
+    FLUTTER_RUST_BRIDGE_HANDLER.wrap_async::<flutter_rust_bridge::for_generated::SseCodec, _, _, _>(
+        flutter_rust_bridge::for_generated::TaskInfo {
+            debug_name: "room_control",
+            port: Some(port_),
+            mode: flutter_rust_bridge::for_generated::FfiCallMode::Normal,
+        },
+        move || {
+            let message = unsafe {
+                flutter_rust_bridge::for_generated::Dart2RustMessageSse::from_wire(
+                    ptr_,
+                    rust_vec_len_,
+                    data_len_,
+                )
+            };
+            let mut deserializer =
+                flutter_rust_bridge::for_generated::SseDeserializer::new(message);
+            let api_call = <Option<u64>>::sse_decode(&mut deserializer);
+            let api_action = <String>::sse_decode(&mut deserializer);
+            let api_member = <Option<String>>::sse_decode(&mut deserializer);
+            let api_on = <bool>::sse_decode(&mut deserializer);
+            deserializer.end();
+            move |context| async move {
+                transform_result_sse::<_, flutter_rust_bridge::for_generated::anyhow::Error>(
+                    (move || async move {
+                        let output_ok = crate::api::phone::room_control(
+                            api_call, api_action, api_member, api_on,
+                        )
+                        .await?;
                         std::result::Result::Ok(output_ok)
                     })()
                     .await,
@@ -2995,6 +3112,8 @@ impl SseDecode for crate::api::phone::Call {
         let mut var_sending = <Option<u32>>::sse_decode(deserializer);
         let mut var_streams = <Vec<u32>>::sse_decode(deserializer);
         let mut var_videoRequested = <bool>::sse_decode(deserializer);
+        let mut var_contentStream = <Option<u32>>::sse_decode(deserializer);
+        let mut var_room = <Option<crate::api::phone::Room>>::sse_decode(deserializer);
         return crate::api::phone::Call {
             id: var_id,
             direction: var_direction,
@@ -3016,6 +3135,8 @@ impl SseDecode for crate::api::phone::Call {
             sending: var_sending,
             streams: var_streams,
             video_requested: var_videoRequested,
+            content_stream: var_contentStream,
+            room: var_room,
         };
     }
 }
@@ -3313,6 +3434,18 @@ impl SseDecode for Vec<crate::api::phone::Line> {
     }
 }
 
+impl SseDecode for Vec<crate::api::phone::Meeting> {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
+        let mut len_ = <i32>::sse_decode(deserializer);
+        let mut ans_ = Vec::with_capacity(len_ as usize);
+        for idx_ in 0..len_ {
+            ans_.push(<crate::api::phone::Meeting>::sse_decode(deserializer));
+        }
+        return ans_;
+    }
+}
+
 impl SseDecode for Vec<crate::api::phone::OwnStatus> {
     // Codec=Sse (Serialization based), see doc to use other codecs
     fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
@@ -3385,6 +3518,18 @@ impl SseDecode for Vec<crate::api::phone::Ringtone> {
     }
 }
 
+impl SseDecode for Vec<crate::api::phone::RoomMember> {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
+        let mut len_ = <i32>::sse_decode(deserializer);
+        let mut ans_ = Vec::with_capacity(len_ as usize);
+        for idx_ in 0..len_ {
+            ans_.push(<crate::api::phone::RoomMember>::sse_decode(deserializer));
+        }
+        return ans_;
+    }
+}
+
 impl SseDecode for Vec<crate::api::phone::TrayIcon> {
     // Codec=Sse (Serialization based), see doc to use other codecs
     fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
@@ -3437,6 +3582,20 @@ impl SseDecode for crate::api::phone::ManagedSettings {
             brand_icon: var_brandIcon,
             brand_icon_path: var_brandIconPath,
             sources: var_sources,
+        };
+    }
+}
+
+impl SseDecode for crate::api::phone::Meeting {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
+        let mut var_id = <String>::sse_decode(deserializer);
+        let mut var_roomNumber = <String>::sse_decode(deserializer);
+        let mut var_name = <String>::sse_decode(deserializer);
+        return crate::api::phone::Meeting {
+            id: var_id,
+            room_number: var_roomNumber,
+            name: var_name,
         };
     }
 }
@@ -3551,6 +3710,17 @@ impl SseDecode for Option<crate::api::phone::RememberedSignIn> {
             return Some(<crate::api::phone::RememberedSignIn>::sse_decode(
                 deserializer,
             ));
+        } else {
+            return None;
+        }
+    }
+}
+
+impl SseDecode for Option<crate::api::phone::Room> {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
+        if (<bool>::sse_decode(deserializer)) {
+            return Some(<crate::api::phone::Room>::sse_decode(deserializer));
         } else {
             return None;
         }
@@ -3741,6 +3911,7 @@ impl SseDecode for crate::api::phone::PhoneState {
         let mut var_audioTestLevel = <u8>::sse_decode(deserializer);
         let mut var_capture = <crate::api::phone::CaptureInfo>::sse_decode(deserializer);
         let mut var_video = <crate::api::phone::VideoInfo>::sse_decode(deserializer);
+        let mut var_meetings = <Vec<crate::api::phone::Meeting>>::sse_decode(deserializer);
         return crate::api::phone::PhoneState {
             aor: var_aor,
             registration: var_registration,
@@ -3778,6 +3949,7 @@ impl SseDecode for crate::api::phone::PhoneState {
             audio_test_level: var_audioTestLevel,
             capture: var_capture,
             video: var_video,
+            meetings: var_meetings,
         };
     }
 }
@@ -3914,6 +4086,48 @@ impl SseDecode for crate::api::phone::Ringtone {
         return crate::api::phone::Ringtone {
             id: var_id,
             name: var_name,
+        };
+    }
+}
+
+impl SseDecode for crate::api::phone::Room {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
+        let mut var_number = <String>::sse_decode(deserializer);
+        let mut var_host = <bool>::sse_decode(deserializer);
+        let mut var_members = <Vec<crate::api::phone::RoomMember>>::sse_decode(deserializer);
+        let mut var_speaker = <Option<String>>::sse_decode(deserializer);
+        let mut var_presenter = <Option<String>>::sse_decode(deserializer);
+        let mut var_floorRefused = <Option<String>>::sse_decode(deserializer);
+        return crate::api::phone::Room {
+            number: var_number,
+            host: var_host,
+            members: var_members,
+            speaker: var_speaker,
+            presenter: var_presenter,
+            floor_refused: var_floorRefused,
+        };
+    }
+}
+
+impl SseDecode for crate::api::phone::RoomMember {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
+        let mut var_id = <String>::sse_decode(deserializer);
+        let mut var_name = <String>::sse_decode(deserializer);
+        let mut var_host = <bool>::sse_decode(deserializer);
+        let mut var_audio = <String>::sse_decode(deserializer);
+        let mut var_camera = <Option<String>>::sse_decode(deserializer);
+        let mut var_speaking = <bool>::sse_decode(deserializer);
+        let mut var_presenting = <bool>::sse_decode(deserializer);
+        return crate::api::phone::RoomMember {
+            id: var_id,
+            name: var_name,
+            host: var_host,
+            audio: var_audio,
+            camera: var_camera,
+            speaking: var_speaking,
+            presenting: var_presenting,
         };
     }
 }
@@ -4129,53 +4343,56 @@ fn pde_ffi_dispatcher_primary_impl(
         27 => wire__crate__api__phone__import_contacts_impl(port, ptr, rust_vec_len, data_len),
         28 => wire__crate__api__phone__init_app_impl(port, ptr, rust_vec_len, data_len),
         29 => wire__crate__api__update__install_update_impl(port, ptr, rust_vec_len, data_len),
-        30 => wire__crate__api__phone__last_sign_in_impl(port, ptr, rust_vec_len, data_len),
-        33 => wire__crate__api__phone__mark_heard_impl(port, ptr, rust_vec_len, data_len),
-        34 => wire__crate__api__phone__mute_impl(port, ptr, rust_vec_len, data_len),
-        35 => wire__crate__api__phone__order_statuses_impl(port, ptr, rust_vec_len, data_len),
-        36 => wire__crate__api__phone__park_impl(port, ptr, rust_vec_len, data_len),
-        37 => wire__crate__api__phone__phone_changes_impl(port, ptr, rust_vec_len, data_len),
-        39 => wire__crate__api__phone__place_call_impl(port, ptr, rust_vec_len, data_len),
-        40 => wire__crate__api__phone__play_voicemail_impl(port, ptr, rust_vec_len, data_len),
-        41 => wire__crate__api__phone__record_impl(port, ptr, rust_vec_len, data_len),
-        42 => wire__crate__api__phone__refresh_impl(port, ptr, rust_vec_len, data_len),
-        43 => wire__crate__api__phone__remove_ringtone_impl(port, ptr, rust_vec_len, data_len),
-        44 => wire__crate__api__phone__remove_status_impl(port, ptr, rust_vec_len, data_len),
-        45 => wire__crate__api__phone__rename_line_impl(port, ptr, rust_vec_len, data_len),
-        46 => wire__crate__api__phone__save_contact_impl(port, ptr, rust_vec_len, data_len),
-        47 => wire__crate__api__phone__saved_account_impl(port, ptr, rust_vec_len, data_len),
-        48 => wire__crate__api__phone__send_digits_impl(port, ptr, rust_vec_len, data_len),
-        49 => wire__crate__api__phone__set_audio_processing_impl(port, ptr, rust_vec_len, data_len),
-        50 => wire__crate__api__phone__set_audio_volume_impl(port, ptr, rust_vec_len, data_len),
-        51 => wire__crate__api__video__set_background_impl(port, ptr, rust_vec_len, data_len),
-        52 => wire__crate__api__phone__set_calling_impl(port, ptr, rust_vec_len, data_len),
-        53 => wire__crate__api__phone__set_capture_impl(port, ptr, rust_vec_len, data_len),
-        54 => wire__crate__api__phone__set_directory_listed_impl(port, ptr, rust_vec_len, data_len),
-        55 => wire__crate__api__phone__set_dnd_impl(port, ptr, rust_vec_len, data_len),
-        56 => wire__crate__api__video__set_network_impl(port, ptr, rust_vec_len, data_len),
-        57 => wire__crate__api__phone__set_presence_impl(port, ptr, rust_vec_len, data_len),
-        58 => wire__crate__api__phone__set_presence_idle_impl(port, ptr, rust_vec_len, data_len),
-        59 => wire__crate__api__phone__set_presence_note_impl(port, ptr, rust_vec_len, data_len),
-        60 => wire__crate__api__video__set_video_impl(port, ptr, rust_vec_len, data_len),
-        61 => wire__crate__api__video__set_wifi_only_impl(port, ptr, rust_vec_len, data_len),
-        62 => wire__crate__api__phone__sign_in_impl(port, ptr, rust_vec_len, data_len),
-        63 => wire__crate__api__phone__sign_in_methods_impl(port, ptr, rust_vec_len, data_len),
-        64 => wire__crate__api__phone__sign_in_with_code_impl(port, ptr, rust_vec_len, data_len),
-        65 => wire__crate__api__phone__sign_out_impl(port, ptr, rust_vec_len, data_len),
-        66 => {
+        30 => wire__crate__api__phone__join_room_impl(port, ptr, rust_vec_len, data_len),
+        31 => wire__crate__api__phone__last_sign_in_impl(port, ptr, rust_vec_len, data_len),
+        34 => wire__crate__api__phone__mark_heard_impl(port, ptr, rust_vec_len, data_len),
+        35 => wire__crate__api__phone__meeting_link_impl(port, ptr, rust_vec_len, data_len),
+        36 => wire__crate__api__phone__mute_impl(port, ptr, rust_vec_len, data_len),
+        37 => wire__crate__api__phone__order_statuses_impl(port, ptr, rust_vec_len, data_len),
+        38 => wire__crate__api__phone__park_impl(port, ptr, rust_vec_len, data_len),
+        39 => wire__crate__api__phone__phone_changes_impl(port, ptr, rust_vec_len, data_len),
+        41 => wire__crate__api__phone__place_call_impl(port, ptr, rust_vec_len, data_len),
+        42 => wire__crate__api__phone__play_voicemail_impl(port, ptr, rust_vec_len, data_len),
+        43 => wire__crate__api__phone__record_impl(port, ptr, rust_vec_len, data_len),
+        44 => wire__crate__api__phone__refresh_impl(port, ptr, rust_vec_len, data_len),
+        45 => wire__crate__api__phone__remove_ringtone_impl(port, ptr, rust_vec_len, data_len),
+        46 => wire__crate__api__phone__remove_status_impl(port, ptr, rust_vec_len, data_len),
+        47 => wire__crate__api__phone__rename_line_impl(port, ptr, rust_vec_len, data_len),
+        48 => wire__crate__api__phone__room_control_impl(port, ptr, rust_vec_len, data_len),
+        49 => wire__crate__api__phone__save_contact_impl(port, ptr, rust_vec_len, data_len),
+        50 => wire__crate__api__phone__saved_account_impl(port, ptr, rust_vec_len, data_len),
+        51 => wire__crate__api__phone__send_digits_impl(port, ptr, rust_vec_len, data_len),
+        52 => wire__crate__api__phone__set_audio_processing_impl(port, ptr, rust_vec_len, data_len),
+        53 => wire__crate__api__phone__set_audio_volume_impl(port, ptr, rust_vec_len, data_len),
+        54 => wire__crate__api__video__set_background_impl(port, ptr, rust_vec_len, data_len),
+        55 => wire__crate__api__phone__set_calling_impl(port, ptr, rust_vec_len, data_len),
+        56 => wire__crate__api__phone__set_capture_impl(port, ptr, rust_vec_len, data_len),
+        57 => wire__crate__api__phone__set_directory_listed_impl(port, ptr, rust_vec_len, data_len),
+        58 => wire__crate__api__phone__set_dnd_impl(port, ptr, rust_vec_len, data_len),
+        59 => wire__crate__api__video__set_network_impl(port, ptr, rust_vec_len, data_len),
+        60 => wire__crate__api__phone__set_presence_impl(port, ptr, rust_vec_len, data_len),
+        61 => wire__crate__api__phone__set_presence_idle_impl(port, ptr, rust_vec_len, data_len),
+        62 => wire__crate__api__phone__set_presence_note_impl(port, ptr, rust_vec_len, data_len),
+        63 => wire__crate__api__video__set_video_impl(port, ptr, rust_vec_len, data_len),
+        64 => wire__crate__api__video__set_wifi_only_impl(port, ptr, rust_vec_len, data_len),
+        65 => wire__crate__api__phone__sign_in_impl(port, ptr, rust_vec_len, data_len),
+        66 => wire__crate__api__phone__sign_in_methods_impl(port, ptr, rust_vec_len, data_len),
+        67 => wire__crate__api__phone__sign_in_with_code_impl(port, ptr, rust_vec_len, data_len),
+        68 => wire__crate__api__phone__sign_out_impl(port, ptr, rust_vec_len, data_len),
+        69 => {
             wire__crate__api__phone__start_browser_sign_in_impl(port, ptr, rust_vec_len, data_len)
         }
-        68 => wire__crate__api__phone__start_phone_impl(port, ptr, rust_vec_len, data_len),
-        69 => wire__crate__api__phone__stop_audio_test_impl(port, ptr, rust_vec_len, data_len),
-        70 => wire__crate__api__phone__stop_phone_impl(port, ptr, rust_vec_len, data_len),
-        71 => wire__crate__api__phone__stop_playing_impl(port, ptr, rust_vec_len, data_len),
-        72 => wire__crate__api__phone__system_audio_impl(port, ptr, rust_vec_len, data_len),
-        73 => wire__crate__api__phone__system_brand_impl(port, ptr, rust_vec_len, data_len),
-        74 => wire__crate__api__phone__take_appearance_impl(port, ptr, rust_vec_len, data_len),
-        75 => wire__crate__api__phone__test_microphone_impl(port, ptr, rust_vec_len, data_len),
-        76 => wire__crate__api__phone__test_speaker_impl(port, ptr, rust_vec_len, data_len),
-        78 => wire__crate__api__phone__transfer_impl(port, ptr, rust_vec_len, data_len),
-        79 => wire__crate__api__phone__transfer_attended_impl(port, ptr, rust_vec_len, data_len),
+        71 => wire__crate__api__phone__start_phone_impl(port, ptr, rust_vec_len, data_len),
+        72 => wire__crate__api__phone__stop_audio_test_impl(port, ptr, rust_vec_len, data_len),
+        73 => wire__crate__api__phone__stop_phone_impl(port, ptr, rust_vec_len, data_len),
+        74 => wire__crate__api__phone__stop_playing_impl(port, ptr, rust_vec_len, data_len),
+        75 => wire__crate__api__phone__system_audio_impl(port, ptr, rust_vec_len, data_len),
+        76 => wire__crate__api__phone__system_brand_impl(port, ptr, rust_vec_len, data_len),
+        77 => wire__crate__api__phone__take_appearance_impl(port, ptr, rust_vec_len, data_len),
+        78 => wire__crate__api__phone__test_microphone_impl(port, ptr, rust_vec_len, data_len),
+        79 => wire__crate__api__phone__test_speaker_impl(port, ptr, rust_vec_len, data_len),
+        81 => wire__crate__api__phone__transfer_impl(port, ptr, rust_vec_len, data_len),
+        82 => wire__crate__api__phone__transfer_attended_impl(port, ptr, rust_vec_len, data_len),
         _ => unreachable!(),
     }
 }
@@ -4191,11 +4408,11 @@ fn pde_ffi_dispatcher_sync_impl(
         5 => wire__crate__api__update__app_version_impl(ptr, rust_vec_len, data_len),
         6 => wire__crate__api__video__attach_tile_impl(ptr, rust_vec_len, data_len),
         18 => wire__crate__api__video__detach_tile_impl(ptr, rust_vec_len, data_len),
-        31 => wire__crate__api__phone__log_path_impl(ptr, rust_vec_len, data_len),
-        32 => wire__crate__api__phone__managed_settings_impl(ptr, rust_vec_len, data_len),
-        38 => wire__crate__api__phone__phone_state_impl(ptr, rust_vec_len, data_len),
-        67 => wire__crate__api__phone__start_log_impl(ptr, rust_vec_len, data_len),
-        77 => wire__crate__api__video__tile_info_impl(ptr, rust_vec_len, data_len),
+        32 => wire__crate__api__phone__log_path_impl(ptr, rust_vec_len, data_len),
+        33 => wire__crate__api__phone__managed_settings_impl(ptr, rust_vec_len, data_len),
+        40 => wire__crate__api__phone__phone_state_impl(ptr, rust_vec_len, data_len),
+        70 => wire__crate__api__phone__start_log_impl(ptr, rust_vec_len, data_len),
+        80 => wire__crate__api__video__tile_info_impl(ptr, rust_vec_len, data_len),
         _ => unreachable!(),
     }
 }
@@ -4284,6 +4501,8 @@ impl flutter_rust_bridge::IntoDart for crate::api::phone::Call {
             self.sending.into_into_dart().into_dart(),
             self.streams.into_into_dart().into_dart(),
             self.video_requested.into_into_dart().into_dart(),
+            self.content_stream.into_into_dart().into_dart(),
+            self.room.into_into_dart().into_dart(),
         ]
         .into_dart()
     }
@@ -4547,6 +4766,23 @@ impl flutter_rust_bridge::IntoIntoDart<crate::api::phone::ManagedSettings>
     }
 }
 // Codec=Dco (DartCObject based), see doc to use other codecs
+impl flutter_rust_bridge::IntoDart for crate::api::phone::Meeting {
+    fn into_dart(self) -> flutter_rust_bridge::for_generated::DartAbi {
+        [
+            self.id.into_into_dart().into_dart(),
+            self.room_number.into_into_dart().into_dart(),
+            self.name.into_into_dart().into_dart(),
+        ]
+        .into_dart()
+    }
+}
+impl flutter_rust_bridge::for_generated::IntoDartExceptPrimitive for crate::api::phone::Meeting {}
+impl flutter_rust_bridge::IntoIntoDart<crate::api::phone::Meeting> for crate::api::phone::Meeting {
+    fn into_into_dart(self) -> crate::api::phone::Meeting {
+        self
+    }
+}
+// Codec=Dco (DartCObject based), see doc to use other codecs
 impl flutter_rust_bridge::IntoDart for crate::api::phone::MyPresence {
     fn into_dart(self) -> flutter_rust_bridge::for_generated::DartAbi {
         [
@@ -4677,6 +4913,7 @@ impl flutter_rust_bridge::IntoDart for crate::api::phone::PhoneState {
             self.audio_test_level.into_into_dart().into_dart(),
             self.capture.into_into_dart().into_dart(),
             self.video.into_into_dart().into_dart(),
+            self.meetings.into_into_dart().into_dart(),
         ]
         .into_dart()
     }
@@ -4817,6 +5054,49 @@ impl flutter_rust_bridge::IntoIntoDart<crate::api::phone::Ringtone>
     for crate::api::phone::Ringtone
 {
     fn into_into_dart(self) -> crate::api::phone::Ringtone {
+        self
+    }
+}
+// Codec=Dco (DartCObject based), see doc to use other codecs
+impl flutter_rust_bridge::IntoDart for crate::api::phone::Room {
+    fn into_dart(self) -> flutter_rust_bridge::for_generated::DartAbi {
+        [
+            self.number.into_into_dart().into_dart(),
+            self.host.into_into_dart().into_dart(),
+            self.members.into_into_dart().into_dart(),
+            self.speaker.into_into_dart().into_dart(),
+            self.presenter.into_into_dart().into_dart(),
+            self.floor_refused.into_into_dart().into_dart(),
+        ]
+        .into_dart()
+    }
+}
+impl flutter_rust_bridge::for_generated::IntoDartExceptPrimitive for crate::api::phone::Room {}
+impl flutter_rust_bridge::IntoIntoDart<crate::api::phone::Room> for crate::api::phone::Room {
+    fn into_into_dart(self) -> crate::api::phone::Room {
+        self
+    }
+}
+// Codec=Dco (DartCObject based), see doc to use other codecs
+impl flutter_rust_bridge::IntoDart for crate::api::phone::RoomMember {
+    fn into_dart(self) -> flutter_rust_bridge::for_generated::DartAbi {
+        [
+            self.id.into_into_dart().into_dart(),
+            self.name.into_into_dart().into_dart(),
+            self.host.into_into_dart().into_dart(),
+            self.audio.into_into_dart().into_dart(),
+            self.camera.into_into_dart().into_dart(),
+            self.speaking.into_into_dart().into_dart(),
+            self.presenting.into_into_dart().into_dart(),
+        ]
+        .into_dart()
+    }
+}
+impl flutter_rust_bridge::for_generated::IntoDartExceptPrimitive for crate::api::phone::RoomMember {}
+impl flutter_rust_bridge::IntoIntoDart<crate::api::phone::RoomMember>
+    for crate::api::phone::RoomMember
+{
+    fn into_into_dart(self) -> crate::api::phone::RoomMember {
         self
     }
 }
@@ -5072,6 +5352,8 @@ impl SseEncode for crate::api::phone::Call {
         <Option<u32>>::sse_encode(self.sending, serializer);
         <Vec<u32>>::sse_encode(self.streams, serializer);
         <bool>::sse_encode(self.video_requested, serializer);
+        <Option<u32>>::sse_encode(self.content_stream, serializer);
+        <Option<crate::api::phone::Room>>::sse_encode(self.room, serializer);
     }
 }
 
@@ -5297,6 +5579,16 @@ impl SseEncode for Vec<crate::api::phone::Line> {
     }
 }
 
+impl SseEncode for Vec<crate::api::phone::Meeting> {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
+        <i32>::sse_encode(self.len() as _, serializer);
+        for item in self {
+            <crate::api::phone::Meeting>::sse_encode(item, serializer);
+        }
+    }
+}
+
 impl SseEncode for Vec<crate::api::phone::OwnStatus> {
     // Codec=Sse (Serialization based), see doc to use other codecs
     fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
@@ -5357,6 +5649,16 @@ impl SseEncode for Vec<crate::api::phone::Ringtone> {
     }
 }
 
+impl SseEncode for Vec<crate::api::phone::RoomMember> {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
+        <i32>::sse_encode(self.len() as _, serializer);
+        for item in self {
+            <crate::api::phone::RoomMember>::sse_encode(item, serializer);
+        }
+    }
+}
+
 impl SseEncode for Vec<crate::api::phone::TrayIcon> {
     // Codec=Sse (Serialization based), see doc to use other codecs
     fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
@@ -5392,6 +5694,15 @@ impl SseEncode for crate::api::phone::ManagedSettings {
         <Option<Vec<u8>>>::sse_encode(self.brand_icon, serializer);
         <Option<String>>::sse_encode(self.brand_icon_path, serializer);
         <Vec<String>>::sse_encode(self.sources, serializer);
+    }
+}
+
+impl SseEncode for crate::api::phone::Meeting {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
+        <String>::sse_encode(self.id, serializer);
+        <String>::sse_encode(self.room_number, serializer);
+        <String>::sse_encode(self.name, serializer);
     }
 }
 
@@ -5485,6 +5796,16 @@ impl SseEncode for Option<crate::api::phone::RememberedSignIn> {
         <bool>::sse_encode(self.is_some(), serializer);
         if let Some(value) = self {
             <crate::api::phone::RememberedSignIn>::sse_encode(value, serializer);
+        }
+    }
+}
+
+impl SseEncode for Option<crate::api::phone::Room> {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
+        <bool>::sse_encode(self.is_some(), serializer);
+        if let Some(value) = self {
+            <crate::api::phone::Room>::sse_encode(value, serializer);
         }
     }
 }
@@ -5642,6 +5963,7 @@ impl SseEncode for crate::api::phone::PhoneState {
         <u8>::sse_encode(self.audio_test_level, serializer);
         <crate::api::phone::CaptureInfo>::sse_encode(self.capture, serializer);
         <crate::api::phone::VideoInfo>::sse_encode(self.video, serializer);
+        <Vec<crate::api::phone::Meeting>>::sse_encode(self.meetings, serializer);
     }
 }
 
@@ -5729,6 +6051,31 @@ impl SseEncode for crate::api::phone::Ringtone {
     fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
         <String>::sse_encode(self.id, serializer);
         <String>::sse_encode(self.name, serializer);
+    }
+}
+
+impl SseEncode for crate::api::phone::Room {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
+        <String>::sse_encode(self.number, serializer);
+        <bool>::sse_encode(self.host, serializer);
+        <Vec<crate::api::phone::RoomMember>>::sse_encode(self.members, serializer);
+        <Option<String>>::sse_encode(self.speaker, serializer);
+        <Option<String>>::sse_encode(self.presenter, serializer);
+        <Option<String>>::sse_encode(self.floor_refused, serializer);
+    }
+}
+
+impl SseEncode for crate::api::phone::RoomMember {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
+        <String>::sse_encode(self.id, serializer);
+        <String>::sse_encode(self.name, serializer);
+        <bool>::sse_encode(self.host, serializer);
+        <String>::sse_encode(self.audio, serializer);
+        <Option<String>>::sse_encode(self.camera, serializer);
+        <bool>::sse_encode(self.speaking, serializer);
+        <bool>::sse_encode(self.presenting, serializer);
     }
 }
 
