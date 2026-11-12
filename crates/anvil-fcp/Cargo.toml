@@ -38,5 +38,8 @@ tokio-tungstenite = { version = "0.24", default-features = false, features = ["r
 
 [dev-dependencies]
 tokio = { workspace = true, features = ["test-util"] }
+# Real VP8 from a pattern camera and screen: FCP's room decodes a shared
+# screen, which a synthetic host's frames are not.
+anvil-video = { workspace = true }
 async-trait = { workspace = true }
 tracing-subscriber = { workspace = true }

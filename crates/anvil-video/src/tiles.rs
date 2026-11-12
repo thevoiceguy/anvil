@@ -18,6 +18,8 @@ pub enum TileKey {
     Stream(StreamId),
     /// Our camera, as it is captured.
     SelfView,
+    /// Our shared screen, as it is captured.
+    ShareView,
 }
 
 /// Something that puts pictures on a screen. Called on the host's

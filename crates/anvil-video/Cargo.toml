@@ -26,8 +26,10 @@ reqwest = { version = "0.12", default-features = false, features = ["rustls-tls-
 sha2    = "0.10"
 
 # Linux: V4L2 cameras, VP8 through libvpx (BSD, no royalties), its
-# bindings made by build.rs from the installed headers.
+# bindings made by build.rs from the installed headers; screens from the
+# X server through x11rb (the protocol in Rust: no library to install).
 [target.'cfg(target_os = "linux")'.dependencies]
+x11rb = { version = "0.14", default-features = false, features = ["randr"] }
 v4l            = "0.14"
 zune-jpeg      = "0.5"
 
