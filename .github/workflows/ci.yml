@@ -49,7 +49,7 @@ jobs:
           echo "ANVIL_OPENH264_DIR=$RUNNER_TEMP/openh264" >> "$GITHUB_ENV"
       - uses: Swatinem/rust-cache@v2
       # A 24-bit screen: the default 8-bit one is not shareable.
-      - run: xvfb-run -a -s "-screen 0 1600x900x24" cargo test --workspace
+      - run: xvfb-run -a -s "-screen 0 1600x900x24 -noreset" cargo test --workspace
 
   # The workspace on Windows (MSVC): its lints (the Windows-only code —
   # the pipe, DPAPI — is linted nowhere else), it builds, and its tests
