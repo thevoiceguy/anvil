@@ -30,6 +30,8 @@ mod aimage;
 pub mod avf;
 pub mod camera;
 pub mod codec;
+#[cfg(windows)]
+pub mod dxgi;
 mod h264;
 #[cfg(target_os = "android")]
 mod mc;
@@ -42,6 +44,8 @@ pub mod ndkcam;
 pub mod openh264_fetch;
 pub mod picture;
 pub mod png;
+#[cfg(target_os = "macos")]
+pub mod sck;
 pub mod screen;
 mod sink;
 mod source;
@@ -52,6 +56,8 @@ pub mod v4l2;
 mod vpx;
 #[cfg(target_vendor = "apple")]
 mod vt;
+#[cfg(target_os = "linux")]
+pub mod wayland;
 #[cfg(target_os = "linux")]
 pub mod x11;
 
@@ -211,12 +217,22 @@ pub fn platform_cameras() -> Box<dyn Cameras> {
     cameras
 }
 
-/// The platform's screens: the X server's monitors on Linux (none under
-/// Wayland without XWayland, nor without a display).
+/// The platform's screens: on Linux, the desktop portal's under Wayland
+/// (the user chooses in the desktop's dialog), else the X server's
+/// monitors (none without a display); a Mac's displays through
+/// ScreenCaptureKit; a PC's through DXGI's Desktop Duplication.
 pub fn platform_screens() -> Box<dyn Screens> {
     #[cfg(target_os = "linux")]
-    let screens: Box<dyn Screens> = Box::new(x11::X11Screens);
-    #[cfg(not(target_os = "linux"))]
+    let screens: Box<dyn Screens> = if wayland::is_wayland() {
+        Box::new(wayland::PortalScreens)
+    } else {
+        Box::new(x11::X11Screens)
+    };
+    #[cfg(target_os = "macos")]
+    let screens: Box<dyn Screens> = Box::new(sck::SckScreens);
+    #[cfg(windows)]
+    let screens: Box<dyn Screens> = Box::new(dxgi::DxgiScreens);
+    #[cfg(not(any(target_os = "linux", target_os = "macos", windows)))]
     let screens: Box<dyn Screens> = Box::new(NoScreens);
     screens
 }

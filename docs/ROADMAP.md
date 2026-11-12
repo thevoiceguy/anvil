@@ -276,10 +276,27 @@ every recommendation:
               shares the pattern; CI's tests under Xvfb; the share
               against FCP (granted, released on the stop's re-INVITE,
               granted again)
-        - [ ] **A4c2b** Wayland: the desktop portal's ScreenCast over
-              PipeWire
-        - [ ] **A4c2c** macOS: ScreenCaptureKit
-        - [ ] **A4c2d** Windows: Desktop Duplication
+        - [x] **A4c2b** Wayland: the desktop portal's ScreenCast (ashpd;
+              the user picks a screen or window in the desktop's dialog, the
+              choice kept for the run) and its PipeWire stream (pipewire-rs,
+              linked: the .deb depends on libpipewire), packed RGB in mapped
+              buffers sized for the frame, the end seen as the node's
+              removal; proved against a PipeWire daemon in CI (the portal
+              itself by hand on a Wayland desktop)
+        - [x] **A4c2c** macOS: ScreenCaptureKit — displays listed by
+              CoreGraphics without asking, the user asked to allow
+              recording at the first share, an `SCStream` per share
+              (BGRA, within the size asked, the cursor shown), the last
+              picture repeated while the screen is still, the share ended
+              when the system stops it; weakly linked (the app runs on
+              12.0, ScreenCaptureKit came with 12.3)
+        - [x] **A4c2d** Windows: DXGI's Desktop Duplication — each display
+              on the desktop (the primary first) duplicated on a Direct3D
+              11 device of its adapter, on the source's thread; a changed
+              frame copied to a readable texture as BGRA, the last one
+              repeated while the display is still or the secure desktop is
+              up; made again when access is lost (a mode change). The
+              pointer is not drawn
       - [x] **A4c3** The app: a Share button in the room's panel and the
             screen's choice where there are several (`share`, `screen`
             commands; `RoomView.sharing`, `VideoState.screens`); a refusal

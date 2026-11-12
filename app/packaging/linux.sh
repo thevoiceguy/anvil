@@ -35,7 +35,7 @@ Homepage: https://github.com/thevoiceguy/anvil
 Section: net
 Priority: optional
 Installed-Size: $(du -sk "$root/opt" | cut -f1)
-Depends: libgtk-3-0t64 | libgtk-3-0, libasound2t64 | libasound2, libayatana-appindicator3-1
+Depends: libgtk-3-0t64 | libgtk-3-0, libasound2t64 | libasound2, libayatana-appindicator3-1, libpipewire-0.3-0t64 | libpipewire-0.3-0
 Description: Anvil, the softphone for FCP
  Calls, transfer, voicemail, presence and the directory from an FCP account,
  on the desktop.
