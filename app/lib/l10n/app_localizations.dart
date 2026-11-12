@@ -381,6 +381,12 @@ abstract class Strings {
   /// **'Anvil may not use the camera, so callers won\'t see you. Allow it in the system\'s settings for Anvil.'**
   String get cameraRefused;
 
+  /// No description provided for @screenRefused.
+  ///
+  /// In en, this message translates to:
+  /// **'Your screen was not shared: Anvil was not allowed to capture it.'**
+  String get screenRefused;
+
   /// No description provided for @commandFailed.
   ///
   /// In en, this message translates to:

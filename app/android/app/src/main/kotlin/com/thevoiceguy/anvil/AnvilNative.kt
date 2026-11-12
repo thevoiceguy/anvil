@@ -49,4 +49,14 @@ object AnvilNative {
     /** The address of the function that draws a picture on a slot's surface. */
     @JvmStatic
     external fun videoPresent(): Long
+
+    // The phone's screen shared (app/rust/src/android_screen.rs; ScreenCapture).
+
+    /** The app's screen capture, which Rust asks for the screen. */
+    @JvmStatic
+    external fun screenCapture(capture: ScreenCapture)
+
+    /** The system ended the projection: the share ends. */
+    @JvmStatic
+    external fun screenCaptureEnded()
 }

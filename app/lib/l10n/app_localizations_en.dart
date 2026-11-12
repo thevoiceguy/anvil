@@ -173,6 +173,10 @@ class StringsEn extends Strings {
       'Anvil may not use the camera, so callers won\'t see you. Allow it in the system\'s settings for Anvil.';
 
   @override
+  String get screenRefused =>
+      'Your screen was not shared: Anvil was not allowed to capture it.';
+
+  @override
   String commandFailed(String reason) {
     return '$reason';
   }

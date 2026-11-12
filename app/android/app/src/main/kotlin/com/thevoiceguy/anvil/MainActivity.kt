@@ -17,6 +17,7 @@ import io.flutter.plugin.common.MethodChannel
 class MainActivity : FlutterActivity() {
     private var microphoneAnswer: MethodChannel.Result? = null
     private var cameraAnswer: MethodChannel.Result? = null
+    private var screenAnswer: MethodChannel.Result? = null
     private var network: NetworkWatch? = null
 
     /** Picture-in-picture as allowed now (a call shows their picture). */
@@ -26,6 +27,7 @@ class MainActivity : FlutterActivity() {
         // Before Dart opens the library: its audio needs the JVM. The
         // phone's calls reach Telecom from here on, Dart or not.
         PhoneLink.start(this)
+        ScreenCapture.register(this)
         super.onCreate(savedInstanceState)
         // Where FCP wakes the app: the token, when built with Firebase.
         Push.register(this)
@@ -71,6 +73,7 @@ class MainActivity : FlutterActivity() {
             when (call.method) {
                 "requestMicrophone" -> requestMicrophone(result)
                 "requestCamera" -> requestCamera(result)
+                "requestScreenCapture" -> requestScreenCapture(result)
                 // Android's AAudio needs nothing set up front: Telecom
                 // sets the call's audio mode and routes it.
                 "startAudio" -> result.success(null)
@@ -200,6 +203,34 @@ class MainActivity : FlutterActivity() {
         requestPermissions(arrayOf(Manifest.permission.CAMERA), CAMERA)
     }
 
+    /** Before each share of the screen: Android asks the user every time. */
+    private fun requestScreenCapture(result: MethodChannel.Result) {
+        screenAnswer?.success(false)
+        screenAnswer = result
+        try {
+            @Suppress("DEPRECATION")
+            startActivityForResult(ScreenCapture.consentIntent(this), SCREEN)
+        } catch (e: Exception) {
+            screenAnswer = null
+            result.success(false)
+        }
+    }
+
+    @Deprecated("Deprecated in Java")
+    override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
+        @Suppress("DEPRECATION")
+        super.onActivityResult(requestCode, resultCode, data)
+        if (requestCode != SCREEN) return
+        val answer = screenAnswer ?: return
+        screenAnswer = null
+        if (resultCode != RESULT_OK || data == null) {
+            answer.success(false)
+            return
+        }
+        // Answered once the service holds the projection.
+        ScreenCapture.allowed(resultCode, data) { ok -> runOnUiThread { answer.success(ok) } }
+    }
+
     override fun onRequestPermissionsResult(
         requestCode: Int,
         permissions: Array<out String>,
@@ -222,5 +253,6 @@ class MainActivity : FlutterActivity() {
     private companion object {
         const val MICROPHONE = 1
         const val CAMERA = 2
+        const val SCREEN = 3
     }
 }

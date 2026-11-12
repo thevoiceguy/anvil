@@ -309,6 +309,7 @@ class _NoticeBanner extends StatelessWidget {
       'transfer' => s.transferProgress(notice.text),
       'microphone' => s.microphoneRefused,
       'camera' => s.cameraRefused,
+      'screen' => s.screenRefused,
       _ => s.commandFailed(notice.text),
     };
     return Material(

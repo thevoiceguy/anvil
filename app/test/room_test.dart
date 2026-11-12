@@ -8,6 +8,8 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 
+import 'fake_mobile.dart';
+import 'fake_phone.dart';
 import 'screens_test.dart' show signedIn, tapKey, withData;
 import 'video_test.dart' show withVideo;
 
@@ -261,6 +263,55 @@ void main() {
     inRoom(phone, 1, const RoomInfo(number: '3000', floorRefused: 'host'));
     await tester.pumpAndSettle();
     expect(find.text('Your share stopped: a host stopped it'), findsOneWidget);
+  });
+
+  const phoneScreen = [CameraDevice(id: 'screen', name: "This phone's screen")];
+  PhoneSnapshot withPhoneScreen(PhoneSnapshot s) {
+    final m = withMeetings(s);
+    return m.copyWith(
+      video: VideoSettings(
+        available: true,
+        cameras: m.video.cameras,
+        screens: phoneScreen,
+      ),
+    );
+  }
+
+  Future<FakePhone> inMeeting(WidgetTester tester, FakeMobile mobile) async {
+    final phone = await signedIn(tester, seed: withPhoneScreen, mobile: mobile);
+    await tapKey(tester, 'meetings');
+    await tapKey(tester, 'meetingJoin-m1');
+    inRoom(phone, 1, const RoomInfo(number: '3000'));
+    await tester.pumpAndSettle();
+    return phone;
+  }
+
+  testWidgets('a phone shares nothing when its user refuses the capture', (
+    tester,
+  ) async {
+    final mobile = FakeMobile(allowScreen: false);
+    final phone = await inMeeting(tester, mobile);
+    await tapKey(tester, 'roomShare');
+    expect(mobile.log, contains('requestScreenCapture'));
+    expect(phone.log, isNot(contains('share 1 on')));
+    expect(
+      find.textContaining('was not allowed to capture it'),
+      findsOneWidget,
+    );
+  });
+
+  testWidgets('a phone asks before each share, and not to stop', (
+    tester,
+  ) async {
+    final mobile = FakeMobile();
+    final phone = await inMeeting(tester, mobile);
+    await tapKey(tester, 'roomShare');
+    expect(mobile.log, contains('requestScreenCapture'));
+    expect(phone.log, contains('share 1 on'));
+    mobile.log.clear();
+    await tapKey(tester, 'roomShare');
+    expect(phone.log, contains('share 1 off'));
+    expect(mobile.log, isNot(contains('requestScreenCapture')));
   });
 
   testWidgets('a device without screens offers no share', (tester) async {

@@ -303,6 +303,12 @@ every recommendation:
             or a host's stop told in words and ended by
             `share_screen(call, false)`, so the next share is a new one
   - [ ] **A5** Mobile screen share
+    - [x] **A5a** Android: MediaProjection — the user asked before each
+          share (`requestScreenCapture`), a `mediaProjection` foreground
+          service holding the projection, its virtual display drawing into
+          an RGBA `AImageReader` (`ProjectionScreens`), a still screen
+          repeated, the share ended with the projection
+    - [ ] **A5b** iOS: a ReplayKit broadcast extension
 - [ ] **U6** Accessibility, localisation, store listings
 - [ ] **W** The Windows client, finished (the 2026-10-12 survey)
   - [x] **W1** One app: a second start hands its arguments to the running

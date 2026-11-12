@@ -44,6 +44,8 @@ pub mod ndkcam;
 pub mod openh264_fetch;
 pub mod picture;
 pub mod png;
+#[cfg(target_os = "android")]
+pub mod projection;
 #[cfg(target_os = "macos")]
 pub mod sck;
 pub mod screen;
@@ -220,7 +222,8 @@ pub fn platform_cameras() -> Box<dyn Cameras> {
 /// The platform's screens: on Linux, the desktop portal's under Wayland
 /// (the user chooses in the desktop's dialog), else the X server's
 /// monitors (none without a display); a Mac's displays through
-/// ScreenCaptureKit; a PC's through DXGI's Desktop Duplication.
+/// ScreenCaptureKit; a PC's through DXGI's Desktop Duplication; an
+/// Android phone's through MediaProjection (the user asked at each share).
 pub fn platform_screens() -> Box<dyn Screens> {
     #[cfg(target_os = "linux")]
     let screens: Box<dyn Screens> = if wayland::is_wayland() {
@@ -232,7 +235,14 @@ pub fn platform_screens() -> Box<dyn Screens> {
     let screens: Box<dyn Screens> = Box::new(sck::SckScreens);
     #[cfg(windows)]
     let screens: Box<dyn Screens> = Box::new(dxgi::DxgiScreens);
-    #[cfg(not(any(target_os = "linux", target_os = "macos", windows)))]
+    #[cfg(target_os = "android")]
+    let screens: Box<dyn Screens> = Box::new(projection::ProjectionScreens);
+    #[cfg(not(any(
+        target_os = "linux",
+        target_os = "macos",
+        windows,
+        target_os = "android"
+    )))]
     let screens: Box<dyn Screens> = Box::new(NoScreens);
     screens
 }

@@ -143,6 +143,11 @@ abstract class MobilePlatform {
   /// camera opens.)
   Future<bool> requestCamera();
 
+  /// Ask to capture the screen, before each share of it; whether the user
+  /// allowed it. Android asks every time (its consent dialog); elsewhere
+  /// the share asks for itself.
+  Future<bool> requestScreenCapture();
+
   /// Set the system's audio up for calls (iOS: play and record, voice
   /// chat), before the phone starts.
   Future<void> startAudio();
@@ -253,6 +258,15 @@ class NativeMobile implements MobilePlatform {
   Future<bool> requestCamera() async {
     try {
       return await _channel.invokeMethod<bool>('requestCamera') ?? false;
+    } on MissingPluginException {
+      return true;
+    }
+  }
+
+  @override
+  Future<bool> requestScreenCapture() async {
+    try {
+      return await _channel.invokeMethod<bool>('requestScreenCapture') ?? false;
     } on MissingPluginException {
       return true;
     }
