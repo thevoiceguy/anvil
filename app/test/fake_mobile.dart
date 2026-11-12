@@ -8,10 +8,12 @@ class FakeMobile implements MobilePlatform {
   FakeMobile({
     this.allow = true,
     this.allowCamera = true,
+    this.allowScreen = true,
     this.systemFollowsPhone = false,
   });
   final bool allow;
   final bool allowCamera;
+  final bool allowScreen;
 
   @override
   final bool systemFollowsPhone;
@@ -75,6 +77,12 @@ class FakeMobile implements MobilePlatform {
   Future<bool> requestCamera() async {
     log.add('requestCamera');
     return allowCamera;
+  }
+
+  @override
+  Future<bool> requestScreenCapture() async {
+    log.add('requestScreenCapture');
+    return allowScreen;
   }
 
   @override

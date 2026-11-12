@@ -133,8 +133,7 @@ class _ShareRow extends StatelessWidget {
               sharing ? Icons.cancel_presentation : Icons.present_to_all,
             ),
             label: Text(sharing ? s.roomStopSharing : s.roomShare),
-            onPressed: () =>
-                model.run(() => model.api.shareScreen(call.id, !sharing)),
+            onPressed: () => model.shareScreen(call.id, !sharing),
           ),
           if (video.screens.length > 1)
             DropdownButton<String>(

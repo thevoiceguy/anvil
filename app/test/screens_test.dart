@@ -2,6 +2,7 @@
 // recents, people, voicemail and settings.
 
 import 'package:anvil/src/app.dart';
+import 'package:anvil/src/mobile/platform.dart';
 import 'package:clock/clock.dart';
 import 'package:anvil/src/phone/phone_api.dart';
 import 'package:anvil/src/screens/calls.dart' show dialSuggestions;
@@ -80,6 +81,7 @@ Future<FakePhone> signedIn(
   WidgetTester tester, {
   Size size = const Size(1000, 1400),
   PhoneSnapshot Function(PhoneSnapshot) seed = withData,
+  MobilePlatform? mobile,
 }) async {
   tester.view.physicalSize = size;
   tester.view.devicePixelRatio = 1;
@@ -87,7 +89,7 @@ Future<FakePhone> signedIn(
   final phone = FakePhone()
     ..saved = const SignedInAccountFake()
     ..seed = seed;
-  await tester.pumpWidget(AnvilApp(phone: phone));
+  await tester.pumpWidget(AnvilApp(phone: phone, mobile: mobile));
   await tester.pumpAndSettle();
   return phone;
 }

@@ -91,6 +91,17 @@ class PhoneModel extends ChangeNotifier {
     _cameraRefused(camera);
   }
 
+  /// Share our screen in `call`'s room, or stop. A phone asks the user
+  /// first, each time; nothing is shared when they say no.
+  Future<void> shareScreen(int call, bool on) async {
+    if (on && mobile != null && !await mobile!.requestScreenCapture()) {
+      notice = const Notice('screen', '');
+      notifyListeners();
+      return;
+    }
+    await run(() => api.shareScreen(call, on));
+  }
+
   /// Before a call uses our camera: a phone asks for it the first time
   /// (whether it may be used). The call goes on without it if not.
   Future<bool> _camera() async =>

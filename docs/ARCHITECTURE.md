@@ -460,6 +460,19 @@ watch is answered without our camera. Android asks for the camera when a call fi
 uses it (placed or answered with video, or the camera turned on); refused, the call
 goes on without it and the user is told where to allow it.
 
+A phone shares its screen in a room as a desktop does (a second, `content` section),
+the picture coming from the platform. On Android it is MediaProjection: before each
+share the app asks the user (`requestScreenCapture`, the system's consent dialog;
+refused, nothing is shared and the user is told), `ScreenCaptureService` comes
+forward as a `mediaProjection` foreground service and takes the projection, and
+anvil-video's `ProjectionScreens` opens an RGBA `AImageReader` whose surface the
+projection's virtual display draws into (`ScreenCapture.start`, reached from Rust
+through `android_screen.rs`). A still screen repeats its last picture; the share ends
+when the projection does (the system's Stop, the notification's Stop sharing, the
+screen locking). Android lets a projection draw one display, so each share asks
+again. Leaving the app does not stop a share: the camera's hold covers the camera's
+section only.
+
 ---
 
 ## 6. Threading and async
