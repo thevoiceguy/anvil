@@ -28,6 +28,17 @@ pub async fn choose_camera(camera: Option<String>) -> anyhow::Result<()> {
     run_command(Command::Camera { camera }).await.map(|_| ())
 }
 
+/// Share our screen in the room a call is in (the connected one when
+/// `None`), or stop.
+pub async fn share_screen(call: Option<u64>, on: bool) -> anyhow::Result<()> {
+    run_command(Command::Share { call, on }).await.map(|_| ())
+}
+
+/// The screen a share shows, by id; `None` is the system's main one.
+pub async fn choose_screen(screen: Option<String>) -> anyhow::Result<()> {
+    run_command(Command::Screen { screen }).await.map(|_| ())
+}
+
 /// Allow H.264 from Cisco's OpenH264 (fetched now if need be), or not.
 pub async fn allow_h264(on: bool) -> anyhow::Result<()> {
     run_command(Command::H264 { on }).await.map(|_| ())

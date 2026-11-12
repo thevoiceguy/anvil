@@ -2240,6 +2240,72 @@ abstract class Strings {
   /// **'Your share stopped: {reason}'**
   String roomShareStopped(String reason);
 
+  /// No description provided for @roomShare.
+  ///
+  /// In en, this message translates to:
+  /// **'Share your screen'**
+  String get roomShare;
+
+  /// No description provided for @roomStopSharing.
+  ///
+  /// In en, this message translates to:
+  /// **'Stop sharing'**
+  String get roomStopSharing;
+
+  /// No description provided for @roomSharing.
+  ///
+  /// In en, this message translates to:
+  /// **'You are sharing your screen'**
+  String get roomSharing;
+
+  /// No description provided for @roomChooseScreen.
+  ///
+  /// In en, this message translates to:
+  /// **'Screen to share'**
+  String get roomChooseScreen;
+
+  /// No description provided for @roomShareWhyHost.
+  ///
+  /// In en, this message translates to:
+  /// **'a host stopped it'**
+  String get roomShareWhyHost;
+
+  /// No description provided for @roomShareWhyHeld.
+  ///
+  /// In en, this message translates to:
+  /// **'someone else is sharing'**
+  String get roomShareWhyHeld;
+
+  /// No description provided for @roomShareWhyDisabled.
+  ///
+  /// In en, this message translates to:
+  /// **'this room does not allow sharing'**
+  String get roomShareWhyDisabled;
+
+  /// No description provided for @roomShareWhyNotYou.
+  ///
+  /// In en, this message translates to:
+  /// **'a host has not let you share'**
+  String get roomShareWhyNotYou;
+
+  /// No description provided for @roomShareWhyIdle.
+  ///
+  /// In en, this message translates to:
+  /// **'nothing was sent for a while'**
+  String get roomShareWhyIdle;
+
+  /// No description provided for @roomShareWhyFailed.
+  ///
+  /// In en, this message translates to:
+  /// **'the room could not show it'**
+  String get roomShareWhyFailed;
+
+  /// No description provided for @roomShareWhyBusy.
+  ///
+  /// In en, this message translates to:
+  /// **'the room is too busy'**
+  String get roomShareWhyBusy;
+
   /// No description provided for @roomHost.
   ///
   /// In en, this message translates to:

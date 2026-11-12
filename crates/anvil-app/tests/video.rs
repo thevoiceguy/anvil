@@ -476,3 +476,117 @@ async fn on_cellular_a_phone_sends_at_most_360p_and_with_wifi_only_none_until_wi
     alice.shutdown().await;
     bob.shutdown().await;
 }
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_screen_is_shared_in_a_room_and_stopped_and_only_in_a_room() {
+    log();
+    let alice_host = SyntheticVideoHost::default();
+    let alice = phone("alice", "127.0.2.10", Some(alice_host.clone()), None).await;
+    let bob_host = SyntheticVideoHost::default();
+    let bob = phone("bob", "127.0.2.11", Some(bob_host.clone()), None).await;
+
+    // The screens there are, and one chosen.
+    let video = alice.state().video;
+    assert_eq!(video.screens.len(), 1);
+    assert_eq!(video.screen, None);
+    alice
+        .execute(Command::parse_line("screen synthetic-screen").unwrap())
+        .await
+        .unwrap();
+    assert_eq!(
+        alice.state().video.screen.as_deref(),
+        Some("synthetic-screen")
+    );
+    assert_eq!(
+        alice_host.record().screen.as_deref(),
+        Some("synthetic-screen")
+    );
+    assert!(alice
+        .execute(Command::parse_line("screen nowhere").unwrap())
+        .await
+        .is_err());
+
+    // Bob stands in for a room: Alice joins him with video.
+    alice
+        .execute(Command::Join {
+            target: format!("sip:bob@{}", bob.sip_address()),
+            video: true,
+        })
+        .await
+        .unwrap();
+    until(&bob, "the room rings", |s| {
+        s.calls.iter().any(|c| c.state == CallState::Ringing)
+    })
+    .await;
+    bob.execute(Command::parse_line("answer video").unwrap())
+        .await
+        .unwrap();
+    until(&alice, "she is in", |s| {
+        s.calls
+            .iter()
+            .any(|c| c.state == CallState::Connected && c.room.is_some())
+    })
+    .await;
+    assert!(!call(&alice).room.unwrap().sharing);
+
+    // She shares: the state says so, and her screen is sent.
+    alice
+        .execute(Command::parse_line("share on").unwrap())
+        .await
+        .unwrap();
+    assert!(call(&alice).room.unwrap().sharing);
+    let deadline = tokio::time::Instant::now() + SOON;
+    while !alice_host.record().sent.iter().any(|s| {
+        s.config.kind == anvil_core::video::host::VideoKind::Content && !s.stopped && s.frames > 3
+    }) {
+        assert!(tokio::time::Instant::now() < deadline, "no screen sent");
+        tokio::time::sleep(Duration::from_millis(20)).await;
+    }
+
+    // She stops.
+    alice
+        .execute(Command::parse_line("share off").unwrap())
+        .await
+        .unwrap();
+    let room = call(&alice).room.unwrap();
+    assert!(!room.sharing);
+    assert_eq!(room.floor_refused, None);
+    let deadline = tokio::time::Instant::now() + SOON;
+    while !alice_host
+        .record()
+        .sent
+        .iter()
+        .filter(|s| s.config.kind == anvil_core::video::host::VideoKind::Content)
+        .all(|s| s.stopped)
+    {
+        assert!(tokio::time::Instant::now() < deadline, "the screen goes on");
+        tokio::time::sleep(Duration::from_millis(20)).await;
+    }
+    alice
+        .execute(Command::parse_line("hangup").unwrap())
+        .await
+        .unwrap();
+    until(&bob, "the room is left", |s| s.calls.is_empty()).await;
+    until(&alice, "she has left", |s| s.calls.is_empty()).await;
+
+    // A call that is not a room has no screen to share.
+    alice
+        .execute(Command::parse_line(&format!("vcall sip:bob@{}", bob.sip_address())).unwrap())
+        .await
+        .unwrap();
+    until(&bob, "Bob rings", |s| {
+        s.calls.iter().any(|c| c.state == CallState::Ringing)
+    })
+    .await;
+    bob.execute(Command::parse_line("answer video").unwrap())
+        .await
+        .unwrap();
+    until(&alice, "the call is up", |s| {
+        s.calls.iter().any(|c| c.state == CallState::Connected)
+    })
+    .await;
+    assert!(alice
+        .execute(Command::parse_line("share on").unwrap())
+        .await
+        .is_err());
+}

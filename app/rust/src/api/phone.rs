@@ -625,6 +625,8 @@ pub struct Room {
     pub presenter: Option<String>,
     /// Our own share was turned down or ended by the room: why.
     pub floor_refused: Option<String>,
+    /// We share our screen in it.
+    pub sharing: bool,
 }
 
 /// One person in a room.
@@ -656,6 +658,10 @@ pub struct VideoInfo {
     pub cameras: Vec<Camera>,
     /// The camera chosen; `None` is the system's first.
     pub camera: Option<String>,
+    /// The screens a share can show, and the one chosen (`None`: the
+    /// system's main one).
+    pub screens: Vec<Camera>,
+    pub screen: Option<String>,
     /// H.264 from Cisco's OpenH264, where Anvil fetches it: whether the
     /// user allows it (`None` where it is not fetched), whether it is
     /// here, and what must be shown about it.
@@ -1163,6 +1169,7 @@ pub fn phone_state() -> anyhow::Result<PhoneState> {
                     speaker: r.speaker,
                     presenter: r.presenter,
                     floor_refused: r.floor_refused,
+                    sharing: r.sharing,
                 }),
             })
             .collect(),
@@ -1277,6 +1284,16 @@ pub fn phone_state() -> anyhow::Result<PhoneState> {
                 })
                 .collect(),
             camera: s.video.camera.clone(),
+            screens: s
+                .video
+                .screens
+                .iter()
+                .map(|c| Camera {
+                    id: c.id.clone(),
+                    name: c.name.clone(),
+                })
+                .collect(),
+            screen: s.video.screen.clone(),
             h264_allowed: s.video.h264.as_ref().map(|h| h.allowed),
             h264_ready: s.video.h264.as_ref().is_some_and(|h| h.ready),
             h264_notice: s.video.h264.as_ref().map(|h| h.notice.clone()),
