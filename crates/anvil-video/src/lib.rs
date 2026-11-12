@@ -28,6 +28,8 @@
 mod aimage;
 #[cfg(target_vendor = "apple")]
 pub mod avf;
+#[cfg(any(target_os = "ios", all(test, target_os = "linux")))]
+pub mod broadcast;
 pub mod camera;
 pub mod codec;
 #[cfg(windows)]
@@ -223,7 +225,8 @@ pub fn platform_cameras() -> Box<dyn Cameras> {
 /// (the user chooses in the desktop's dialog), else the X server's
 /// monitors (none without a display); a Mac's displays through
 /// ScreenCaptureKit; a PC's through DXGI's Desktop Duplication; an
-/// Android phone's through MediaProjection (the user asked at each share).
+/// Android phone's through MediaProjection (the user asked at each share);
+/// an iPhone's through the app's ReplayKit broadcast extension.
 pub fn platform_screens() -> Box<dyn Screens> {
     #[cfg(target_os = "linux")]
     let screens: Box<dyn Screens> = if wayland::is_wayland() {
@@ -237,11 +240,14 @@ pub fn platform_screens() -> Box<dyn Screens> {
     let screens: Box<dyn Screens> = Box::new(dxgi::DxgiScreens);
     #[cfg(target_os = "android")]
     let screens: Box<dyn Screens> = Box::new(projection::ProjectionScreens);
+    #[cfg(target_os = "ios")]
+    let screens: Box<dyn Screens> = Box::new(broadcast::BroadcastScreens::platform());
     #[cfg(not(any(
         target_os = "linux",
         target_os = "macos",
         windows,
-        target_os = "android"
+        target_os = "android",
+        target_os = "ios"
     )))]
     let screens: Box<dyn Screens> = Box::new(NoScreens);
     screens

@@ -308,7 +308,12 @@ every recommendation:
           service holding the projection, its virtual display drawing into
           an RGBA `AImageReader` (`ProjectionScreens`), a still screen
           repeated, the share ended with the projection
-    - [ ] **A5b** iOS: a ReplayKit broadcast extension
+    - [x] **A5b** iOS: a ReplayKit broadcast extension (`ScreenShare`)
+          started from the system's picker, sending NV12 pictures (15 a
+          second at most, the turn that makes them upright) over a Unix
+          socket in the app group's container to `BroadcastScreens`; the
+          share ends when either side closes it, or after a minute without
+          the extension
 - [ ] **U6** Accessibility, localisation, store listings
 - [ ] **W** The Windows client, finished (the 2026-10-12 survey)
   - [x] **W1** One app: a second start hands its arguments to the running

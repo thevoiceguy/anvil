@@ -77,5 +77,9 @@
 		<string>UIInterfaceOrientationLandscapeLeft</string>
 		<string>UIInterfaceOrientationLandscapeRight</string>
 	</array>
+	<!-- The group shared with the screen-share extension (ScreenShare):
+	     a share listens for its pictures in the group's container. -->
+	<key>AnvilAppGroup</key>
+	<string>group.com.thevoiceguy.anvil</string>
 </dict>
 </plist>

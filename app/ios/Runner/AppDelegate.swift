@@ -2,6 +2,7 @@ import AVFoundation
 import CallKit
 import Flutter
 import Network
+import ReplayKit
 import UIKit
 
 @main
@@ -31,6 +32,28 @@ import UIKit
       .rootViewController?.view
   }
 
+  /// Before each share of the screen: iOS captures it only in the
+  /// broadcast extension (ScreenShare), which the user starts from the
+  /// system's picker. The picker is shown, set to our extension; the share
+  /// then waits for the extension's pictures (and ends after a minute
+  /// without them, as when the picker is dismissed).
+  static func requestScreenCapture(_ result: @escaping FlutterResult) {
+    guard let view = appView(), let id = Bundle.main.bundleIdentifier else {
+      result(false)
+      return
+    }
+    let picker = RPSystemBroadcastPickerView(frame: CGRect(x: 0, y: 0, width: 1, height: 1))
+    picker.preferredExtension = id + ".ScreenShare"
+    picker.showsMicrophoneButton = false
+    picker.isHidden = true
+    view.addSubview(picker)
+    // The picker has no API to open it: its button is pressed.
+    let button = picker.subviews.compactMap { $0 as? UIButton }.first
+    button?.sendActions(for: .touchUpInside)
+    DispatchQueue.main.asyncAfter(deadline: .now() + 1) { picker.removeFromSuperview() }
+    result(button != nil)
+  }
+
   func didInitializeImplicitFlutterEngine(_ engineBridge: FlutterImplicitEngineBridge) {
     GeneratedPluginRegistrant.register(with: engineBridge.pluginRegistry)
     if let registrar = engineBridge.pluginRegistry.registrar(forPlugin: "AnvilVideo") {
@@ -54,6 +77,7 @@ import UIKit
         let number = args["number"] as? String ?? ""
         switch call.method {
         case "requestMicrophone": AppDelegate.requestMicrophone(result)
+        case "requestScreenCapture": AppDelegate.requestScreenCapture(result)
         case "startAudio": AppDelegate.startAudio(result)
         case "reportIncoming":
           calls.reportIncoming(id: id, name: name, number: number)
