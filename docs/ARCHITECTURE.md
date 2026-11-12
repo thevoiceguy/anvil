@@ -473,6 +473,19 @@ screen locking). Android lets a projection draw one display, so each share asks
 again. Leaving the app does not stop a share: the camera's hold covers the camera's
 section only.
 
+On iOS only a broadcast upload extension may capture the whole screen, in its own
+process. `requestScreenCapture` shows the system's broadcast picker, set to the app's
+`ScreenShare` extension; meanwhile the share (anvil-video's `BroadcastScreens`) listens
+on `anvil-share.sock` in the container of the app group both name (`AnvilAppGroup` in
+their Info.plists, `group.com.thevoiceguy.anvil`). The extension sends each picture as
+NV12, at most 15 a second, after a 32-byte header (`ANVS`, version, the turn that
+makes it upright, size, strides, range); the app brings full range to video range and
+repeats the last picture while the screen is still. Stopping the share closes the
+socket and the extension ends its broadcast; the user stopping the broadcast ends the
+share, and so does a minute without the extension (the picker dismissed). Whether
+VideoToolbox encodes the share while the app is in the background is still to be
+seen on a device.
+
 ---
 
 ## 6. Threading and async
