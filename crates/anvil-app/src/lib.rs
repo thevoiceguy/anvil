@@ -1079,6 +1079,14 @@ impl Phone {
                 self.choose_camera(camera).await?;
                 Ok(Response::ok())
             }
+            Command::Share { call, on } => {
+                self.share(call, on).await?;
+                Ok(Response::ok())
+            }
+            Command::Screen { screen } => {
+                self.choose_screen(screen).await?;
+                Ok(Response::ok())
+            }
             Command::H264 { on } => {
                 self.allow_h264(on).await?;
                 Ok(Response::ok())

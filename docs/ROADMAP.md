@@ -297,8 +297,11 @@ every recommendation:
               repeated while the display is still or the secure desktop is
               up; made again when access is lost (a mode change). The
               pointer is not drawn
-      - [ ] **A4c3** The app: a Share button and the screen's choice; a
-            refusal or a host's stop ended by `share_screen(call, false)`
+      - [x] **A4c3** The app: a Share button in the room's panel and the
+            screen's choice where there are several (`share`, `screen`
+            commands; `RoomView.sharing`, `VideoState.screens`); a refusal
+            or a host's stop told in words and ended by
+            `share_screen(call, false)`, so the next share is a new one
   - [ ] **A5** Mobile screen share
 - [ ] **U6** Accessibility, localisation, store listings
 - [ ] **W** The Windows client, finished (the 2026-10-12 survey)

@@ -79,6 +79,12 @@ pub struct VideoState {
     pub cameras: Vec<CameraView>,
     /// The camera chosen; `None` is the system's first.
     pub camera: Option<String>,
+    /// The screens a share can show (none where this device cannot share).
+    #[serde(default)]
+    pub screens: Vec<CameraView>,
+    /// The screen chosen; `None` is the system's main one.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub screen: Option<String>,
     /// Cisco's OpenH264, where Anvil fetches it from Cisco (Linux);
     /// `None` elsewhere.
     pub h264: Option<H264View>,
@@ -91,6 +97,7 @@ pub struct VideoState {
     pub cellular: bool,
 }
 
+/// A camera, or a screen to share.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct CameraView {
     pub id: String,
@@ -153,6 +160,9 @@ pub struct RoomView {
     /// Our own share was turned down or ended by the room: why.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub floor_refused: Option<String>,
+    /// We share our screen in it.
+    #[serde(default)]
+    pub sharing: bool,
 }
 
 /// One person in a room.

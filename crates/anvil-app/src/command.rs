@@ -67,6 +67,18 @@ pub enum Command {
         #[serde(default)]
         camera: Option<String>,
     },
+    /// Share our screen in a room, or stop (a call joined with video).
+    Share {
+        #[serde(default)]
+        call: Option<u64>,
+        on: bool,
+    },
+    /// The screen a share shows, by id (`None`, the system's main one); a
+    /// share running switches to it.
+    Screen {
+        #[serde(default)]
+        screen: Option<String>,
+    },
     /// Allow H.264 from Cisco's OpenH264 (fetched from Cisco if need be),
     /// or not: where it is fetched (Linux).
     H264 { on: bool },
@@ -516,6 +528,15 @@ impl Command {
                 on: on_off(words.get(1)).ok_or("video needs on or off")?,
                 call: id(words.get(2))?,
             },
+            // `share on`, `share off 3`.
+            "share" => Command::Share {
+                on: on_off(words.get(1)).ok_or("share needs on or off")?,
+                call: id(words.get(2))?,
+            },
+            // `screen DP-1`, `screen default`.
+            "screen" => Command::Screen {
+                screen: rest(&words, 1).filter(|c| !c.eq_ignore_ascii_case("default")),
+            },
             // `camera /dev/video2`, `camera default`.
             "camera" => Command::Camera {
                 camera: rest(&words, 1).filter(|c| !c.eq_ignore_ascii_case("default")),
@@ -963,6 +984,38 @@ mod tests {
         assert_eq!(
             Command::parse_line("camera default").unwrap(),
             Command::Camera { camera: None }
+        );
+        assert_eq!(
+            Command::parse_line("share on").unwrap(),
+            Command::Share {
+                call: None,
+                on: true
+            }
+        );
+        assert_eq!(
+            Command::parse_line("share off 3").unwrap(),
+            Command::Share {
+                call: Some(3),
+                on: false
+            }
+        );
+        assert_eq!(
+            Command::parse_line("screen DP-1").unwrap(),
+            Command::Screen {
+                screen: Some("DP-1".into())
+            }
+        );
+        assert_eq!(
+            Command::parse_line("screen default").unwrap(),
+            Command::Screen { screen: None }
+        );
+        let json = r#"{"cmd":"share","on":true}"#;
+        assert_eq!(
+            serde_json::from_str::<Command>(json).unwrap(),
+            Command::Share {
+                call: None,
+                on: true
+            }
         );
         assert_eq!(
             Command::parse_line("h264 off").unwrap(),

@@ -59,7 +59,7 @@ jobs:
           mkdir -p -m 700 "$XDG_RUNTIME_DIR"
           dbus-run-session -- sh -c '
             pipewire & wireplumber & sleep 2
-            xvfb-run -a -s "-screen 0 1600x900x24" cargo test --workspace'
+            xvfb-run -a -s "-screen 0 1600x900x24 -noreset" cargo test --workspace'
 
   # The workspace on Windows (MSVC): its lints (the Windows-only code —
   # the pipe, DPAPI — is linted nowhere else), it builds, and its tests

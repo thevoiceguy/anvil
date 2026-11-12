@@ -197,7 +197,9 @@ impl Capture for X11Capture {
 mod tests {
     use super::*;
 
-    /// Against `$DISPLAY` (CI runs it under Xvfb); skipped without one.
+    /// Against `$DISPLAY` (CI runs it under Xvfb with `-noreset`: an X
+    /// server resets when its last client leaves, and a connection made
+    /// during the reset is refused); skipped without one.
     #[test]
     fn an_x_servers_screen_is_listed_and_captured() {
         if std::env::var_os("DISPLAY").is_none() {
