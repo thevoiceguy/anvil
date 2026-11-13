@@ -20,7 +20,10 @@ use std::sync::Arc;
 use std::thread;
 
 use async_trait::async_trait;
-use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
+#[cfg(not(target_os = "android"))]
+use cpal::traits::StreamTrait;
+use cpal::traits::{DeviceTrait, HostTrait};
+#[cfg(not(target_os = "android"))]
 use cpal::{SampleFormat, SampleRate, StreamConfig};
 use forge_resampler::Resampler;
 use parking_lot::Mutex;
@@ -65,6 +68,10 @@ type Chosen = Arc<Mutex<(Option<String>, Option<String>)>>;
 
 /// The volumes, shared with the streams.
 type Volumes = Arc<VolumeState>;
+
+/// A stream open, until dropped: cpal's, or on Android Oboe's
+/// (`android.rs`).
+type Held = Box<dyn std::any::Any>;
 
 #[derive(Debug)]
 struct VolumeState {
@@ -365,6 +372,7 @@ const FOLLOW_EVERY: std::time::Duration = std::time::Duration::from_secs(2);
 
 /// A stream error callback that marks the stream as failed (a device
 /// unplugged), for its thread to open another.
+#[cfg(not(target_os = "android"))]
 fn on_error(
     what: &'static str,
     failed: &Arc<std::sync::atomic::AtomicBool>,
@@ -425,12 +433,13 @@ impl AudioSource for CpalCapture {
 
 /// Open a capture stream on `device` feeding `frame_tx`; `failed` is set
 /// when it stops working.
+#[cfg(not(target_os = "android"))]
 fn open_capture(
     device: &cpal::Device,
     cfg: AudioFormat,
     frame_tx: &mpsc::Sender<AudioFrame>,
     failed: &Arc<std::sync::atomic::AtomicBool>,
-) -> Result<(cpal::Stream, u32, u16), String> {
+) -> Result<(Held, u32, u16), String> {
     let default_config = device
         .default_input_config()
         .map_err(|e| format!("default_input_config: {e}"))?;
@@ -529,7 +538,31 @@ fn open_capture(
     stream
         .play()
         .map_err(|e| format!("input stream play: {e}"))?;
-    Ok((stream, device_rate, channels))
+    Ok((Box::new(stream), device_rate, channels))
+}
+
+/// Android: a voice call's microphone (`android.rs`), on the call's route
+/// rather than on `device`.
+#[cfg(target_os = "android")]
+fn open_capture(
+    _device: &cpal::Device,
+    cfg: AudioFormat,
+    frame_tx: &mpsc::Sender<AudioFrame>,
+    failed: &Arc<std::sync::atomic::AtomicBool>,
+) -> Result<(Held, u32, u16), String> {
+    let rate = crate::android::RATE;
+    let frame_samples = (cfg.sample_rate as u64 * cfg.frame_ms as u64 / 1000) as usize;
+    let mut resampler = Resampler::new(rate, cfg.sample_rate, 1)
+        .map_err(|e| format!("resampler at {rate} Hz: {e}"))?;
+    let buf = Arc::new(Mutex::new(VecDeque::new()));
+    let tx = frame_tx.clone();
+    let stream = crate::android::input(
+        move |data: &[i16]| {
+            push_frames(&mut resampler, data.to_vec(), &buf, frame_samples, cfg, &tx)
+        },
+        failed,
+    )?;
+    Ok((stream, rate, 1))
 }
 
 /// Capture for a call until its source is dropped: on the device chosen or
@@ -646,11 +679,13 @@ impl AudioSink for CpalPlayback {
 
 /// Open a playback stream on `device`, fed from its own queue; `failed`
 /// is set when it stops working.
+#[cfg(not(target_os = "android"))]
 #[allow(clippy::type_complexity)]
 fn open_playback(
     device: &cpal::Device,
+    _role: Role,
     failed: &Arc<std::sync::atomic::AtomicBool>,
-) -> Result<(cpal::Stream, Arc<Mutex<VecDeque<i16>>>, u32, u16), String> {
+) -> Result<(Held, Arc<Mutex<VecDeque<i16>>>, u32, u16), String> {
     let default_config = device
         .default_output_config()
         .map_err(|e| format!("default_output_config: {e}"))?;
@@ -731,7 +766,36 @@ fn open_playback(
     stream
         .play()
         .map_err(|e| format!("output stream play: {e}"))?;
-    Ok((stream, out_buf, device_rate, channels))
+    Ok((Box::new(stream), out_buf, device_rate, channels))
+}
+
+/// Android: a ringtone's stream, or a call's (`android.rs`), on Android's
+/// route for it rather than on `device`.
+#[cfg(target_os = "android")]
+#[allow(clippy::type_complexity)]
+fn open_playback(
+    _device: &cpal::Device,
+    role: Role,
+    failed: &Arc<std::sync::atomic::AtomicBool>,
+) -> Result<(Held, Arc<Mutex<VecDeque<i16>>>, u32, u16), String> {
+    let rate = crate::android::RATE;
+    let kind = match role {
+        Role::Call => crate::android::Kind::Call,
+        Role::Ring => crate::android::Kind::Ring,
+    };
+    let out_buf = Arc::new(Mutex::new(VecDeque::with_capacity(rate as usize)));
+    let buf = Arc::clone(&out_buf);
+    let stream = crate::android::output(
+        kind,
+        move |data: &mut [i16]| {
+            let mut guard = buf.lock();
+            for sample in data {
+                *sample = guard.pop_front().unwrap_or(0);
+            }
+        },
+        failed,
+    )?;
+    Ok((stream, out_buf, rate, 1))
 }
 
 /// Play a call (or a ring) until its sink is dropped: on the device chosen
@@ -750,7 +814,7 @@ fn run_playback(
             .ok_or_else(|| "no output device".to_string())
             .and_then(|(device, following)| {
                 let name = device.name().unwrap_or_default();
-                open_playback(&device, &failed).map(|s| (s, name, following))
+                open_playback(&device, role, &failed).map(|s| (s, name, following))
             })
             .and_then(|(opened, name, following)| {
                 Resampler::new(cfg.sample_rate, opened.2, 1)
@@ -984,12 +1048,13 @@ fn clip(sum: i32) -> i16 {
 }
 
 /// Open the calls' speaker on `device`, mixing `voices`.
+#[cfg(not(target_os = "android"))]
 fn open_output(
     device: &cpal::Device,
     voices: &Arc<Mutex<Voices>>,
     volume: &Volumes,
     failed: &Arc<std::sync::atomic::AtomicBool>,
-) -> Result<(cpal::Stream, u32, u16), String> {
+) -> Result<(Held, u32, u16), String> {
     let default_config = device
         .default_output_config()
         .map_err(|e| format!("default_output_config: {e}"))?;
@@ -1058,7 +1123,32 @@ fn open_output(
     stream
         .play()
         .map_err(|e| format!("output stream play: {e}"))?;
-    Ok((stream, device_rate, channels))
+    Ok((Box::new(stream), device_rate, channels))
+}
+
+/// Android: the calls' speaker as a voice call (`android.rs`), on the
+/// call's route rather than on `device`.
+#[cfg(target_os = "android")]
+fn open_output(
+    _device: &cpal::Device,
+    voices: &Arc<Mutex<Voices>>,
+    volume: &Volumes,
+    failed: &Arc<std::sync::atomic::AtomicBool>,
+) -> Result<(Held, u32, u16), String> {
+    let voices = Arc::clone(voices);
+    let volume = Arc::clone(volume);
+    let mut mixer = Mixer::default();
+    let stream = crate::android::output(
+        crate::android::Kind::Call,
+        move |data: &mut [i16]| {
+            let mixed = mixer.mix(&voices, data.len(), volume.get().speaker);
+            for (sample, sum) in data.iter_mut().zip(mixed) {
+                *sample = clip(*sum);
+            }
+        },
+        failed,
+    )?;
+    Ok((stream, crate::android::RATE, 1))
 }
 
 /// Hold the calls' speaker open: on the device chosen or the default,
@@ -1143,6 +1233,7 @@ fn run_output(
 
 // ─── helpers ────────────────────────────────────────────────────────────────
 
+#[cfg(not(target_os = "android"))]
 fn downmix_f32(data: &[f32], channels: u16) -> Vec<i16> {
     data.chunks(channels as usize)
         .map(|frame| {
@@ -1152,6 +1243,7 @@ fn downmix_f32(data: &[f32], channels: u16) -> Vec<i16> {
         .collect()
 }
 
+#[cfg(not(target_os = "android"))]
 fn downmix_i16(data: &[i16], channels: u16) -> Vec<i16> {
     data.chunks(channels as usize)
         .map(|frame| {

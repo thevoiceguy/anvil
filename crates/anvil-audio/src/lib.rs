@@ -5,8 +5,9 @@
 //! `apm` feature (on by default) it cancels echo and suppresses noise with
 //! WebRTC's audio processing, ported to Rust by `sonora` (`echo.rs`).
 //!
-//! Mobile hosts (iOS AVAudioEngine, Android Oboe) implement `AudioHost` themselves
-//! and do not use this crate.
+//! On Android it opens its streams with Oboe (`android.rs`), as a voice call
+//! and a ringtone rather than cpal's media. iOS hosts (AVAudioEngine)
+//! implement `AudioHost` themselves.
 
 // Unsafe only where Windows' API needs it, in one module.
 #![deny(unsafe_code)]
@@ -16,6 +17,9 @@ mod cpal_host;
 
 #[cfg(feature = "cpal-default")]
 pub use cpal_host::CpalHost;
+
+#[cfg(all(target_os = "android", feature = "cpal-default"))]
+mod android;
 
 #[cfg(all(windows, feature = "cpal-default"))]
 #[allow(unsafe_code)]
