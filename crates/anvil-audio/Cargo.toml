@@ -11,7 +11,7 @@ homepage.workspace     = true
 
 [features]
 default = ["cpal-default", "apm"]
-cpal-default = ["dep:cpal", "dep:forge-resampler"]
+cpal-default = ["dep:cpal", "dep:forge-resampler", "dep:oboe"]
 # Echo cancellation and noise suppression: WebRTC's audio processing as
 # sonora ports it to Rust (no C++ to build).
 apm = ["dep:sonora"]
@@ -34,3 +34,9 @@ sonora          = { version = "0.2.0", optional = true }
 # cpal already uses.
 [target.'cfg(windows)'.dependencies]
 windows = { version = "0.54", features = ["Win32_Foundation", "Win32_Media_Audio", "Win32_System_Com", "Win32_System_Com_StructuredStorage", "Win32_System_Variant", "Win32_UI_Shell_PropertiesSystem", "Win32_Devices_FunctionDiscovery", "Win32_Devices_Properties"] }
+
+# Android's streams as a voice call and a ringtone (`android.rs`): cpal
+# opens them as media, which some phones silence in a call. The Oboe cpal
+# uses, with the same features.
+[target.'cfg(target_os = "android")'.dependencies]
+oboe = { version = "0.6", features = ["java-interface"], optional = true }
