@@ -82,11 +82,28 @@ pub enum VideoKind {
     Content,
 }
 
-/// One of a source's encodings. A source has one today; simulcast asks
-/// the host for several, each with its own id, through the same
-/// interface.
+/// One of a source's encodings. A source has one, unless the call sends
+/// simulcast (RFC 8853, FCP's `docs/FORWARDING_ROOMS.md` §2.4): then
+/// several, of one capture, each with its own id.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct EncodingId(pub u8);
+
+/// One encoding a source is asked for: the largest picture it carries
+/// and the most it may spend.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Encoding {
+    pub id: EncodingId,
+    pub max: Resolution,
+    pub kbps: u32,
+}
+
+/// What the network allows one encoding of a simulcast source now.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct EncodingTarget {
+    pub kbps: u32,
+    pub max: Resolution,
+    pub fps: u32,
+}
 
 /// One incoming stream, unique within the process (a host can show
 /// several calls' streams at once).
@@ -104,8 +121,22 @@ pub struct SendConfig {
     pub max: Resolution,
     pub kbps: u32,
     pub fps: u32,
-    /// The encodings wanted, one per entry: the core asks for one today.
-    pub encodings: Vec<EncodingId>,
+    /// The encodings wanted, largest first. The first is the picture
+    /// `max` and `kbps` describe; more than one is simulcast, which the
+    /// core asks for only of a host whose [`VideoHost::simulcast`] allows
+    /// it. A host that cannot simulcast sends the first.
+    pub encodings: Vec<Encoding>,
+}
+
+impl SendConfig {
+    /// The one encoding of a source without simulcast.
+    pub fn single(max: Resolution, kbps: u32) -> Vec<Encoding> {
+        vec![Encoding {
+            id: EncodingId(0),
+            max,
+            kbps,
+        }]
+    }
 }
 
 /// What an incoming stream is, for its decoder and its tile.
@@ -144,6 +175,11 @@ pub trait VideoHost: Send + Sync {
     /// screen, or the system's picker where it has one); a share running
     /// switches to it, where the host can.
     fn set_screen(&self, _screen: Option<&str>) {}
+    /// How many encodings of one camera it can make at once, of every
+    /// codec it encodes (simulcast); 1, none beyond the one.
+    fn simulcast(&self) -> usize {
+        1
+    }
     /// A camera or a screen, captured and encoded.
     fn start_send(&self, cfg: SendConfig) -> Result<Box<dyn VideoSource>, AnvilError>;
     /// One per incoming stream: decoded and shown.
@@ -164,6 +200,22 @@ pub trait VideoSource: Send {
     fn request_keyframe(&self);
     /// What the network allows now.
     fn set_target(&self, kbps: u32, max: Resolution, fps: u32);
+    /// Simulcast: make the next frame of `encoding` a keyframe. A host
+    /// that cannot single one out makes one of every encoding.
+    fn request_keyframe_of(&self, encoding: EncodingId) {
+        let _ = encoding;
+        self.request_keyframe();
+    }
+    /// Simulcast: what the network allows `encoding` now; `None` pauses
+    /// it (nothing coded until it has a target again, starting on a
+    /// keyframe). Called for every encoding whenever the share changes.
+    fn set_encoding_target(&self, encoding: EncodingId, target: Option<EncodingTarget>) {
+        if encoding == EncodingId(0) {
+            if let Some(t) = target {
+                self.set_target(t.kbps, t.max, t.fps);
+            }
+        }
+    }
 }
 
 /// Decode and render, on the host. Dropping it removes the tile.

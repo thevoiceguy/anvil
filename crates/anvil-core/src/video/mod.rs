@@ -26,7 +26,9 @@ use std::sync::Arc;
 
 use tokio::sync::mpsc;
 
-use self::host::{EncodingId, Resolution, SendConfig, StreamId, VideoCodec, VideoHost, VideoKind};
+use self::host::{
+    Encoding, EncodingId, Resolution, SendConfig, StreamId, VideoCodec, VideoHost, VideoKind,
+};
 use self::playout::AudioClock;
 use self::sdp::{LocalSection, RemoteSection};
 use self::session::{SessionLinks, VideoSession};
@@ -127,6 +129,9 @@ pub(crate) struct StreamPlan {
     pub feedback: Feedback,
     /// What to capture and encode; `None`, receive only.
     pub send: Option<SendConfig>,
+    /// Simulcast: the rids `send`'s encodings go under, in their order,
+    /// and the header extension that carries them.
+    pub simulcast: Option<sdp::Simulcast>,
 }
 
 /// Tells the app of a call's streams.
@@ -178,6 +183,26 @@ impl VideoEvents {
 
 /// What a camera sends until the network (REMB) or the server says less.
 const DEFAULT_KBPS: u32 = 1500;
+/// The most each of a simulcast camera's encodings spends, by its place
+/// in [`sdp::RIDS`]: 720p, 360p, 180p.
+const LAYER_KBPS: [u32; 3] = [DEFAULT_KBPS, 500, 150];
+
+/// The encodings for the simulcast rids `rids` (each one of
+/// [`sdp::RIDS`]), largest first: each half the height of the one before
+/// it in [`sdp::RIDS`], from `max`.
+fn layers(rids: &[String], max: Resolution) -> Vec<Encoding> {
+    rids.iter()
+        .filter_map(|rid| sdp::RIDS.iter().position(|r| r == rid))
+        .map(|i| Encoding {
+            id: EncodingId(i as u8),
+            max: Resolution {
+                width: (max.width >> i) & !1,
+                height: (max.height >> i) & !1,
+            },
+            kbps: LAYER_KBPS[i],
+        })
+        .collect()
+}
 const DEFAULT_FPS: u32 = 30;
 /// A shared screen's frame rate: a screen changes less than a face.
 const CONTENT_FPS: u32 = 10;
@@ -259,6 +284,9 @@ pub(crate) struct CallVideo {
     before_offer: Option<(usize, Vec<(MediaDirection, MediaDirection)>)>,
     /// In a room: whose each incoming camera stream is.
     owners: Option<Arc<crate::room::StreamOwners>>,
+    /// How many encodings of the camera we offer to send: more than one
+    /// in a room, where the host can make them (simulcast).
+    simulcast: usize,
 }
 
 impl CallVideo {
@@ -274,6 +302,7 @@ impl CallVideo {
             held: false,
             before_offer: None,
             owners: None,
+            simulcast: 1,
         }
     }
 
@@ -283,13 +312,17 @@ impl CallVideo {
         self.owners = Some(owners);
     }
 
-    /// A camera section offered on its own sockets.
+    /// A camera section offered on its own sockets, sending `simulcast`
+    /// encodings where that is two or more.
     async fn camera_offer(
         host: &dyn VideoHost,
         setup: SectionSetup,
         direction: MediaDirection,
+        simulcast: usize,
     ) -> Option<(LocalSection, MediaSockets)> {
-        Self::section_offer(host, setup, VideoKind::Camera, direction).await
+        Self::section_offer(host, setup, VideoKind::Camera, direction)
+            .await
+            .map(|(local, sockets)| (local.with_simulcast(simulcast), sockets))
     }
 
     /// A section of `kind` offered on its own sockets.
@@ -322,7 +355,9 @@ impl CallVideo {
     /// The sections of an offer of ours: a camera, sending and receiving
     /// (or only receiving, `receive_only`, until the camera is turned on),
     /// and with `content` a room's shared screen (RFC 4796
-    /// `a=content:slides`), received.
+    /// `a=content:slides`), received. A room's camera is offered as
+    /// simulcast, as many encodings as the host makes, up to three (FCP's
+    /// `docs/FORWARDING_ROOMS.md` §2.4).
     pub(crate) async fn offer(
         host: Arc<dyn VideoHost>,
         media_ip: IpAddr,
@@ -337,8 +372,14 @@ impl CallVideo {
         } else {
             MediaDirection::Sendrecv
         };
-        let (local, sockets) = Self::camera_offer(host.as_ref(), setup, want).await?;
+        let simulcast = if content {
+            host.simulcast().min(sdp::RIDS.len())
+        } else {
+            1
+        };
+        let (local, sockets) = Self::camera_offer(host.as_ref(), setup, want, simulcast).await?;
         let mut v = Self::empty(host, capture);
+        v.simulcast = simulcast;
         let mut section = CallSection::new(local, want);
         section.sockets = Some(sockets);
         v.sections.push(section);
@@ -568,6 +609,7 @@ impl CallVideo {
                     self.host.as_ref(),
                     setup,
                     direction(MediaDirection::Sendrecv, held),
+                    self.simulcast,
                 )
                 .await
                 {
@@ -798,6 +840,19 @@ impl CallVideo {
             .codecs()
             .iter()
             .any(|c| c.codec == codec.codec && c.encode);
+        // Simulcast where we offered it and the far end takes two or more
+        // of the encodings (a room's `a=simulcast:recv`); else one.
+        let simulcast = match (&s.local.simulcast, &s.remote) {
+            (Some(ours), Some(remote)) if s.local.kind == VideoKind::Camera => remote
+                .simulcast_recv
+                .as_ref()
+                .and_then(|theirs| ours.agreed(theirs)),
+            _ => None,
+        };
+        s.local.simulcast = simulcast.clone();
+        if let Some(sc) = &simulcast {
+            tracing::info!(rids = ?sc.rids, "video: sending simulcast");
+        }
         let plan = StreamPlan {
             kind: s.local.kind,
             codec: codec.codec,
@@ -810,16 +865,21 @@ impl CallVideo {
                     VideoKind::Camera => (Resolution::P720, DEFAULT_FPS),
                     VideoKind::Content => (Resolution::P1080, CONTENT_FPS),
                 };
+                let encodings = match &simulcast {
+                    Some(sc) => layers(&sc.rids, max),
+                    None => SendConfig::single(max, DEFAULT_KBPS),
+                };
                 SendConfig {
                     codec: codec.codec,
                     kind: s.local.kind,
                     camera: None,
-                    max,
-                    kbps: DEFAULT_KBPS,
+                    max: encodings[0].max,
+                    kbps: encodings[0].kbps,
                     fps,
-                    encodings: vec![EncodingId(0)],
+                    encodings,
                 }
             }),
+            simulcast: simulcast.clone(),
         };
         let (tx, rx) = mpsc::channel(transport::INBOUND_QUEUE);
         let t = SdesTransport::start(sockets, addr, ctx, tx);

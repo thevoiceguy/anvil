@@ -22,7 +22,7 @@ use forge_rtp::rtcp::{
     ntp, PayloadFeedback, PsFeedback, ReceiverReport, ReceptionReportBlock, RtcpPacket,
     RtpFeedback, SdesItem, SenderReport, SourceDescription, TransportFeedback,
 };
-use forge_rtp::rtp::RtpPacket;
+use forge_rtp::rtp::{RtpExtension, RtpPacket};
 use forge_rtp::video::{AssemblerEvent, FrameAssembler, KeyframeRequestGate, RtxCache};
 use forge_rtp::{RttTracker, SourceStats};
 use parking_lot::Mutex;
@@ -32,8 +32,8 @@ use tokio::task::JoinHandle;
 
 use super::bwe::{BandwidthEstimator, RembEstimator, MIN_BPS};
 use super::host::{
-    CodedFrame, EncodingId, ReceiveConfig, Resolution, SendConfig, StreamId, VideoHost, VideoKind,
-    VideoSink, VideoSource,
+    CodedFrame, EncodingId, EncodingTarget, ReceiveConfig, Resolution, SendConfig, StreamId,
+    VideoHost, VideoKind, VideoSink, VideoSource,
 };
 use super::playout::{self, AudioClock, Playout};
 use super::transport::{Inbound, MediaTransport};
@@ -201,8 +201,10 @@ impl DirectionCell {
 /// What the receive side tells the send side.
 #[derive(Debug)]
 enum SendCommand {
-    Resend(Vec<u16>),
-    Keyframe,
+    /// Packets of the encoding sent under this SSRC.
+    Resend(u32, Vec<u16>),
+    /// A keyframe of the encoding sent under this SSRC.
+    Keyframe(u32),
     /// The far end's REMB, in bits a second.
     Target(u64),
     /// The direction changed: open or close the camera.
@@ -221,17 +223,24 @@ pub(crate) struct SessionLinks {
     pub owners: Option<Arc<crate::room::StreamOwners>>,
 }
 
+/// One encoding's counts, for its sender reports.
+struct LaneCount {
+    ssrc: u32,
+    packets: u32,
+    octets: u32,
+    sent_at_last_report: u32,
+}
+
 /// The send side as the reports and stats see it.
 struct Outgoing {
     id: Option<StreamId>,
-    ssrc: u32,
+    /// Each encoding's, in order; the first is ours, the one our reports
+    /// come from.
+    lanes: Vec<LaneCount>,
     /// Our RTP clock: `base_ts` at `epoch`, so a report's timestamp is
     /// the one a frame captured at that moment carries.
     epoch: Instant,
     base_ts: u32,
-    packets: u32,
-    octets: u32,
-    sent_at_last_report: u32,
     rtt: RttTracker,
     /// The far end's last report on ours: the share it lost, in percent.
     remote_loss_pct: Option<f32>,
@@ -244,6 +253,10 @@ struct Outgoing {
 }
 
 impl Outgoing {
+    fn sends_as(&self, ssrc: u32) -> bool {
+        self.lanes.iter().any(|l| l.ssrc == ssrc)
+    }
+
     fn rtp_at(&self, now: Instant) -> u32 {
         let ticks =
             now.saturating_duration_since(self.epoch).as_micros() as u64 * CLOCK / 1_000_000;
@@ -269,21 +282,36 @@ impl VideoSession {
         inbound: mpsc::Receiver<Inbound>,
         links: SessionLinks,
     ) -> Self {
-        // Ours, sending or not: RTCP needs one.
-        let (ssrc, seq, base_ts) = {
+        // Ours, sending or not: RTCP needs one. Simulcast sends each
+        // encoding under an SSRC of its own.
+        let encodings = plan.send.as_ref().map_or(1, |c| c.encodings.len().max(1));
+        let (lanes, base_ts) = {
             let mut rng = rand::thread_rng();
-            (rng.next_u32(), rng.next_u32() as u16, rng.next_u32())
+            let mut lanes: Vec<(u32, u16)> = Vec::new();
+            while lanes.len() < encodings {
+                let ssrc = rng.next_u32();
+                if !lanes.iter().any(|(s, _)| *s == ssrc) {
+                    lanes.push((ssrc, rng.next_u32() as u16));
+                }
+            }
+            (lanes, rng.next_u32())
         };
+        let ssrc = lanes[0].0;
         let direction = DirectionCell::new(plan.direction);
         let (commands, command_rx) = mpsc::channel(64);
         let outgoing = Arc::new(Mutex::new(Outgoing {
             id: None,
-            ssrc,
+            lanes: lanes
+                .iter()
+                .map(|&(ssrc, _)| LaneCount {
+                    ssrc,
+                    packets: 0,
+                    octets: 0,
+                    sent_at_last_report: 0,
+                })
+                .collect(),
             epoch: Instant::now(),
             base_ts,
-            packets: 0,
-            octets: 0,
-            sent_at_last_report: 0,
             rtt: RttTracker::new(Duration::from_secs(30)),
             remote_loss_pct: None,
             target_kbps: plan.send.as_ref().map_or(0, |c| c.kbps),
@@ -299,7 +327,8 @@ impl VideoSession {
                 cfg,
                 kind: plan.kind,
                 pt: plan.pt,
-                seq,
+                lanes: lanes.clone(),
+                simulcast: plan.simulcast.clone(),
                 transport: Arc::clone(&transport),
                 direction: Arc::clone(&direction),
                 commands: command_rx,
@@ -408,12 +437,65 @@ pub(crate) fn ladder(kbps: u32, max: Resolution, fps: u32) -> (Resolution, u32) 
     (res, if kbps < 150 { fps.min(15) } else { fps })
 }
 
+/// A simulcast encoding is sent only once what is left for it is at
+/// least this share of the most it spends.
+const LAYER_START: f64 = 0.6;
+
+/// `target` kb/s shared among a simulcast source's encodings, given the
+/// most each spends, largest first (FCP's `docs/FORWARDING_ROOMS.md`
+/// §2.4). The smallest is always sent and is served first, so a viewer on
+/// a poor link always has something; each larger one is sent only once
+/// those below it have theirs and what is left is at least
+/// [`LAYER_START`] of its own most. None takes more than its most.
+/// `None`, paused.
+pub(crate) fn share(target: u32, most: &[u32]) -> Vec<Option<u32>> {
+    let mut out = vec![None; most.len()];
+    let mut left = target;
+    let floor = (MIN_BPS / 1000) as u32;
+    for (i, &m) in most.iter().enumerate().rev() {
+        let smallest = i + 1 == most.len();
+        if !smallest && f64::from(left) < f64::from(m) * LAYER_START {
+            break;
+        }
+        let give = if smallest {
+            left.min(m).max(floor)
+        } else {
+            left.min(m)
+        };
+        out[i] = Some(give);
+        left = left.saturating_sub(give);
+    }
+    out
+}
+
+/// One encoding going out: its own SSRC, sequence and packets kept for
+/// NACK, and under simulcast its rid and its share of the target.
+struct Lane {
+    id: EncodingId,
+    ssrc: u32,
+    seq: u16,
+    cache: RtxCache,
+    /// The rid header extension's element: `(id, rid)`.
+    rid: Option<(u8, Bytes)>,
+    max: Resolution,
+    most_kbps: u32,
+    /// What it was last given; `None`, paused.
+    share: Option<u32>,
+    resent: HashMap<u16, Instant>,
+    keyframe_due: bool,
+    last_forced: Option<Instant>,
+}
+
 struct SendLoop {
     host: Arc<dyn VideoHost>,
     cfg: SendConfig,
     kind: super::host::VideoKind,
     pt: u8,
-    seq: u16,
+    /// Each encoding's SSRC and first sequence number, in the order of
+    /// `cfg.encodings`.
+    lanes: Vec<(u32, u16)>,
+    /// The rids `cfg.encodings` go under, and their extension's id.
+    simulcast: Option<super::sdp::Simulcast>,
     transport: Arc<dyn MediaTransport>,
     direction: Arc<DirectionCell>,
     commands: mpsc::Receiver<SendCommand>,
@@ -429,23 +511,65 @@ async fn next_frame(source: &mut Option<Box<dyn VideoSource>>) -> Option<(Encodi
     }
 }
 
+/// Every lane's share of `target`, told to the source.
+fn share_out(lanes: &mut [Lane], target: u32, fps: u32, src: &dyn VideoSource) {
+    let most: Vec<u32> = lanes.iter().map(|l| l.most_kbps).collect();
+    for (lane, share) in lanes.iter_mut().zip(share(target, &most)) {
+        lane.share = share;
+        src.set_encoding_target(
+            lane.id,
+            share.map(|kbps| EncodingTarget {
+                kbps,
+                max: lane.max,
+                fps: if kbps < 150 { fps.min(15) } else { fps },
+            }),
+        );
+    }
+}
+
 async fn send_loop(mut s: SendLoop) {
-    let mut seq = s.seq;
-    let mut cache = RtxCache::new(RTX_CACHE);
     let codec = s.cfg.codec.forge();
-    let ours = s.cfg.encodings.first().copied().unwrap_or(EncodingId(0));
-    let mut target = s.cfg.kbps;
+    let encodings = if s.cfg.encodings.is_empty() {
+        SendConfig::single(s.cfg.max, s.cfg.kbps)
+    } else {
+        s.cfg.encodings.clone()
+    };
+    let mut lanes: Vec<Lane> = encodings
+        .iter()
+        .zip(&s.lanes)
+        .enumerate()
+        .map(|(i, (e, &(ssrc, seq)))| Lane {
+            id: e.id,
+            ssrc,
+            seq,
+            cache: RtxCache::new(RTX_CACHE),
+            rid: s
+                .simulcast
+                .as_ref()
+                .and_then(|sc| Some((sc.ext, Bytes::from(sc.rids.get(i)?.clone().into_bytes())))),
+            max: e.max,
+            most_kbps: e.kbps,
+            share: Some(e.kbps),
+            resent: HashMap::new(),
+            keyframe_due: false,
+            last_forced: None,
+        })
+        .collect();
+    let layered = lanes.len() > 1;
+    // What the far end may be asked to take of us: every lane's most.
+    let most_kbps = if layered {
+        lanes.iter().map(|l| l.most_kbps).sum()
+    } else {
+        s.cfg.kbps
+    };
+    let mut target = most_kbps;
     let mut target_changed = false;
     // The rate the picture's size was chosen for, and what the encoder
-    // actually sent over the last second.
+    // actually sent over the last second (one encoding: its ladder).
     let mut rung_kbps = s.cfg.kbps;
     let mut sent_kbps: Option<u32> = None;
     let mut sent_window = (Instant::now(), 0u64);
-    let mut last_forced: Option<Instant> = None;
-    let mut resent: HashMap<u16, Instant> = HashMap::new();
     let mut budget = ResendBudget::new();
-    let mut keyframe_due = false;
-    let ssrc = s.outgoing.lock().ssrc;
     // The camera is open only while the session sends: not before the
     // user agreed to send (an upgrade taken receive-only), not on hold.
     let mut source: Option<Box<dyn VideoSource>> = None;
@@ -463,12 +587,16 @@ async fn send_loop(mut s: SendLoop) {
             match s.host.start_send(s.cfg.clone()) {
                 Ok(src) => {
                     // A new source starts on a keyframe, as encoders do.
-                    if target != s.cfg.kbps {
+                    if layered {
+                        share_out(&mut lanes, target, s.cfg.fps, src.as_ref());
+                    } else if target != s.cfg.kbps {
                         let (max, fps) = ladder(rung_kbps, s.cfg.max, s.cfg.fps);
                         src.set_target(target, max, fps);
                     }
                     source = Some(src);
-                    keyframe_due = false;
+                    for lane in &mut lanes {
+                        lane.keyframe_due = false;
+                    }
                     target_changed = false;
                     if id.is_none() {
                         let new = StreamId(s.links.streams.fetch_add(1, Ordering::Relaxed));
@@ -487,23 +615,42 @@ async fn send_loop(mut s: SendLoop) {
         }
         if let Some(src) = &source {
             // A keyframe asked for, once the last one made is old enough.
-            if keyframe_due && last_forced.is_none_or(|t| t.elapsed() >= KEYFRAME_MIN_INTERVAL) {
-                keyframe_due = false;
-                last_forced = Some(Instant::now());
-                src.request_keyframe();
+            for lane in lanes.iter_mut() {
+                if lane.keyframe_due
+                    && lane
+                        .last_forced
+                        .is_none_or(|t| t.elapsed() >= KEYFRAME_MIN_INTERVAL)
+                {
+                    lane.keyframe_due = false;
+                    lane.last_forced = Some(Instant::now());
+                    if layered {
+                        src.request_keyframe_of(lane.id);
+                    } else {
+                        src.request_keyframe();
+                    }
+                }
             }
             if target_changed {
                 target_changed = false;
-                rung_kbps = ladder_kbps(target, sent_kbps, rung_kbps);
-                let (max, fps) = ladder(rung_kbps, s.cfg.max, s.cfg.fps);
-                tracing::debug!(
-                    kbps = target,
-                    sent_kbps,
-                    ?max,
-                    fps,
-                    "video: the far end's estimate moved the target"
-                );
-                src.set_target(target, max, fps);
+                if layered {
+                    share_out(&mut lanes, target, s.cfg.fps, src.as_ref());
+                    tracing::debug!(
+                        kbps = target,
+                        shares = ?lanes.iter().map(|l| l.share).collect::<Vec<_>>(),
+                        "video: the far end's estimate shared among the encodings"
+                    );
+                } else {
+                    rung_kbps = ladder_kbps(target, sent_kbps, rung_kbps);
+                    let (max, fps) = ladder(rung_kbps, s.cfg.max, s.cfg.fps);
+                    tracing::debug!(
+                        kbps = target,
+                        sent_kbps,
+                        ?max,
+                        fps,
+                        "video: the far end's estimate moved the target"
+                    );
+                    src.set_target(target, max, fps);
+                }
             }
         }
         tokio::select! {
@@ -511,11 +658,16 @@ async fn send_loop(mut s: SendLoop) {
             cmd = s.commands.recv() => match cmd {
                 None => break,
                 Some(SendCommand::Wake) => {}
-                Some(SendCommand::Keyframe) => {
+                Some(SendCommand::Keyframe(ssrc)) => {
                     s.outgoing.lock().keyframe_requests += 1;
-                    keyframe_due = true;
+                    if let Some(lane) = lanes.iter_mut().find(|l| l.ssrc == ssrc) {
+                        lane.keyframe_due = true;
+                    }
                 }
-                Some(SendCommand::Resend(seqs)) => {
+                Some(SendCommand::Resend(ssrc, seqs)) => {
+                    let Some(lane) = lanes.iter_mut().find(|l| l.ssrc == ssrc) else {
+                        continue;
+                    };
                     let rtt = {
                         let mut o = s.outgoing.lock();
                         o.nacks += seqs.len() as u32;
@@ -525,25 +677,25 @@ async fn send_loop(mut s: SendLoop) {
                     // Not again within a round trip: the last one may be
                     // on its way still.
                     let gap = RESEND_GAP.max(Duration::from_secs_f32(rtt.unwrap_or(0.0).max(0.0) / 1000.0));
-                    resent.retain(|_, t| now.saturating_duration_since(*t) < RESEND_FORGET);
+                    lane.resent.retain(|_, t| now.saturating_duration_since(*t) < RESEND_FORGET);
                     budget.refill(now, target);
-                    for (seq, packet) in cache.lookup(&seqs) {
-                        if resent.get(&seq).is_some_and(|t| now.saturating_duration_since(*t) < gap) {
+                    for (seq, packet) in lane.cache.lookup(&seqs) {
+                        if lane.resent.get(&seq).is_some_and(|t| now.saturating_duration_since(*t) < gap) {
                             continue;
                         }
                         if !budget.take(packet.len()) {
                             break;
                         }
-                        resent.insert(seq, now);
+                        lane.resent.insert(seq, now);
                         s.transport.send_rtp(packet.clone()).await;
                     }
                 }
                 Some(SendCommand::Target(bps)) => {
                     // What the far end allows, within what we were set up
                     // to send.
-                    let kbps = ((bps / 1000) as u32).clamp((MIN_BPS / 1000) as u32, s.cfg.kbps.max(1));
+                    let kbps = ((bps / 1000) as u32).clamp((MIN_BPS / 1000) as u32, most_kbps.max(1));
                     if f64::from(kbps.abs_diff(target)) > f64::from(target) * TARGET_STEP
-                        || (kbps == s.cfg.kbps && target != kbps)
+                        || (kbps == most_kbps && target != kbps)
                     {
                         target = kbps;
                         target_changed = true;
@@ -556,11 +708,20 @@ async fn send_loop(mut s: SendLoop) {
                     tracing::info!(kind = ?s.kind, "video: the source ended");
                     break;
                 };
-                // One encoding is sent today; the others a host may make
-                // for simulcast are for a transport that can carry them.
-                if encoding != ours || !s.direction.get().sends() {
+                if !s.direction.get().sends() {
                     continue;
                 }
+                // An encoding we did not ask for, or one paused whose
+                // frame was on its way.
+                let Some(index) = lanes.iter().position(|l| l.id == encoding) else {
+                    continue;
+                };
+                if layered && lanes[index].share.is_none() {
+                    continue;
+                }
+                // The largest encoding sent stands for the stream's rate.
+                let counted = lanes.iter().position(|l| l.share.is_some()) == Some(index);
+                let lane = &mut lanes[index];
                 let ts = s.outgoing.lock().rtp_at(frame.captured);
                 let payloads = match forge_rtp::video::packetize(
                     codec,
@@ -581,13 +742,17 @@ async fn send_loop(mut s: SendLoop) {
                 let mut sent = (0u32, 0usize, 0usize);
                 for (i, payload) in payloads.into_iter().enumerate() {
                     let len = payload.len();
-                    let packet = RtpPacket::build(s.pt, seq, ts, ssrc, payload, i == last)
-                        .to_bytes()
-                        .freeze();
+                    let mut rtp = RtpPacket::build(s.pt, lane.seq, ts, lane.ssrc, payload, i == last);
+                    // Every packet names its rid: the room binds a
+                    // layer's SSRC by it, whenever it starts listening.
+                    if let Some((ext, rid)) = &lane.rid {
+                        rtp.extension = Some(RtpExtension::one_byte(&[(*ext, rid)]));
+                    }
+                    let packet = rtp.to_bytes().freeze();
                     sent = (sent.0 + 1, sent.1 + len, sent.2 + packet.len());
-                    cache.push(seq, packet.clone());
+                    lane.cache.push(lane.seq, packet.clone());
                     s.transport.send_rtp(packet).await;
-                    seq = seq.wrapping_add(1);
+                    lane.seq = lane.seq.wrapping_add(1);
                 }
                 sent_window.1 += sent.2 as u64;
                 let window = sent_window.0.elapsed();
@@ -596,10 +761,14 @@ async fn send_loop(mut s: SendLoop) {
                     sent_window = (Instant::now(), 0);
                 }
                 let mut o = s.outgoing.lock();
-                o.packets = o.packets.wrapping_add(sent.0);
-                o.octets = o.octets.wrapping_add(sent.1 as u32);
+                if let Some(c) = o.lanes.get_mut(index) {
+                    c.packets = c.packets.wrapping_add(sent.0);
+                    c.octets = c.octets.wrapping_add(sent.1 as u32);
+                }
                 o.bytes += sent.2 as u64;
-                o.frames += 1;
+                if counted {
+                    o.frames += 1;
+                }
             }
         }
     }
@@ -916,17 +1085,27 @@ impl RecvLoop {
                     let _ = self.commands.try_send(SendCommand::Target(bitrate_bps));
                     continue;
                 }
-                p if p.feedback_media_ssrc() != Some(self.ssrc) => continue,
+                p if !p
+                    .feedback_media_ssrc()
+                    .is_some_and(|m| self.outgoing.lock().sends_as(m)) =>
+                {
+                    continue
+                }
                 RtcpPacket::TransportFeedback(RtpFeedback {
                     kind: TransportFeedback::Nack(entries),
+                    media_ssrc,
                     ..
                 }) => {
                     let lost = entries.iter().flat_map(|e| e.lost()).collect();
-                    let _ = self.commands.try_send(SendCommand::Resend(lost));
+                    let _ = self
+                        .commands
+                        .try_send(SendCommand::Resend(media_ssrc, lost));
                     continue;
                 }
                 p if p.is_keyframe_request() => {
-                    let _ = self.commands.try_send(SendCommand::Keyframe);
+                    if let Some(m) = p.feedback_media_ssrc() {
+                        let _ = self.commands.try_send(SendCommand::Keyframe(m));
+                    }
                     continue;
                 }
                 _ => continue,
@@ -936,6 +1115,10 @@ impl RecvLoop {
             let ours = blocks
                 .iter()
                 .find(|b| b.ssrc == self.ssrc)
+                .or_else(|| {
+                    let o = self.outgoing.lock();
+                    blocks.iter().find(|b| o.sends_as(b.ssrc))
+                })
                 .or(match blocks.as_slice() {
                     [only] if self.incoming.is_empty() => Some(only),
                     _ => None,
@@ -996,27 +1179,46 @@ impl RecvLoop {
             .filter(|s| s.stats.is_started())
             .map(|s| s.stats.report_block(now))
             .collect();
-        let mut packet = {
+        let (mut packet, ssrcs) = {
             let mut o = self.outgoing.lock();
-            let sending = o.packets != o.sent_at_last_report;
-            o.sent_at_last_report = o.packets;
-            if sending {
-                let mut sr =
-                    SenderReport::with_current_time(self.ssrc, o.rtp_at(now), o.packets, o.octets);
-                o.rtt.record_outgoing_sr(
-                    (u64::from(sr.ntp_timestamp_msw) << 32) | u64::from(sr.ntp_timestamp_lsw),
-                );
-                for b in blocks {
+            let ts = o.rtp_at(now);
+            // A sender report from each encoding that sent, the first
+            // carrying the blocks; a receiver report when none did.
+            // All at one moment, so a report on any of them gives the
+            // round trip.
+            let base = SenderReport::with_current_time(self.ssrc, ts, 0, 0);
+            let mut blocks = Some(blocks);
+            let mut packet = Vec::new();
+            for lane in o.lanes.iter_mut() {
+                if lane.packets == lane.sent_at_last_report {
+                    continue;
+                }
+                lane.sent_at_last_report = lane.packets;
+                let mut sr = SenderReport {
+                    ssrc: lane.ssrc,
+                    sender_packet_count: lane.packets,
+                    sender_octet_count: lane.octets,
+                    report_blocks: Vec::new(),
+                    ..base.clone()
+                };
+                for b in blocks.take().into_iter().flatten() {
                     sr.add_report_block(b);
                 }
-                RtcpPacket::SenderReport(sr).to_bytes()
-            } else {
+                packet.extend_from_slice(&RtcpPacket::SenderReport(sr).to_bytes());
+            }
+            if !packet.is_empty() {
+                o.rtt.record_outgoing_sr(
+                    (u64::from(base.ntp_timestamp_msw) << 32) | u64::from(base.ntp_timestamp_lsw),
+                );
+            }
+            if let Some(blocks) = blocks.filter(|_| packet.is_empty()) {
                 let mut rr = ReceiverReport::new(self.ssrc);
                 for b in blocks {
                     rr.add_report_block(b);
                 }
-                RtcpPacket::ReceiverReport(rr).to_bytes()
+                packet.extend_from_slice(&RtcpPacket::ReceiverReport(rr).to_bytes());
             }
+            (packet, o.lanes.iter().map(|l| l.ssrc).collect::<Vec<_>>())
         };
         let cname = self
             .links
@@ -1024,7 +1226,9 @@ impl RecvLoop {
             .as_ref()
             .map_or_else(|| format!("{:08x}@anvil", self.ssrc), |a| a.cname());
         let mut sdes = SourceDescription::new();
-        sdes.add_chunk(self.ssrc, vec![SdesItem::new(SDES_CNAME, cname)]);
+        for ssrc in ssrcs {
+            sdes.add_chunk(ssrc, vec![SdesItem::new(SDES_CNAME, cname.clone())]);
+        }
         packet.extend_from_slice(&RtcpPacket::SourceDescription(sdes).to_bytes());
         if let Some(e) = remb {
             self.last_remb = Some((e, now));
@@ -1223,8 +1427,9 @@ mod tests {
                 max: Resolution::P720,
                 kbps: 1500,
                 fps: 30,
-                encodings: vec![EncodingId(0)],
+                encodings: SendConfig::single(Resolution::P720, 1500),
             }),
+            simulcast: None,
         }
     }
 
@@ -1278,6 +1483,176 @@ mod tests {
             assert!(Instant::now() < deadline, "timed out: {what}");
             tokio::time::sleep(Duration::from_millis(20)).await;
         }
+    }
+
+    #[test]
+    fn the_estimate_is_shared_smallest_first_and_a_layer_starts_only_with_enough_for_it() {
+        let most = [1500, 500, 150];
+        assert_eq!(share(2150, &most), [Some(1500), Some(500), Some(150)]);
+        assert_eq!(
+            share(5000, &most),
+            [Some(1500), Some(500), Some(150)],
+            "none past its most"
+        );
+        // 720p needs 900 of its own (60%) before it starts.
+        assert_eq!(share(1549, &most), [None, Some(500), Some(150)]);
+        assert_eq!(share(1550, &most), [Some(900), Some(500), Some(150)]);
+        // 360p needs 300.
+        assert_eq!(share(449, &most), [None, None, Some(150)]);
+        assert_eq!(share(450, &most), [None, Some(300), Some(150)]);
+        // The smallest always goes, at no less than the floor.
+        let floor = (MIN_BPS / 1000) as u32;
+        assert_eq!(share(10, &most), [None, None, Some(floor)]);
+        assert_eq!(share(1000, &[800]), [Some(800)]);
+    }
+
+    /// A camera's three encodings as a room takes them.
+    fn simulcast_plan() -> StreamPlan {
+        let mut p = plan(VideoCodec::Vp8, true, ALL);
+        let rids: Vec<String> = ["h", "m", "l"].iter().map(|r| r.to_string()).collect();
+        let send = p.send.as_mut().unwrap();
+        send.encodings = super::super::layers(&rids, Resolution::P720);
+        p.simulcast = Some(super::super::sdp::Simulcast { rids, ext: 4 });
+        p
+    }
+
+    #[tokio::test]
+    async fn simulcast_sends_each_encoding_under_its_ssrc_and_rid_and_shares_the_estimate() {
+        let host = SyntheticVideoHost::new(&[VideoCodec::Vp8])
+            .with_fps(30)
+            .with_simulcast(3);
+        let (to_far, mut far) = mpsc::channel(8192);
+        let (in_tx, in_rx) = mpsc::channel(super::super::transport::INBOUND_QUEUE);
+        let out = LoopTransport::new(to_far);
+        let _session = VideoSession::start(
+            simulcast_plan(),
+            Arc::new(host.clone()),
+            out.clone(),
+            in_rx,
+            SessionLinks::default(),
+        );
+        // What arrives over `within`: each SSRC's rid and sequence
+        // numbers, and the SSRCs that sent reports.
+        async fn listen(
+            far: &mut mpsc::Receiver<Inbound>,
+            within: Duration,
+        ) -> (BTreeMap<u32, (String, Vec<u16>)>, Vec<u32>) {
+            let mut seen: BTreeMap<u32, (String, Vec<u16>)> = BTreeMap::new();
+            let mut reports = Vec::new();
+            let until = tokio::time::Instant::now() + within;
+            while let Ok(Some(inbound)) = tokio::time::timeout_at(until, far.recv()).await {
+                match inbound {
+                    Inbound::Rtp { packet, .. } => {
+                        let rid = packet
+                            .extension
+                            .as_ref()
+                            .and_then(|e| e.element(4))
+                            .and_then(|d| std::str::from_utf8(d).ok())
+                            .expect("every packet names its rid");
+                        let e = seen
+                            .entry(packet.header.ssrc)
+                            .or_insert_with(|| (rid.to_string(), Vec::new()));
+                        assert_eq!(e.0, rid, "an SSRC keeps its rid");
+                        e.1.push(packet.header.sequence_number);
+                    }
+                    Inbound::Rtcp { packet } => {
+                        for p in RtcpPacket::parse_compound(&packet) {
+                            if let RtcpPacket::SenderReport(sr) = p {
+                                reports.push(sr.ssrc);
+                            }
+                        }
+                    }
+                }
+            }
+            (seen, reports)
+        }
+        let (seen, reports) = listen(&mut far, Duration::from_millis(1500)).await;
+        let by_rid: BTreeMap<String, u32> = seen
+            .iter()
+            .map(|(ssrc, (rid, _))| (rid.clone(), *ssrc))
+            .collect();
+        assert_eq!(
+            by_rid.keys().cloned().collect::<Vec<_>>(),
+            ["h", "l", "m"],
+            "three encodings, three SSRCs"
+        );
+        for ssrc in by_rid.values() {
+            assert!(
+                reports.contains(ssrc),
+                "a sender report for each: {reports:?}"
+            );
+        }
+        let (h, m, l) = (by_rid["h"], by_rid["m"], by_rid["l"]);
+        let made = |id: u8| host.record().sent[0].encodings[&EncodingId(id)].clone();
+        assert!(
+            (0..3).all(|i| made(i).frames > 10),
+            "each encoding made frames"
+        );
+
+        // The far end allows 700 kb/s: 720p pauses, 360p and 180p go on.
+        let remb = |kbps: u64| Inbound::Rtcp {
+            packet: feedback(
+                1,
+                vec![RtcpPacket::PayloadFeedback(PsFeedback::remb(
+                    1,
+                    kbps * 1000,
+                    vec![h, m, l],
+                ))],
+            ),
+        };
+        in_tx.send(remb(700)).await.unwrap();
+        until("720p paused", || made(0).targets.last() == Some(&None)).await;
+        assert_eq!(made(1).targets.last().unwrap().unwrap().kbps, 500);
+        assert_eq!(made(2).targets.last().unwrap().unwrap().kbps, 150);
+        // What was on its way lands; then nothing more of 720p.
+        listen(&mut far, Duration::from_millis(200)).await;
+        let (seen, _) = listen(&mut far, Duration::from_millis(600)).await;
+        assert!(!seen.contains_key(&h), "a paused encoding sends nothing");
+        let m_seqs = seen[&m].1.clone();
+        assert!(seen.contains_key(&l));
+
+        // A PLI for 360p is a keyframe of 360p alone.
+        in_tx
+            .send(Inbound::Rtcp {
+                packet: feedback(1, vec![RtcpPacket::PayloadFeedback(PsFeedback::pli(1, m))]),
+            })
+            .await
+            .unwrap();
+        until("360p's keyframe asked for", || {
+            made(1).keyframe_requests == 1
+        })
+        .await;
+        assert_eq!(
+            (made(0).keyframe_requests, made(2).keyframe_requests),
+            (0, 0)
+        );
+
+        // A NACK of 360p's is answered from its own packets.
+        let lost = m_seqs[m_seqs.len() / 2];
+        in_tx
+            .send(Inbound::Rtcp {
+                packet: feedback(
+                    1,
+                    vec![RtcpPacket::TransportFeedback(RtpFeedback::nack(
+                        1,
+                        m,
+                        &[lost],
+                    ))],
+                ),
+            })
+            .await
+            .unwrap();
+        let (seen, _) = listen(&mut far, Duration::from_millis(500)).await;
+        assert!(seen[&m].1.contains(&lost), "sent again under 360p's SSRC");
+
+        // Room again: 720p comes back, on a keyframe.
+        in_tx.send(remb(3000)).await.unwrap();
+        until("720p back", || {
+            made(0).targets.last().is_some_and(|t| t.is_some())
+        })
+        .await;
+        let (seen, _) = listen(&mut far, Duration::from_millis(500)).await;
+        assert!(seen.contains_key(&h), "720p sends again");
     }
 
     #[tokio::test]

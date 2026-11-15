@@ -1676,3 +1676,128 @@ async fn three_anvils_in_a_forwarding_room_are_each_sent_the_others() {
         let _ = anvil.shutdown().await;
     }
 }
+
+/// A forwarding room sends each viewer the simulcast layer it asks for
+/// (FCP's `docs/FORWARDING_ROOMS.md` §2.4–2.5): two Anvils send their
+/// 640x360 camera as three encodings, and a third, asking for one of them
+/// at 360 and the other at 90, is shown each at that size; asked the other
+/// way round, the sizes change places.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_simulcast_camera_reaches_each_viewer_at_the_size_it_asks_for() {
+    use anvil_core::video::host::Resolution;
+    use anvil_core::{CallMedia, RoomJoin, RoomView, ViewStream, ViewTarget};
+    use anvil_fcp::JoinRole;
+    use anvil_video::{DesktopVideoHost, PatternCamera, SoftwareCodecs, TileKey};
+    let fcp = fcp_or_skip!();
+    let (owner_client, owner) = signed_in(&fcp, "sim-alice").await;
+    let (meeting, room) = fcp
+        .meeting_with(&owner, json!({ "video_mode": "auto" }))
+        .await;
+    let link = owner_client
+        .join_link(&meeting, JoinRole::Guest, None, None)
+        .await
+        .expect("a join link");
+    let domain = owner_client.softphone().await.unwrap().account.domain;
+    let target = format!("sip:{room}@{domain}");
+    let clients = [
+        owner_client,
+        signed_in(&fcp, "sim-bob").await.0,
+        signed_in(&fcp, "sim-carol").await.0,
+    ];
+    let mut people = Vec::new();
+    let mut tiles = Vec::new();
+    for (i, (who, client)) in ["alice", "bob", "carol"].iter().zip(&clients).enumerate() {
+        let host = DesktopVideoHost::new(
+            PatternCamera::new(Resolution {
+                width: 640,
+                height: 360,
+            }),
+            SoftwareCodecs::default(),
+        );
+        tiles.push(host.tiles());
+        let (anvil, mut events) = softphone_with_video(
+            client,
+            &format!("127.0.0.{}", 79 + i),
+            MediaConfig::default(),
+            Box::new(Quiet),
+            Some(Box::new(host)),
+        )
+        .await;
+        let join = if i == 0 {
+            RoomJoin::default()
+        } else {
+            RoomJoin::from_link(&link.link()).expect("the link's token")
+        };
+        let call = anvil
+            .join_room(&target, &join, CallMedia::VIDEO)
+            .await
+            .expect("joins");
+        let call = established(&mut events, Some(call)).await;
+        assert!(anvil.room_forwards(call), "{who}: the room forwards");
+        people.push((anvil, events, call));
+    }
+
+    let carol_tiles = tiles.pop().unwrap();
+    let (carol, carol_events, c) = &mut people[2];
+    let streams = streams_where(
+        carol_events,
+        *c,
+        Duration::from_secs(20),
+        "two named",
+        |s| shown(s).len() == 2,
+    )
+    .await;
+    let named: Vec<(String, anvil_core::video::host::StreamId)> = streams
+        .iter()
+        .filter(|s| !s.speaker)
+        .filter_map(|s| Some((s.member.clone()?, s.stream)))
+        .collect();
+    let (one, two) = (named[0].clone(), named[1].clone());
+    let ask = |big: &str, small: &str| RoomView {
+        streams: Some(vec![
+            ViewStream {
+                target: ViewTarget::Member(big.to_string()),
+                max_height: Some(360),
+                priority: Some(1),
+            },
+            ViewStream {
+                target: ViewTarget::Member(small.to_string()),
+                max_height: Some(90),
+                priority: None,
+            },
+        ]),
+        max_streams: Some(2),
+    };
+    // The heights `one` and `two` are shown at, once both are as asked.
+    let shown_at = async |want: (u32, u32), what: &str| {
+        let deadline = std::time::Instant::now() + Duration::from_secs(30);
+        let mut last = (None, None);
+        while std::time::Instant::now() < deadline {
+            let h = |id| carol_tiles.stats(TileKey::Stream(id)).map(|t| t.height);
+            last = (h(one.1), h(two.1));
+            if last == (Some(want.0), Some(want.1)) {
+                return;
+            }
+            tokio::time::sleep(Duration::from_millis(100)).await;
+        }
+        panic!("{what}: shown at {last:?}, not {want:?}");
+    };
+
+    carol
+        .set_room_view(*c, &ask(&one.0, &two.0))
+        .await
+        .expect("the view");
+    shown_at((360, 90), "one large, the other small").await;
+    carol
+        .set_room_view(*c, &ask(&two.0, &one.0))
+        .await
+        .expect("the view");
+    shown_at((90, 360), "the other way round").await;
+
+    for (anvil, _, call) in &people {
+        let _ = anvil.hangup(*call).await;
+    }
+    for (anvil, _, _) in people {
+        let _ = anvil.shutdown().await;
+    }
+}
