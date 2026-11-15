@@ -32,8 +32,8 @@ use tokio::task::JoinHandle;
 
 use super::bwe::{BandwidthEstimator, RembEstimator, MIN_BPS};
 use super::host::{
-    CodedFrame, EncodingId, ReceiveConfig, Resolution, SendConfig, StreamId, VideoHost, VideoSink,
-    VideoSource,
+    CodedFrame, EncodingId, ReceiveConfig, Resolution, SendConfig, StreamId, VideoHost, VideoKind,
+    VideoSink, VideoSource,
 };
 use super::playout::{self, AudioClock, Playout};
 use super::transport::{Inbound, MediaTransport};
@@ -217,6 +217,8 @@ pub(crate) struct SessionLinks {
     pub events: Option<VideoEvents>,
     /// The call's audio, for lip sync and for the CNAME our reports carry.
     pub audio: Option<Arc<dyn AudioClock>>,
+    /// In a room: whose each incoming camera stream is.
+    pub owners: Option<Arc<crate::room::StreamOwners>>,
 }
 
 /// The send side as the reports and stats see it.
@@ -750,6 +752,7 @@ impl RecvLoop {
                     self.plan.codec,
                 );
             }
+            self.tell_owners(|o| o.arrived(ssrc, id));
             self.incoming.insert(
                 ssrc,
                 Incoming {
@@ -1143,7 +1146,36 @@ impl RecvLoop {
                 if let Some(ev) = &self.links.events {
                     ev.stopped(s.id);
                 }
+                self.tell_owners(|o| o.left(ssrc));
             }
+        }
+    }
+
+    /// A room's camera streams changed: whose each is, told when that
+    /// changes.
+    fn tell_owners(
+        &self,
+        change: impl FnOnce(&crate::room::StreamOwners) -> Option<Vec<crate::room::RoomStream>>,
+    ) {
+        if self.plan.kind != VideoKind::Camera {
+            return;
+        }
+        let (Some(owners), Some(ev)) = (&self.links.owners, &self.links.events) else {
+            return;
+        };
+        if let Some(streams) = change(owners) {
+            ev.room_streams(streams);
+        }
+    }
+}
+
+impl Drop for RecvLoop {
+    /// The session ended (the section was dropped or replaced): its
+    /// streams are no one's now.
+    fn drop(&mut self) {
+        let gone: Vec<u32> = self.incoming.keys().copied().collect();
+        for ssrc in gone {
+            self.tell_owners(|o| o.left(ssrc));
         }
     }
 }

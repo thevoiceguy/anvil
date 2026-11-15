@@ -163,6 +163,28 @@ pub struct RoomView {
     /// We share our screen in it.
     #[serde(default)]
     pub sharing: bool,
+    /// It forwards each person's own stream: its tiles are ours to lay out
+    /// (`streams` says whose each is), and a view says which to send.
+    #[serde(default)]
+    pub forwards: bool,
+    /// Its incoming camera streams and whose each is, in a room that
+    /// forwards.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub streams: Vec<RoomStreamView>,
+}
+
+/// One incoming camera stream of a room that forwards: its tile, and
+/// whose it is.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct RoomStreamView {
+    /// The tile (`VideoStarted`'s stream).
+    pub stream: u32,
+    /// The member it shows, by the room's id, once the roster says.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub member: Option<String>,
+    /// It follows whoever speaks; `member` is whom it shows now.
+    #[serde(default)]
+    pub speaker: bool,
 }
 
 /// One person in a room.
@@ -182,6 +204,12 @@ pub struct RoomMemberView {
     pub speaking: bool,
     #[serde(default)]
     pub presenting: bool,
+    /// In a room that forwards: their stream to us is held back.
+    #[serde(default)]
+    pub paused: bool,
+    /// A host's spotlight is on them.
+    #[serde(default)]
+    pub spotlight: bool,
 }
 
 /// A test of this device's audio, under way.

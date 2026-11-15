@@ -83,6 +83,11 @@ pub(crate) struct RoomCall {
     pub resubscribe: Arc<tokio::sync::Notify>,
     /// The roster subscription, kept while the call lasts.
     pub subscription: Option<tokio::task::JoinHandle<()>>,
+    /// The room said it forwards each person's stream (its answer's
+    /// `Recv-Info: fcp-view`): a view may be asked of it.
+    pub forwards: bool,
+    /// Whose each incoming camera stream is, shared with the call's video.
+    pub owners: Arc<crate::room::StreamOwners>,
 }
 
 impl Drop for RoomCall {
