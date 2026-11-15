@@ -314,6 +314,25 @@ every recommendation:
           socket in the app group's container to `BroadcastScreens`; the
           share ends when either side closes it, or after a minute without
           the extension
+  - [ ] **A6** Rooms that forward each person's stream (FCP's
+        `docs/FORWARDING_ROOMS.md`)
+    - [x] **A6a** The core: a join with video says `Recv-Info: fcp-content,
+          fcp-view`, and the room's answer saying `fcp-view` makes it a
+          room that forwards (`Anvil::room_forwards`, `RoomRoster.forwards`);
+          the roster's `<src-id>`s, `fcp:paused`, the speaker stream and
+          `fcp:spotlight` read; `Event::RoomStreams` naming whose each
+          incoming camera stream is, whichever comes first, the packets or
+          the roster; `Anvil::set_room_view` sending the `fcp-view` INFO
+          (`RoomView`, `ViewStream`, `ViewTarget`); the app's room state
+          (`RoomView.forwards`, `streams`, members' `paused` and
+          `spotlight`) and the `view` command (`room view p1 speaker`);
+          proved against a scripted room and by three Anvils in a room on
+          FCP
+    - [ ] **A6b** Simulcast send: the core's encodings under their rids,
+          the synthetic and Linux hosts
+    - [ ] **A6c** Simulcast in the macOS, Windows, Android and iOS hosts
+    - [ ] **A6d** The app: our own grid, a pin and the speaker as views,
+          names on tiles, more than one content stream kept
 - [ ] **U6** Accessibility, localisation, store listings
 - [ ] **W** The Windows client, finished (the 2026-10-12 survey)
   - [x] **W1** One app: a second start hands its arguments to the running

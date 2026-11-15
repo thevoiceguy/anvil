@@ -161,6 +161,13 @@ impl VideoEvents {
         });
     }
 
+    pub(crate) fn room_streams(&self, streams: Vec<crate::room::RoomStream>) {
+        let _ = self.tx.try_send(Event::RoomStreams {
+            call: self.call,
+            streams,
+        });
+    }
+
     pub(crate) fn stopped(&self, stream: StreamId) {
         let _ = self.tx.try_send(Event::VideoStopped {
             call: self.call,
@@ -250,6 +257,8 @@ pub(crate) struct CallVideo {
     /// many sections, and what each allowed and said. An offer refused
     /// leaves the call as it was.
     before_offer: Option<(usize, Vec<(MediaDirection, MediaDirection)>)>,
+    /// In a room: whose each incoming camera stream is.
+    owners: Option<Arc<crate::room::StreamOwners>>,
 }
 
 impl CallVideo {
@@ -264,7 +273,14 @@ impl CallVideo {
             audio: None,
             held: false,
             before_offer: None,
+            owners: None,
         }
+    }
+
+    /// A room's call: its camera streams are told to `owners` as they
+    /// arrive and end.
+    pub(crate) fn set_owners(&mut self, owners: Arc<crate::room::StreamOwners>) {
+        self.owners = Some(owners);
     }
 
     /// A camera section offered on its own sockets.
@@ -722,6 +738,7 @@ impl CallVideo {
             streams: Arc::clone(&self.streams),
             events,
             audio: self.audio.clone(),
+            owners: self.owners.clone(),
         }
     }
 

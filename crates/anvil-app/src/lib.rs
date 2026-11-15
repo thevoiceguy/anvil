@@ -48,8 +48,8 @@ pub use state::{
     AppearanceView, AudioDevice, AudioDevices, AudioProcessing, AudioTest, AudioTestStage,
     AudioVolume, Brand, CallState, CallVideoView, CallView, CameraView, Change, Contact,
     ContactNumber, Direction, DirectoryListing, H264View, LineView, MessageWaiting, MyPresence,
-    OwnStatus, Person, Push, Quality, Recent, Registration, Ringtone, RoomMemberView, RoomView,
-    State, VideoState, Voicemail,
+    OwnStatus, Person, Push, Quality, Recent, Registration, Ringtone, RoomMemberView,
+    RoomStreamView, RoomView, State, VideoState, Voicemail,
 };
 pub use video::OpenH264;
 
@@ -1073,6 +1073,14 @@ impl Phone {
             }),
             Command::Room { call, action } => {
                 self.room_control(call, action).await?;
+                Ok(Response::ok())
+            }
+            Command::View {
+                call,
+                members,
+                speaker,
+            } => {
+                self.set_view(call, members, speaker).await?;
                 Ok(Response::ok())
             }
             Command::Camera { camera } => {

@@ -8,7 +8,7 @@ use anvil_core::{Event, FloorState, RoomAudio, RoomJoin, RoomMember};
 use anvil_fcp::{JoinRole, RoomLayout};
 
 use crate::command::RoomAction;
-use crate::state::{CallView, Change, Direction, RoomMemberView, RoomView};
+use crate::state::{CallView, Change, Direction, RoomMemberView, RoomStreamView, RoomView};
 use crate::{update_call, CallState, Inner, Phone, PhoneError};
 
 /// What `join` was given: a room's number, or a join link.
@@ -164,6 +164,27 @@ impl Phone {
         Ok(done?)
     }
 
+    /// What the room `call` is in sends us, where it forwards each
+    /// person's stream: `members` and with `speaker` whoever speaks, each
+    /// at the height its tile has (one large, a few at half, more small);
+    /// neither, the room's default.
+    pub(crate) async fn set_view(
+        &self,
+        call: Option<u64>,
+        members: Vec<String>,
+        speaker: bool,
+    ) -> Result<(), PhoneError> {
+        let id = self.pick(call, "no call in a room", |c| {
+            c.room.is_some() && c.state == CallState::Connected
+        })?;
+        let view = view_of(&members, speaker);
+        Ok(self
+            .anvil()
+            .await?
+            .set_room_view(anvil_core::CallId(id), &view)
+            .await?)
+    }
+
     /// A host's control over the room `call` is in.
     pub(crate) async fn room_control(
         &self,
@@ -256,6 +277,37 @@ pub(crate) async fn refresh_meetings(inner: &Inner, fcp: &anvil_fcp::FcpClient) 
     }
 }
 
+/// The view for a layout of `members` (and the speaker): the speaker
+/// large and first kept; the people each as tall as a grid of that many
+/// lets a tile be.
+fn view_of(members: &[String], speaker: bool) -> anvil_core::RoomView {
+    if members.is_empty() && !speaker {
+        return anvil_core::RoomView::default();
+    }
+    let tile = match members.len() + usize::from(speaker) {
+        1 => 720,
+        2..=4 => 360,
+        _ => 180,
+    };
+    let mut streams = Vec::new();
+    if speaker {
+        streams.push(anvil_core::ViewStream {
+            target: anvil_core::ViewTarget::Speaker,
+            max_height: Some(720),
+            priority: Some(1),
+        });
+    }
+    streams.extend(members.iter().map(|m| anvil_core::ViewStream {
+        target: anvil_core::ViewTarget::Member(m.clone()),
+        max_height: Some(tile),
+        priority: None,
+    }));
+    anvil_core::RoomView {
+        max_streams: Some(streams.len().min(25) as u8),
+        streams: Some(streams),
+    }
+}
+
 fn member_view(m: &RoomMember) -> RoomMemberView {
     RoomMemberView {
         id: m.id.clone(),
@@ -270,6 +322,8 @@ fn member_view(m: &RoomMember) -> RoomMemberView {
         camera: m.camera.clone(),
         speaking: m.speaking,
         presenting: m.presenting,
+        paused: m.paused,
+        spotlight: m.spotlight,
     }
 }
 
@@ -301,6 +355,7 @@ pub(crate) fn on_event(inner: &Arc<Inner>, event: &Event) -> bool {
             call,
             members,
             speaker,
+            forwards,
         } if in_room(call.0) => {
             let members: Vec<RoomMemberView> = members.iter().map(member_view).collect();
             let presenter = members
@@ -315,6 +370,27 @@ pub(crate) fn on_event(inner: &Arc<Inner>, event: &Event) -> bool {
                         r.members = members;
                         r.speaker = speaker.clone();
                         r.presenter = presenter;
+                        r.forwards = *forwards;
+                    }
+                },
+                || crate::outgoing(call.0),
+            );
+        }
+        Event::RoomStreams { call, streams } if in_room(call.0) => {
+            let streams: Vec<RoomStreamView> = streams
+                .iter()
+                .map(|s| RoomStreamView {
+                    stream: s.stream.0,
+                    member: s.member.clone(),
+                    speaker: s.speaker,
+                })
+                .collect();
+            update_call(
+                inner,
+                call.0,
+                |c| {
+                    if let Some(r) = c.room.as_mut() {
+                        r.streams = streams;
                     }
                 },
                 || crate::outgoing(call.0),
@@ -359,7 +435,7 @@ pub(crate) fn on_event(inner: &Arc<Inner>, event: &Event) -> bool {
             },
             || crate::outgoing(call.0),
         ),
-        Event::RoomRoster { .. } | Event::RoomFloor { .. } => {}
+        Event::RoomRoster { .. } | Event::RoomFloor { .. } | Event::RoomStreams { .. } => {}
         _ => return false,
     }
     true

@@ -286,6 +286,18 @@ pub enum Event {
         call: CallId,
         members: Vec<crate::room::RoomMember>,
         speaker: Option<String>,
+        /// The room forwards each person's stream ([`Event::RoomStreams`]
+        /// names them): a layout of our own, asked for with
+        /// [`set_room_view`](crate::Anvil::set_room_view), can be drawn.
+        forwards: bool,
+    },
+    /// A room that forwards each person's stream: whose each of `call`'s
+    /// incoming camera streams is, sent whole whenever that changes (a
+    /// stream arrived or ended, or the roster named it). A tile shows its
+    /// member's name; the speaker stream's member changes as people speak.
+    RoomStreams {
+        call: CallId,
+        streams: Vec<crate::room::RoomStream>,
     },
     /// The floor of the room `call` is in: someone shares, stopped, or a
     /// share (ours, when `mine`) was refused.

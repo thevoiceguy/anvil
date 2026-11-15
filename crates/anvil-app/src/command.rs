@@ -54,6 +54,17 @@ pub enum Command {
         call: Option<u64>,
         action: RoomAction,
     },
+    /// What a room that forwards each person's stream sends us: these
+    /// people, and with `speaker` whoever speaks; neither, the room's
+    /// default (the speaker large, those who spoke last small).
+    View {
+        #[serde(default)]
+        call: Option<u64>,
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        members: Vec<String>,
+        #[serde(default, skip_serializing_if = "is_false")]
+        speaker: bool,
+    },
     /// Our camera on or off in a call: a re-INVITE. On, an audio call
     /// becomes a video call.
     Video {
@@ -309,7 +320,8 @@ pub enum RoomAction {
 /// `room <what> …` at the prompt.
 fn room_line(words: &[&str]) -> Result<Command, String> {
     let usage = "room layout grid|speaker, room pin|spotlight <id>|off, \
-                 room mute|camera <id> on|off, room remove <id>, room stop-share";
+                 room mute|camera <id> on|off, room remove <id>, room stop-share, \
+                 room view default|<id>|speaker … [call]";
     let word = |i: usize| words.get(i).map(|w| w.to_string());
     let call_at = |i: usize| -> Result<Option<u64>, String> {
         words
@@ -322,6 +334,34 @@ fn room_line(words: &[&str]) -> Result<Command, String> {
         Ok((!m.eq_ignore_ascii_case("off")).then_some(m))
     };
     let what = word(1).ok_or(usage)?.to_ascii_lowercase();
+    // Our own view, not a host's control: `room view p1 speaker 4`.
+    if what == "view" {
+        let mut rest: Vec<&str> = words.get(2..).unwrap_or_default().to_vec();
+        if rest.is_empty() {
+            return Err(usage.into());
+        }
+        let call = match rest.last().and_then(|w| w.parse::<u64>().ok()) {
+            Some(id) => {
+                rest.pop();
+                Some(id)
+            }
+            None => None,
+        };
+        let mut members = Vec::new();
+        let mut speaker = false;
+        for w in rest {
+            match w.to_ascii_lowercase().as_str() {
+                "default" => {}
+                "speaker" => speaker = true,
+                _ => members.push(w.to_string()),
+            }
+        }
+        return Ok(Command::View {
+            call,
+            members,
+            speaker,
+        });
+    }
     let (action, call) = match what.as_str() {
         "layout" => (
             RoomAction::Layout {
@@ -915,6 +955,23 @@ mod tests {
                 action: RoomAction::StopShare
             }
         );
+        assert_eq!(
+            p("room view p1 speaker 4"),
+            Command::View {
+                call: Some(4),
+                members: vec!["p1".into()],
+                speaker: true
+            }
+        );
+        assert_eq!(
+            p("room view default"),
+            Command::View {
+                call: None,
+                members: vec![],
+                speaker: false
+            }
+        );
+        assert!(Command::parse_line("room view").is_err());
         assert!(Command::parse_line("room mute p2").is_err());
         assert!(Command::parse_line("room dance").is_err());
         // As JSON on the control socket.
