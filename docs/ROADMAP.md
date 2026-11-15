@@ -349,8 +349,14 @@ every recommendation:
           simulator); an encoder failing every picture for a second (a
           phone's hardware out of instances) has its encoding let go while
           another still codes
-    - [ ] **A6d** The app: our own grid, a pin and the speaker as views,
-          names on tiles, more than one content stream kept
+    - [x] **A6d** The app: our own grid, a pin and the speaker as views,
+          names on tiles, more than one content stream kept — where the
+          room forwards, the stage lays out the tiles (a grid, or one large
+          — the user's pin, a host's spotlight or the speaker — with up to
+          four beside it), each named with a speaking ring and marks for
+          muted, pinned and held back, and sends the view each layout
+          needs (`set_room_view`, `room view … pin p1`); a new shared
+          screen is shown and the older kept until it ends
 - [ ] **U6** Accessibility, localisation, store listings
 - [ ] **W** The Windows client, finished (the 2026-10-12 survey)
   - [x] **W1** One app: a second start hands its arguments to the running

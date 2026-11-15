@@ -162,6 +162,21 @@ Future<void> roomControl({
   on_: on_,
 );
 
+/// What the room `call` is in sends us, where it forwards each person's
+/// stream (the user's own layout): `members`, with `speaker` the one who
+/// speaks large, or `pinned` large; neither, the room's default.
+Future<void> setRoomView({
+  BigInt? call,
+  required List<String> members,
+  required bool speaker,
+  String? pinned,
+}) => RustLib.instance.api.crateApiPhoneSetRoomView(
+  call: call,
+  members: members,
+  speaker: speaker,
+  pinned: pinned,
+);
+
 /// Take appearance `index` of a shared line (by key): pick up the call
 /// held there, or join the one up where the line allows barging in; the
 /// new call's id.
@@ -1735,6 +1750,14 @@ class Room {
   /// We share our screen in it.
   final bool sharing;
 
+  /// It forwards each person's own stream: the tiles are ours to lay
+  /// out (`streams` says whose each is), and `set_room_view` says which
+  /// to send.
+  final bool forwards;
+
+  /// Its camera streams coming in and whose each is, where it forwards.
+  final List<RoomStream> streams;
+
   const Room({
     required this.number,
     required this.host,
@@ -1743,6 +1766,8 @@ class Room {
     this.presenter,
     this.floorRefused,
     required this.sharing,
+    required this.forwards,
+    required this.streams,
   });
 
   @override
@@ -1753,7 +1778,9 @@ class Room {
       speaker.hashCode ^
       presenter.hashCode ^
       floorRefused.hashCode ^
-      sharing.hashCode;
+      sharing.hashCode ^
+      forwards.hashCode ^
+      streams.hashCode;
 
   @override
   bool operator ==(Object other) =>
@@ -1766,7 +1793,9 @@ class Room {
           speaker == other.speaker &&
           presenter == other.presenter &&
           floorRefused == other.floorRefused &&
-          sharing == other.sharing;
+          sharing == other.sharing &&
+          forwards == other.forwards &&
+          streams == other.streams;
 }
 
 /// One person in a room.
@@ -1784,6 +1813,13 @@ class RoomMember {
   final bool speaking;
   final bool presenting;
 
+  /// Where the room forwards: their stream to us is held back (the
+  /// network is short).
+  final bool paused;
+
+  /// A host's spotlight is on them.
+  final bool spotlight;
+
   const RoomMember({
     required this.id,
     required this.name,
@@ -1792,6 +1828,8 @@ class RoomMember {
     this.camera,
     required this.speaking,
     required this.presenting,
+    required this.paused,
+    required this.spotlight,
   });
 
   @override
@@ -1802,7 +1840,9 @@ class RoomMember {
       audio.hashCode ^
       camera.hashCode ^
       speaking.hashCode ^
-      presenting.hashCode;
+      presenting.hashCode ^
+      paused.hashCode ^
+      spotlight.hashCode;
 
   @override
   bool operator ==(Object other) =>
@@ -1815,7 +1855,35 @@ class RoomMember {
           audio == other.audio &&
           camera == other.camera &&
           speaking == other.speaking &&
-          presenting == other.presenting;
+          presenting == other.presenting &&
+          paused == other.paused &&
+          spotlight == other.spotlight;
+}
+
+/// One camera stream of a room that forwards: its tile, and whose it is.
+class RoomStream {
+  /// The tile (one of the call's `streams`).
+  final int stream;
+
+  /// The member it shows, by the room's id, once the roster says.
+  final String? member;
+
+  /// It follows whoever speaks.
+  final bool speaker;
+
+  const RoomStream({required this.stream, this.member, required this.speaker});
+
+  @override
+  int get hashCode => stream.hashCode ^ member.hashCode ^ speaker.hashCode;
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is RoomStream &&
+          runtimeType == other.runtimeType &&
+          stream == other.stream &&
+          member == other.member &&
+          speaker == other.speaker;
 }
 
 /// How a person signs in on a server (`POST /auth/discover`).

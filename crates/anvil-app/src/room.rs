@@ -166,18 +166,19 @@ impl Phone {
 
     /// What the room `call` is in sends us, where it forwards each
     /// person's stream: `members` and with `speaker` whoever speaks, each
-    /// at the height its tile has (one large, a few at half, more small);
-    /// neither, the room's default.
+    /// at the height its tile has; `pinned` large; neither, the room's
+    /// default.
     pub(crate) async fn set_view(
         &self,
         call: Option<u64>,
         members: Vec<String>,
         speaker: bool,
+        pinned: Option<String>,
     ) -> Result<(), PhoneError> {
         let id = self.pick(call, "no call in a room", |c| {
             c.room.is_some() && c.state == CallState::Connected
         })?;
-        let view = view_of(&members, speaker);
+        let view = view_of(&members, speaker, pinned.as_deref());
         Ok(self
             .anvil()
             .await?
@@ -277,27 +278,38 @@ pub(crate) async fn refresh_meetings(inner: &Inner, fcp: &anvil_fcp::FcpClient) 
     }
 }
 
-/// The view for a layout of `members` (and the speaker): the speaker
-/// large and first kept; the people each as tall as a grid of that many
-/// lets a tile be.
-fn view_of(members: &[String], speaker: bool) -> anvil_core::RoomView {
-    if members.is_empty() && !speaker {
+/// The view for a layout of `members` (and the speaker): one large (the
+/// pinned, else the speaker) and kept first, the rest small beside it;
+/// without one large, each as tall as a grid of that many lets a tile be.
+fn view_of(members: &[String], speaker: bool, pinned: Option<&str>) -> anvil_core::RoomView {
+    if members.is_empty() && !speaker && pinned.is_none() {
         return anvil_core::RoomView::default();
     }
-    let tile = match members.len() + usize::from(speaker) {
-        1 => 720,
-        2..=4 => 360,
-        _ => 180,
+    let large = |target| anvil_core::ViewStream {
+        target,
+        max_height: Some(720),
+        priority: Some(1),
     };
     let mut streams = Vec::new();
-    if speaker {
-        streams.push(anvil_core::ViewStream {
-            target: anvil_core::ViewTarget::Speaker,
-            max_height: Some(720),
-            priority: Some(1),
-        });
+    if let Some(p) = pinned {
+        streams.push(large(anvil_core::ViewTarget::Member(p.to_string())));
+    } else if speaker {
+        streams.push(large(anvil_core::ViewTarget::Speaker));
     }
-    streams.extend(members.iter().map(|m| anvil_core::ViewStream {
+    let others: Vec<&String> = members
+        .iter()
+        .filter(|m| Some(m.as_str()) != pinned)
+        .collect();
+    let tile = if !streams.is_empty() {
+        180
+    } else {
+        match others.len() {
+            1 => 720,
+            2..=4 => 360,
+            _ => 180,
+        }
+    };
+    streams.extend(others.into_iter().map(|m| anvil_core::ViewStream {
         target: anvil_core::ViewTarget::Member(m.clone()),
         max_height: Some(tile),
         priority: None,
@@ -454,6 +466,58 @@ mod tests {
             "{}.sig",
             base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(payload)
         )
+    }
+
+    /// A view as (target, height, kept first).
+    fn sizes(view: &anvil_core::RoomView) -> Vec<(String, u32, bool)> {
+        view.streams
+            .iter()
+            .flatten()
+            .map(|s| {
+                let who = match &s.target {
+                    anvil_core::ViewTarget::Member(m) => m.clone(),
+                    anvil_core::ViewTarget::Speaker => "speaker".into(),
+                };
+                (who, s.max_height.unwrap_or(0), s.priority == Some(1))
+            })
+            .collect()
+    }
+
+    #[test]
+    fn a_view_asks_for_each_tile_at_its_height() {
+        let m = |v: &[&str]| v.iter().map(|s| s.to_string()).collect::<Vec<_>>();
+        // A grid: as tall as a grid of that many lets a tile be.
+        assert_eq!(
+            sizes(&view_of(&m(&["a"]), false, None)),
+            [("a".into(), 720, false)]
+        );
+        let four = sizes(&view_of(&m(&["a", "b", "c", "d"]), false, None));
+        assert!(four.iter().all(|s| s.1 == 360 && !s.2), "{four:?}");
+        let five = sizes(&view_of(&m(&["a", "b", "c", "d", "e"]), false, None));
+        assert!(five.iter().all(|s| s.1 == 180), "{five:?}");
+        // Pinned: large and first, the others small.
+        assert_eq!(
+            sizes(&view_of(&m(&["a", "b", "c"]), false, Some("b"))),
+            [
+                ("b".into(), 720, true),
+                ("a".into(), 180, false),
+                ("c".into(), 180, false)
+            ]
+        );
+        // The speaker large; a pin wins over it.
+        assert_eq!(
+            sizes(&view_of(&m(&["a", "b"]), true, None)),
+            [
+                ("speaker".into(), 720, true),
+                ("a".into(), 180, false),
+                ("b".into(), 180, false)
+            ]
+        );
+        assert_eq!(
+            sizes(&view_of(&m(&["a"]), true, Some("a"))),
+            [("a".into(), 720, true)]
+        );
+        assert_eq!(view_of(&[], false, None), anvil_core::RoomView::default());
     }
 
     #[test]

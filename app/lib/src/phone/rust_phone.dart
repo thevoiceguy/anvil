@@ -424,12 +424,19 @@ class RustPhone implements PhoneApi {
           camera: m.camera,
           speaking: m.speaking,
           presenting: m.presenting,
+          paused: m.paused,
+          spotlight: m.spotlight,
         ),
     ],
     speaker: r.speaker,
     presenter: r.presenter,
     floorRefused: r.floorRefused,
     sharing: r.sharing,
+    forwards: r.forwards,
+    streams: [
+      for (final st in r.streams)
+        RoomStream(stream: st.stream, member: st.member, speaker: st.speaker),
+    ],
   );
 
   static AudioDevice _device(rust.AudioDevice d) =>
@@ -468,6 +475,19 @@ class RustPhone implements PhoneApi {
     },
     member: member,
     on_: on,
+  );
+
+  @override
+  Future<void> setRoomView(
+    int call, {
+    List<String> members = const [],
+    bool speaker = false,
+    String? pinned,
+  }) => rust.setRoomView(
+    call: _id(call),
+    members: members,
+    speaker: speaker,
+    pinned: pinned,
   );
 
   @override

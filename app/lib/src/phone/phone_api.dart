@@ -285,6 +285,8 @@ class RoomInfo {
     this.presenter,
     this.floorRefused,
     this.sharing = false,
+    this.forwards = false,
+    this.streams = const [],
   });
 
   /// The room's number.
@@ -306,16 +308,54 @@ class RoomInfo {
   /// We share our screen in it.
   final bool sharing;
 
-  RoomInfo copyWith({bool? sharing, String? Function()? floorRefused}) =>
-      RoomInfo(
-        number: number,
-        host: host,
-        members: members,
-        speaker: speaker,
-        presenter: presenter,
-        floorRefused: floorRefused == null ? this.floorRefused : floorRefused(),
-        sharing: sharing ?? this.sharing,
-      );
+  /// It forwards each person's own stream: the tiles are the app's to lay
+  /// out (`streams` says whose each is), and a view says which to send.
+  final bool forwards;
+
+  /// Its camera streams coming in and whose each is, where it forwards.
+  final List<RoomStream> streams;
+
+  RoomInfo copyWith({
+    bool? sharing,
+    String? Function()? floorRefused,
+    List<RoomMember>? members,
+    String? Function()? speaker,
+    bool? forwards,
+    List<RoomStream>? streams,
+  }) => RoomInfo(
+    number: number,
+    host: host,
+    members: members ?? this.members,
+    speaker: speaker == null ? this.speaker : speaker(),
+    presenter: presenter,
+    floorRefused: floorRefused == null ? this.floorRefused : floorRefused(),
+    sharing: sharing ?? this.sharing,
+    forwards: forwards ?? this.forwards,
+    streams: streams ?? this.streams,
+  );
+
+  RoomMember? member(String? id) {
+    for (final m in members) {
+      if (m.id == id) return m;
+    }
+    return null;
+  }
+
+  /// Whose stream `stream` is, where the room forwards.
+  RoomStream? stream(int stream) {
+    for (final s in streams) {
+      if (s.stream == stream) return s;
+    }
+    return null;
+  }
+
+  /// Whom a host's spotlight is on.
+  RoomMember? get spotlit {
+    for (final m in members) {
+      if (m.spotlight) return m;
+    }
+    return null;
+  }
 
   RoomMember? get speaking {
     for (final m in members) {
@@ -335,6 +375,8 @@ class RoomMember {
     this.camera,
     this.speaking = false,
     this.presenting = false,
+    this.paused = false,
+    this.spotlight = false,
   });
 
   /// The room's id for them: what a host's controls name.
@@ -351,8 +393,29 @@ class RoomMember {
   final bool speaking;
   final bool presenting;
 
+  /// Where the room forwards: their stream to us is held back (the
+  /// network is short).
+  final bool paused;
+
+  /// A host's spotlight is on them.
+  final bool spotlight;
+
   bool get muted => audio != 'sending';
   bool get cameraOn => camera == 'on';
+}
+
+/// One camera stream of a room that forwards: its tile, and whose it is.
+class RoomStream {
+  const RoomStream({required this.stream, this.member, this.speaker = false});
+
+  /// The tile (one of the call's `streams`).
+  final int stream;
+
+  /// The member it shows, by the room's id, once the roster says.
+  final String? member;
+
+  /// It follows whoever speaks.
+  final bool speaker;
 }
 
 /// A meeting the user owns on FCP.
@@ -1461,6 +1524,16 @@ abstract class PhoneApi {
     RoomControl control, {
     String? member,
     bool on = false,
+  });
+
+  /// What the room `call` is in sends us, where it forwards each
+  /// person's stream (the user's own layout): `members`, with `speaker` the
+  /// one who speaks large, or `pinned` large; none, the room's default.
+  Future<void> setRoomView(
+    int call, {
+    List<String> members = const [],
+    bool speaker = false,
+    String? pinned,
   });
 
   /// Where a call's pictures are shown.

@@ -1139,6 +1139,18 @@ class StringsEn extends Strings {
   String get selfView => 'You';
 
   @override
+  String get stageGrid => 'Everyone the same size';
+
+  @override
+  String get stageSpeaker => 'The speaker large';
+
+  @override
+  String get stagePinned => 'Pinned';
+
+  @override
+  String get stagePaused => 'Held back: the network is short';
+
+  @override
   String get settingsVideo => 'Video';
 
   @override

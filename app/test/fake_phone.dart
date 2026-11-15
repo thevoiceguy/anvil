@@ -293,6 +293,20 @@ class FakePhone implements PhoneApi {
   }
 
   @override
+  Future<void> setRoomView(
+    int call, {
+    List<String> members = const [],
+    bool speaker = false,
+    String? pinned,
+  }) async {
+    _refuse();
+    log.add(
+      'view $call ${members.join(',')}'
+      '${speaker ? ' speaker' : ''}${pinned == null ? '' : ' pin $pinned'}',
+    );
+  }
+
+  @override
   Future<void> roomControl(
     int call,
     RoomControl control, {
