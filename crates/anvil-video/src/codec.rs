@@ -318,7 +318,11 @@ mod tests {
     #[cfg(target_vendor = "apple")]
     #[test]
     fn videotoolbox_runs_a_simulcast_s_encoders_at_once() {
-        simulcast_keeps_up(&crate::vt::VtCodecs, VideoCodec::H264, 0, true);
+        // An iPhone simulator's encoder is software in a VM (3 s for
+        // 1.7 s of pictures on CI's runner): keeping up there is an
+        // iPhone's media engine's to show, as on the Android emulator.
+        let simulator = cfg!(target_abi = "sim");
+        simulcast_keeps_up(&crate::vt::VtCodecs, VideoCodec::H264, 0, !simulator);
     }
 
     #[cfg(target_vendor = "apple")]
