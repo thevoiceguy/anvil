@@ -481,6 +481,123 @@ mod tests {
         );
     }
 
+    /// Software codecs whose encoders at `fails_at` kb/s fail every
+    /// picture (a hardware encoder out of sessions), counting the tries.
+    #[derive(Clone)]
+    struct FailingAt {
+        fails_at: u32,
+        tries: Arc<std::sync::atomic::AtomicU32>,
+    }
+
+    struct Failing(Arc<std::sync::atomic::AtomicU32>);
+
+    impl codec::Encoder for Failing {
+        fn encode(
+            &mut self,
+            _: &picture::Picture,
+            _: bool,
+        ) -> Result<Option<codec::Encoded>, String> {
+            self.0.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+            Err("no session".into())
+        }
+        fn set_rate(&mut self, _: u32, _: u32) {}
+    }
+
+    impl Codecs for FailingAt {
+        fn caps(&self) -> Vec<anvil_core::video::host::VideoCodecCaps> {
+            SoftwareCodecs::default().caps()
+        }
+        fn encoder(
+            &self,
+            codec: VideoCodec,
+            kbps: u32,
+            fps: u32,
+        ) -> Result<Box<dyn codec::Encoder>, String> {
+            if kbps == self.fails_at {
+                return Ok(Box::new(Failing(Arc::clone(&self.tries))));
+            }
+            SoftwareCodecs::default().encoder(codec, kbps, fps)
+        }
+        fn decoder(&self, codec: VideoCodec) -> Result<Box<dyn codec::Decoder>, String> {
+            SoftwareCodecs::default().decoder(codec)
+        }
+        fn simulcast(&self) -> usize {
+            3
+        }
+    }
+
+    #[tokio::test]
+    async fn an_encoding_whose_encoder_keeps_failing_is_let_go_and_the_others_go_on() {
+        let tries = Arc::new(std::sync::atomic::AtomicU32::new(0));
+        let host = DesktopVideoHost::new(
+            PatternCamera::new(Resolution {
+                width: 640,
+                height: 360,
+            }),
+            FailingAt {
+                fails_at: 100,
+                tries: Arc::clone(&tries),
+            },
+        );
+        let size = |width, height| Resolution { width, height };
+        let layers = [
+            (0, size(640, 360), 600),
+            (1, size(320, 180), 200),
+            (2, size(160, 90), 100),
+        ];
+        let mut source = host
+            .start_send(SendConfig {
+                max: layers[0].1,
+                kbps: layers[0].2,
+                encodings: layers
+                    .iter()
+                    .map(|&(id, max, kbps)| Encoding {
+                        id: EncodingId(id),
+                        max,
+                        kbps,
+                    })
+                    .collect(),
+                ..send_config()
+            })
+            .unwrap();
+        // Two frames a picture: past the pictures it takes to let go.
+        let mut sent = [0u32; 3];
+        for _ in 0..2 * (source::GIVE_UP + 10) {
+            let (id, _) = source.next_frame().await.unwrap();
+            sent[usize::from(id.0)] += 1;
+        }
+        assert_eq!(sent[2], 0, "{sent:?}");
+        assert!(
+            sent[0] > source::GIVE_UP && sent[1] > source::GIVE_UP,
+            "{sent:?}"
+        );
+        let tried = tries.load(std::sync::atomic::Ordering::Relaxed);
+        assert_eq!(tried, source::GIVE_UP, "tried once a picture, then let go");
+
+        // Alone, an encoder that fails is never let go: it is the call's
+        // video.
+        let tries = Arc::new(std::sync::atomic::AtomicU32::new(0));
+        let host = DesktopVideoHost::new(
+            PatternCamera::new(Resolution {
+                width: 640,
+                height: 360,
+            }),
+            FailingAt {
+                fails_at: 300,
+                tries: Arc::clone(&tries),
+            },
+        );
+        let _source = host.start_send(send_config()).unwrap();
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+        while tries.load(std::sync::atomic::Ordering::Relaxed) < 2 * source::GIVE_UP {
+            assert!(
+                std::time::Instant::now() < deadline,
+                "the only encoder let go"
+            );
+            tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+        }
+    }
+
     #[tokio::test]
     async fn simulcast_codes_each_encoding_at_its_size_and_pauses_one_alone() {
         let host = DesktopVideoHost::new(

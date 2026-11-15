@@ -342,9 +342,13 @@ every recommendation:
           (Linux) and off elsewhere until A6c; proved against a scripted
           room and on FCP, a viewer shown each sender at the height it
           asks for
-    - [ ] **A6c** Simulcast in the macOS, Windows, Android and iOS hosts:
-          `Codecs::simulcast` above 1 for VideoToolbox, Media Foundation
-          and MediaCodec once each is shown to run the encoders at once
+    - [x] **A6c** Simulcast in the macOS, Windows, Android and iOS hosts:
+          `Codecs::simulcast` 3 for VideoToolbox, Media Foundation and
+          MediaCodec, each shown in CI to run three encoders of one camera
+          at once (macOS, Windows, the Android emulator, an iPhone
+          simulator); an encoder failing every picture for a second (a
+          phone's hardware out of instances) has its encoding let go while
+          another still codes
     - [ ] **A6d** The app: our own grid, a pin and the speaker as views,
           names on tiles, more than one content stream kept
 - [ ] **U6** Accessibility, localisation, store listings

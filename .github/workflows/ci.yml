@@ -90,13 +90,39 @@ jobs:
       - uses: dtolnay/rust-toolchain@1.97.1
         with:
           components: clippy
-          targets: aarch64-apple-ios
+          targets: aarch64-apple-ios,aarch64-apple-ios-sim
       - uses: Swatinem/rust-cache@v2
       - run: cargo clippy --workspace --all-targets -- -D warnings
       - run: cargo test -p anvil-video
       # The same cameras and codecs on an iPhone (the app's iOS job links
       # them; neither runner has a camera).
       - run: cargo clippy -p anvil-video --target aarch64-apple-ios --all-targets -- -D warnings
+      # VideoToolbox on iOS, in a simulator: the codec tests (a round trip,
+      # a simulcast's encoders at once) as a bare program.
+      - name: anvil-video's codec tests in an iPhone simulator
+        timeout-minutes: 20
+        run: |
+          exe=$(cargo test -p anvil-video --target aarch64-apple-ios-sim --lib --no-run --message-format=json \
+            | python3 -c '
+          import json, sys
+          for line in sys.stdin:
+              m = json.loads(line)
+              if m.get("executable") and m["target"]["name"] == "anvil_video":
+                  print(m["executable"])')
+          udid=$(xcrun simctl list devices available --json | python3 -c '
+          import json, sys
+          for runtime, devices in json.load(sys.stdin)["devices"].items():
+              if "iOS" in runtime:
+                  for d in devices:
+                      if d["name"].startswith("iPhone"):
+                          print(d["udid"]); sys.exit()
+          sys.exit("no iPhone simulator")')
+          xcrun simctl boot "$udid"
+          # Read from what the harness prints, and at least one test run.
+          out=$(xcrun simctl spawn "$udid" "$exe" videotoolbox --test-threads=1 --nocapture 2>&1) ||
+            echo "simctl spawn: $?"
+          echo "$out"
+          echo "$out" | grep -q 'test result: ok\. [1-9]'
 
   # Anvil against FCP: FCP's compose stack from its nightly images, and
   # the tests against it (users made through the admin API, calls through

@@ -29,10 +29,10 @@ use objc2_video_toolbox::{
     kVTCompressionPropertyKey_AllowFrameReordering, kVTCompressionPropertyKey_AverageBitRate,
     kVTCompressionPropertyKey_ExpectedFrameRate, kVTCompressionPropertyKey_MaxKeyFrameInterval,
     kVTCompressionPropertyKey_ProfileLevel, kVTCompressionPropertyKey_RealTime,
-    kVTEncodeFrameOptionKey_ForceKeyFrame, kVTProfileLevel_H264_ConstrainedBaseline_AutoLevel,
-    VTCompressionSession, VTDecodeFrameFlags, VTDecodeInfoFlags,
-    VTDecompressionOutputCallbackRecord, VTDecompressionSession, VTEncodeInfoFlags,
-    VTSessionSetProperty,
+    kVTEncodeFrameOptionKey_ForceKeyFrame, kVTProfileLevel_H264_Baseline_AutoLevel,
+    kVTProfileLevel_H264_ConstrainedBaseline_AutoLevel, VTCompressionSession, VTDecodeFrameFlags,
+    VTDecodeInfoFlags, VTDecompressionOutputCallbackRecord, VTDecompressionSession,
+    VTEncodeInfoFlags, VTSessionSetProperty,
 };
 use parking_lot::Mutex;
 
@@ -47,6 +47,14 @@ const START: [u8; 4] = [0, 0, 0, 1];
 pub(crate) struct VtCodecs;
 
 impl Codecs for VtCodecs {
+    /// Three: VideoToolbox runs a session per encoding, on the Mac's and
+    /// the iPhone's media engine where they have one (shown by
+    /// `videotoolbox_runs_a_simulcast_s_encoders_at_once`, on macOS and in
+    /// an iPhone simulator).
+    fn simulcast(&self) -> usize {
+        3
+    }
+
     fn caps(&self) -> Vec<VideoCodecCaps> {
         vec![VideoCodecCaps {
             codec: VideoCodec::H264,
@@ -92,7 +100,7 @@ fn number(v: i32) -> CFRetained<CFNumber> {
 
 fn set(session: &CFType, key: &CFString, value: &CFType) -> Result<(), String> {
     // SAFETY: a session, a key it knows and a value of the key's type.
-    status("property", unsafe {
+    status(&format!("property {key}"), unsafe {
         VTSessionSetProperty(session, key, Some(value))
     })
 }
@@ -150,11 +158,21 @@ impl VtEncoder {
         // SAFETY: the keys' documented value types.
         unsafe {
             set(ty, kVTCompressionPropertyKey_RealTime, CFBoolean::new(true))?;
+            // Constrained baseline where the encoder names it; baseline
+            // where it does not (the iPhone simulator's), which Apple's
+            // encoder codes without the tools constrained baseline drops.
             set(
                 ty,
                 kVTCompressionPropertyKey_ProfileLevel,
                 kVTProfileLevel_H264_ConstrainedBaseline_AutoLevel,
-            )?;
+            )
+            .or_else(|_| {
+                set(
+                    ty,
+                    kVTCompressionPropertyKey_ProfileLevel,
+                    kVTProfileLevel_H264_Baseline_AutoLevel,
+                )
+            })?;
             set(
                 ty,
                 kVTCompressionPropertyKey_AllowFrameReordering,
