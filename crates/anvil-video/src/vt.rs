@@ -29,10 +29,10 @@ use objc2_video_toolbox::{
     kVTCompressionPropertyKey_AllowFrameReordering, kVTCompressionPropertyKey_AverageBitRate,
     kVTCompressionPropertyKey_ExpectedFrameRate, kVTCompressionPropertyKey_MaxKeyFrameInterval,
     kVTCompressionPropertyKey_ProfileLevel, kVTCompressionPropertyKey_RealTime,
-    kVTEncodeFrameOptionKey_ForceKeyFrame, kVTProfileLevel_H264_ConstrainedBaseline_AutoLevel,
-    VTCompressionSession, VTDecodeFrameFlags, VTDecodeInfoFlags,
-    VTDecompressionOutputCallbackRecord, VTDecompressionSession, VTEncodeInfoFlags,
-    VTSessionSetProperty,
+    kVTEncodeFrameOptionKey_ForceKeyFrame, kVTProfileLevel_H264_Baseline_AutoLevel,
+    kVTProfileLevel_H264_ConstrainedBaseline_AutoLevel, VTCompressionSession, VTDecodeFrameFlags,
+    VTDecodeInfoFlags, VTDecompressionOutputCallbackRecord, VTDecompressionSession,
+    VTEncodeInfoFlags, VTSessionSetProperty,
 };
 use parking_lot::Mutex;
 
@@ -158,11 +158,21 @@ impl VtEncoder {
         // SAFETY: the keys' documented value types.
         unsafe {
             set(ty, kVTCompressionPropertyKey_RealTime, CFBoolean::new(true))?;
+            // Constrained baseline where the encoder names it; baseline
+            // where it does not (the iPhone simulator's), which Apple's
+            // encoder codes without the tools constrained baseline drops.
             set(
                 ty,
                 kVTCompressionPropertyKey_ProfileLevel,
                 kVTProfileLevel_H264_ConstrainedBaseline_AutoLevel,
-            )?;
+            )
+            .or_else(|_| {
+                set(
+                    ty,
+                    kVTCompressionPropertyKey_ProfileLevel,
+                    kVTProfileLevel_H264_Baseline_AutoLevel,
+                )
+            })?;
             set(
                 ty,
                 kVTCompressionPropertyKey_AllowFrameReordering,
