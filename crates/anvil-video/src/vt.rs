@@ -100,7 +100,7 @@ fn number(v: i32) -> CFRetained<CFNumber> {
 
 fn set(session: &CFType, key: &CFString, value: &CFType) -> Result<(), String> {
     // SAFETY: a session, a key it knows and a value of the key's type.
-    status("property", unsafe {
+    status(&format!("property {key}"), unsafe {
         VTSessionSetProperty(session, key, Some(value))
     })
 }
