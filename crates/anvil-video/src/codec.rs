@@ -183,9 +183,23 @@ mod tests {
             }
             let got = dec
                 .decode(&e.data)
-                .unwrap_or_else(|e| panic!("{codec:?} picture {n}: {e}"))
-                .expect("a picture");
-            assert_eq!((got.width, got.height), size);
+                .unwrap_or_else(|e| panic!("{codec:?} picture {n}: {e}"));
+            // A decoder that runs behind (MediaCodec on the emulator) may
+            // hold a picture back and hand it out with a later frame.
+            let Some(got) = got else {
+                assert!(late > 0, "{codec:?} picture {n}: no picture");
+                continue;
+            };
+            let held_over = late > 0 && (30..30 + late).contains(&n) && got.width == 640;
+            assert!(
+                (got.width, got.height) == size || held_over,
+                "{codec:?} picture {n}: {}x{}",
+                got.width,
+                got.height
+            );
+            if held_over {
+                continue;
+            }
             let likeness = recent.iter().map(|p| got.psnr(p)).fold(0.0, f64::max);
             if likeness < worst {
                 (worst, worst_at) = (likeness, n);
