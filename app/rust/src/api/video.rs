@@ -297,9 +297,7 @@ mod tests {
     use std::ffi::c_void;
     use std::time::{Duration, Instant};
 
-    use anvil_core::video::host::{
-        EncodingId, Resolution, SendConfig, VideoCodec, VideoHost, VideoKind,
-    };
+    use anvil_core::video::host::{Resolution, SendConfig, VideoCodec, VideoHost, VideoKind};
     use anvil_video::{DesktopVideoHost, PatternCamera, SoftwareCodecs};
     use parking_lot::Mutex;
 
@@ -338,7 +336,7 @@ mod tests {
                 max: Resolution::P720,
                 kbps: 300,
                 fps: 30,
-                encodings: vec![EncodingId(0)],
+                encodings: SendConfig::single(Resolution::P720, 300),
             })
             .unwrap();
         let drain = tokio::spawn(async move { while source.next_frame().await.is_some() {} });

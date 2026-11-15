@@ -328,9 +328,23 @@ every recommendation:
           `spotlight`) and the `view` command (`room view p1 speaker`);
           proved against a scripted room and by three Anvils in a room on
           FCP
-    - [ ] **A6b** Simulcast send: the core's encodings under their rids,
-          the synthetic and Linux hosts
-    - [ ] **A6c** Simulcast in the macOS, Windows, Android and iOS hosts
+    - [x] **A6b** Simulcast send: a room's camera offered as three
+          encodings (`a=rid` h/m/l, `a=simulcast:send`, the RFC 8852 rid
+          extension) and sent as the room takes them (`a=simulcast:recv`),
+          each under its own SSRC, sequence, NACK cache and sender report,
+          every packet naming its rid; the far end's REMB shared smallest
+          first, a larger encoding paused until there is enough for it
+          (`session::share`); a PLI or NACK answered for the encoding it
+          names; the host interface's `Encoding`s, `VideoHost::simulcast`,
+          `set_encoding_target` and `request_keyframe_of`; the synthetic
+          host and the desktop `CameraSource` (an encoder per encoding,
+          each layer scaled from the capture), on in `SoftwareCodecs`
+          (Linux) and off elsewhere until A6c; proved against a scripted
+          room and on FCP, a viewer shown each sender at the height it
+          asks for
+    - [ ] **A6c** Simulcast in the macOS, Windows, Android and iOS hosts:
+          `Codecs::simulcast` above 1 for VideoToolbox, Media Foundation
+          and MediaCodec once each is shown to run the encoders at once
     - [ ] **A6d** The app: our own grid, a pin and the speaker as views,
           names on tiles, more than one content stream kept
 - [ ] **U6** Accessibility, localisation, store listings

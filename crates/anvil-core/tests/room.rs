@@ -693,6 +693,10 @@ async fn a_forwarding_room_names_each_stream_and_takes_a_view() {
     let pt = vp8_pt(&offered[0]);
     let rtp_pt: u8 = pt.parse().unwrap();
     let alice_camera = SocketAddr::from(([127, 0, 0, 1], section_port(&offered[0])));
+    assert!(
+        !offered[0].contains("a=simulcast"),
+        "a host that cannot simulcast offers one encoding"
+    );
     let answer = video_answer(
         "127.0.0.10",
         &pt,
@@ -846,4 +850,131 @@ async fn a_forwarding_room_names_each_stream_and_takes_a_view() {
         .await;
     let err = refused.await.unwrap().expect_err("refused");
     assert!(err.to_string().contains("400"), "{err}");
+}
+
+/// A camera's RTP packets reaching `socket` within `within`: each SSRC
+/// with the rid its packets name under extension `ext`.
+async fn layers_arriving(
+    socket: &UdpSocket,
+    ext: u8,
+    within: std::time::Duration,
+) -> std::collections::BTreeMap<u32, String> {
+    let mut out = std::collections::BTreeMap::new();
+    let mut buf = [0u8; 2048];
+    let end = tokio::time::Instant::now() + within;
+    while let Ok(Ok((n, _))) = tokio::time::timeout_at(end, socket.recv_from(&mut buf)).await {
+        let p = &buf[..n];
+        // RTP (not RTCP: 200–206) with a one-byte header extension
+        // (RFC 8285).
+        if n < 16 || p[0] >> 6 != 2 || p[0] & 0x10 == 0 || (200..=206).contains(&p[1]) {
+            continue;
+        }
+        let ssrc = u32::from_be_bytes([p[8], p[9], p[10], p[11]]);
+        let at = 12 + 4 * usize::from(p[0] & 0x0f);
+        if p[at..at + 2] != [0xBE, 0xDE] {
+            continue;
+        }
+        let words = usize::from(u16::from_be_bytes([p[at + 2], p[at + 3]]));
+        let mut i = at + 4;
+        let stop = (i + 4 * words).min(n);
+        while i < stop {
+            let (id, len) = (p[i] >> 4, usize::from(p[i] & 0x0f) + 1);
+            if p[i] == 0 {
+                i += 1;
+                continue;
+            }
+            if id == ext {
+                let rid = String::from_utf8_lossy(&p[i + 1..i + 1 + len]).to_string();
+                out.insert(ssrc, rid);
+            }
+            i += 1 + len;
+        }
+    }
+    out
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_room_s_camera_is_sent_as_the_simulcast_the_room_takes() {
+    use anvil_core::video::host::VideoCodec;
+    let (alice, mut events) = start_with_video(
+        account(
+            "sip:alice@127.0.0.1",
+            "sip:127.0.0.1:9",
+            "alice",
+            "",
+            "127.0.0.1",
+            3600,
+        ),
+        MediaConfig::default(),
+        Some(SyntheticVideoHost::new(&[VideoCodec::Vp8]).with_simulcast(3)),
+    )
+    .await;
+    let mut room = Room::bind("127.0.0.11").await;
+    let camera = UdpSocket::bind("127.0.0.11:0").await.unwrap();
+    let screen = UdpSocket::bind("127.0.0.11:0").await.unwrap();
+    let call = alice
+        .join_room(
+            &format!("sip:3000@{}", room.addr),
+            &RoomJoin::default(),
+            CallMedia::VIDEO,
+        )
+        .await
+        .expect("the room is dialed");
+    let (invite, from) = room.next("INVITE ").await;
+    room.invite = invite.clone();
+    room.phone = from;
+    let offered = video_sections(body(&invite));
+    for line in [
+        "a=rid:h send",
+        "a=rid:m send",
+        "a=rid:l send",
+        "a=simulcast:send h;m;l",
+        "urn:ietf:params:rtp-hdrext:sdes:rtp-stream-id",
+    ] {
+        assert!(offered[0].contains(line), "{line} in {}", offered[0]);
+    }
+    assert!(
+        !offered[1].contains("a=simulcast"),
+        "the shared screen is not simulcast"
+    );
+    // The room takes two of them, under an extension id of its own.
+    let pt = vp8_pt(&offered[0]);
+    let answer = video_answer(
+        "127.0.0.11",
+        &pt,
+        camera.local_addr().unwrap().port(),
+        screen.local_addr().unwrap().port(),
+        "sendonly",
+    )
+    .replacen(
+        "a=sendrecv\r\n",
+        "a=extmap:9 urn:ietf:params:rtp-hdrext:sdes:rtp-stream-id\r\n\
+         a=rid:h recv\r\na=rid:l recv\r\na=simulcast:recv h;l\r\na=sendrecv\r\n",
+        1,
+    );
+    room.answer(
+        &invite,
+        from,
+        "200 OK",
+        "Recv-Info: fcp-content, fcp-view\r\n",
+        "application/sdp",
+        &answer,
+    )
+    .await;
+    room.next("ACK ").await;
+    expect(&mut events, SOON, |e| match e {
+        Event::CallEstablished { call: c, .. } if *c == call => Some(()),
+        _ => None,
+    })
+    .await
+    .expect("in the room");
+
+    let layers = layers_arriving(&camera, 9, std::time::Duration::from_secs(2)).await;
+    let mut rids: Vec<&String> = layers.values().collect();
+    rids.sort();
+    assert_eq!(
+        rids,
+        ["h", "l"],
+        "the two it took, each under an SSRC of its own: {layers:?}"
+    );
 }

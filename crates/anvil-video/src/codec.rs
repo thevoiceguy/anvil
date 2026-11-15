@@ -36,6 +36,12 @@ pub trait Codecs: Send + Sync {
     fn caps(&self) -> Vec<VideoCodecCaps>;
     fn encoder(&self, codec: VideoCodec, kbps: u32, fps: u32) -> Result<Box<dyn Encoder>, String>;
     fn decoder(&self, codec: VideoCodec) -> Result<Box<dyn Decoder>, String>;
+    /// How many encoders of one camera it runs at once (simulcast). A
+    /// hardware encoder has sessions to spare or not; 1 until a platform
+    /// is shown to keep up.
+    fn simulcast(&self) -> usize {
+        1
+    }
 }
 
 /// Software codecs: H.264 once Cisco's OpenH264 is on disk, and VP8
@@ -96,6 +102,12 @@ impl Codecs for SoftwareCodecs {
             #[cfg(not(target_os = "linux"))]
             VideoCodec::Vp8 => Err("no VP8 encoder".into()),
         }
+    }
+
+    /// Three: the smaller two cost a quarter and a sixteenth of the
+    /// largest.
+    fn simulcast(&self) -> usize {
+        3
     }
 
     fn decoder(&self, codec: VideoCodec) -> Result<Box<dyn Decoder>, String> {

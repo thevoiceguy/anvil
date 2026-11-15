@@ -2678,9 +2678,18 @@ async fn drive_outgoing_call(
                 }
             };
 
+            // In a room: whether it forwards, known before anyone hears the
+            // call is up.
+            let forwards = resp.headers().get_all("Recv-Info").any(|v| {
+                v.split(',')
+                    .any(|p| p.trim().eq_ignore_ascii_case(room::VIEW_PACKAGE))
+            });
             if let Some(mut entry) = calls.get_mut(&call_id) {
                 entry.negotiated_codec = Some(codec);
                 entry.pipeline = pipeline;
+                if let Some(room) = entry.room.as_mut() {
+                    room.forwards = forwards;
+                }
                 let audio = entry
                     .pipeline
                     .as_ref()
@@ -2714,14 +2723,9 @@ async fn drive_outgoing_call(
                 })
                 .await;
 
-            // In a room: its roster, in the call; and whether it forwards.
-            let forwards = resp.headers().get_all("Recv-Info").any(|v| {
-                v.split(',')
-                    .any(|p| p.trim().eq_ignore_ascii_case(room::VIEW_PACKAGE))
-            });
+            // In a room: its roster, in the call.
             if let Some(mut entry) = calls.get_mut(&call_id) {
                 if let Some(room) = entry.room.as_mut() {
-                    room.forwards = forwards;
                     room.subscription = Some(tokio::spawn(subscribe_roster(
                         call_id,
                         Arc::clone(&calls),

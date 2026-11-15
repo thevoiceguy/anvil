@@ -25,6 +25,49 @@ const H264_PROFILE: &str = "42e01f";
 
 pub(crate) use super::Feedback;
 
+/// RFC 8852's header extension naming a packet's rid.
+pub(crate) const RID_URI: &str = "urn:ietf:params:rtp-hdrext:sdes:rtp-stream-id";
+/// The id we offer it under (any of 1–14; a room answers with ours).
+const RID_EXT: u8 = 4;
+/// A simulcast camera's rids, largest first: the full picture, half its
+/// height, a quarter (FCP's `docs/FORWARDING_ROOMS.md` §2.4, §8 Q5).
+pub(crate) const RIDS: [&str; 3] = ["h", "m", "l"];
+
+/// A section's simulcast (RFC 8853) in one direction: its rids, largest
+/// first, and the id of the header extension that names them.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct Simulcast {
+    pub rids: Vec<String>,
+    pub ext: u8,
+}
+
+impl Simulcast {
+    /// Ours to send: the first `n` of [`RIDS`]; `None` under two (one
+    /// encoding is not simulcast).
+    pub(crate) fn ours(n: usize) -> Option<Self> {
+        (n >= 2).then(|| Self {
+            rids: RIDS.iter().take(n).map(|r| r.to_string()).collect(),
+            ext: RID_EXT,
+        })
+    }
+
+    /// What we send of ours that `theirs` (the far end's receive side)
+    /// takes: our rids it names, in our order, under its extension id;
+    /// `None` when that is fewer than two.
+    pub(crate) fn agreed(&self, theirs: &Simulcast) -> Option<Self> {
+        let rids: Vec<String> = self
+            .rids
+            .iter()
+            .filter(|r| theirs.rids.contains(r))
+            .cloned()
+            .collect();
+        (rids.len() >= 2).then_some(Self {
+            rids,
+            ext: theirs.ext,
+        })
+    }
+}
+
 /// One codec in a section, with its payload type there.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct SectionCodec {
@@ -90,6 +133,9 @@ pub(crate) struct LocalSection {
     pub codecs: Vec<SectionCodec>,
     pub direction: MediaDirection,
     pub crypto: Option<Crypto>,
+    /// The encodings of our camera we offer to send (offered: every one
+    /// we can make; answered: those the far end took).
+    pub simulcast: Option<Simulcast>,
 }
 
 impl LocalSection {
@@ -125,7 +171,17 @@ impl LocalSection {
             codecs,
             direction,
             crypto,
+            simulcast: None,
         }
+    }
+
+    /// The same offer, sending `n` encodings of the camera where `n` is
+    /// two or more.
+    pub(crate) fn with_simulcast(mut self, n: usize) -> Self {
+        if self.kind == VideoKind::Camera {
+            self.simulcast = Simulcast::ours(n);
+        }
+        self
     }
 
     /// The answer declining `offered`: port 0, its own first format.
@@ -137,6 +193,7 @@ impl LocalSection {
             codecs: Vec::new(),
             direction: MediaDirection::Inactive,
             crypto: None,
+            simulcast: None,
         }
         .with_formats(offered.formats.first().cloned())
     }
@@ -201,6 +258,13 @@ impl LocalSection {
                 let _ = write!(out, "a=rtcp-fb:{} goog-remb\r\n", c.pt);
             }
         }
+        if let Some(sc) = &self.simulcast {
+            let _ = write!(out, "a=extmap:{} {RID_URI}\r\n", sc.ext);
+            for rid in &sc.rids {
+                let _ = write!(out, "a=rid:{rid} send\r\n");
+            }
+            let _ = write!(out, "a=simulcast:send {}\r\n", sc.rids.join(";"));
+        }
         if self.kind == VideoKind::Content {
             out.push_str("a=content:slides\r\n");
         }
@@ -237,6 +301,9 @@ pub(crate) struct RemoteSection {
     pub codecs: Vec<SectionCodec>,
     pub direction: MediaDirection,
     pub crypto: Vec<Crypto>,
+    /// The simulcast streams it takes from us (its `a=simulcast` receive
+    /// list, each with an `a=rid … recv`, and the rid extension).
+    pub simulcast_recv: Option<Simulcast>,
 }
 
 impl RemoteSection {
@@ -270,6 +337,9 @@ impl RemoteSection {
             codecs: vec![ours],
             direction,
             crypto,
+            // Simulcast we offer, not answer: a room's offer to us asks
+            // for none.
+            simulcast: None,
         }
     }
 }
@@ -443,11 +513,49 @@ impl Raw {
             port,
             addr: self.addr.or(session_addr),
             profile,
+            simulcast_recv: self.simulcast_recv(),
             formats: self.formats,
             codecs,
             direction,
             crypto,
         })
+    }
+
+    /// The streams the section takes (RFC 8853 §5.1, `a=simulcast:recv`):
+    /// the first alternative of each that is not paused and has an
+    /// `a=rid:<id> recv`; at least two, and the rid extension negotiated.
+    fn simulcast_recv(&self) -> Option<Simulcast> {
+        let ext = self.values("extmap").find_map(|v| {
+            let mut words = v.split_whitespace();
+            let id = words.next()?.split('/').next()?.parse::<u8>().ok()?;
+            (words.next()? == RID_URI).then_some(id)
+        })?;
+        let described: Vec<&str> = self
+            .values("rid")
+            .filter_map(|v| {
+                let mut words = v.split_whitespace();
+                let id = words.next()?;
+                (words.next()? == "recv").then_some(id)
+            })
+            .collect();
+        let value = self.values("simulcast").next()?;
+        let mut words = value.split_whitespace();
+        let mut rids = Vec::new();
+        while let (Some(dir), Some(list)) = (words.next(), words.next()) {
+            if dir != "recv" {
+                continue;
+            }
+            for stream in list.split(';') {
+                let first = stream.split(',').next().unwrap_or_default();
+                if first.starts_with('~') || !described.contains(&first) {
+                    continue;
+                }
+                if !rids.iter().any(|r| r == first) {
+                    rids.push(first.to_string());
+                }
+            }
+        }
+        (rids.len() >= 2).then_some(Simulcast { rids, ext })
     }
 }
 
@@ -560,6 +668,94 @@ mod tests {
             "not asked for what it never named"
         );
         assert!(text.contains("a=recvonly\r\n"));
+    }
+
+    #[test]
+    fn a_room_s_camera_is_offered_as_simulcast_and_the_answer_says_what_it_takes() {
+        let camera = LocalSection::offer(
+            VideoKind::Camera,
+            5000,
+            &[VideoCodec::H264],
+            MediaDirection::Sendrecv,
+            None,
+        )
+        .with_simulcast(3);
+        let content = LocalSection::offer(
+            VideoKind::Content,
+            5002,
+            &[VideoCodec::H264],
+            MediaDirection::Recvonly,
+            None,
+        )
+        .with_simulcast(3);
+        assert!(content.simulcast.is_none(), "a screen is not simulcast");
+        let sdp = with_sections(audio(), &[camera.clone(), content]);
+        for line in [
+            "a=extmap:4 urn:ietf:params:rtp-hdrext:sdes:rtp-stream-id\r\n",
+            "a=rid:h send\r\na=rid:m send\r\na=rid:l send\r\n",
+            "a=simulcast:send h;m;l\r\n",
+        ] {
+            assert!(sdp.contains(line), "{line:?} in {sdp}");
+        }
+        assert_eq!(sdp.matches("a=simulcast").count(), 1);
+        assert!(LocalSection::offer(
+            VideoKind::Camera,
+            5000,
+            &[VideoCodec::H264],
+            MediaDirection::Sendrecv,
+            None
+        )
+        .with_simulcast(1)
+        .simulcast
+        .is_none());
+
+        // FCP's room takes all three, under its own extension id.
+        let answer = "v=0\r\nc=IN IP4 198.51.100.7\r\n\
+            m=video 6000 RTP/AVP 96\r\n\
+            a=rtpmap:96 H264/90000\r\n\
+            a=fmtp:96 profile-level-id=42e01f;packetization-mode=1\r\n\
+            a=extmap:7 urn:ietf:params:rtp-hdrext:sdes:rtp-stream-id\r\n\
+            a=rid:h recv\r\na=rid:m recv\r\na=rid:l recv\r\n\
+            a=simulcast:recv h;m;l\r\na=sendrecv\r\n";
+        let theirs = sections(answer.as_bytes())[0]
+            .simulcast_recv
+            .clone()
+            .unwrap();
+        assert_eq!(theirs.rids, ["h", "m", "l"]);
+        assert_eq!(theirs.ext, 7);
+        let agreed = camera.simulcast.as_ref().unwrap().agreed(&theirs).unwrap();
+        assert_eq!((agreed.rids.clone(), agreed.ext), (theirs.rids.clone(), 7));
+
+        // Two of them, one paused, an alternative: what is left, in our
+        // order.
+        let some = "m=video 6000 RTP/AVP 96\r\n\
+            a=extmap:3/recvonly urn:ietf:params:rtp-hdrext:sdes:rtp-stream-id\r\n\
+            a=rid:h recv\r\na=rid:m recv\r\na=rid:l recv\r\n\
+            a=simulcast:recv l,x;~m;h\r\n";
+        let theirs = sections(some.as_bytes())[0].simulcast_recv.clone().unwrap();
+        assert_eq!(theirs.rids, ["l", "h"]);
+        assert_eq!(
+            camera
+                .simulcast
+                .as_ref()
+                .unwrap()
+                .agreed(&theirs)
+                .unwrap()
+                .rids,
+            ["h", "l"]
+        );
+
+        // Not simulcast: one stream, no extension, or a send list only.
+        for not in [
+            "m=video 6000 RTP/AVP 96\r\na=extmap:4 urn:ietf:params:rtp-hdrext:sdes:rtp-stream-id\r\n\
+             a=rid:h recv\r\na=simulcast:recv h\r\n",
+            "m=video 6000 RTP/AVP 96\r\na=rid:h recv\r\na=rid:l recv\r\na=simulcast:recv h;l\r\n",
+            "m=video 6000 RTP/AVP 96\r\na=extmap:4 urn:ietf:params:rtp-hdrext:sdes:rtp-stream-id\r\n\
+             a=rid:h send\r\na=rid:l send\r\na=simulcast:send h;l\r\n",
+            "m=video 6000 RTP/AVP 96\r\n",
+        ] {
+            assert!(sections(not.as_bytes())[0].simulcast_recv.is_none(), "{not}");
+        }
     }
 
     #[test]
