@@ -18,6 +18,12 @@ use crate::tiles::{TileKey, Tiles};
 /// An encoding's (kbps, max, fps).
 type Target = (u32, Resolution, u32);
 
+/// Pictures in a row an encoder of a simulcast may fail before its
+/// encoding is let go (a second's worth): a hardware encoder out of
+/// sessions, or a size it will not code, fails every picture, and the
+/// other encodings go on without it. The last one coding is never let go.
+pub(crate) const GIVE_UP: u32 = 30;
+
 /// What the core asks of one encoding.
 struct Layer {
     id: EncodingId,
@@ -230,14 +236,18 @@ fn run(
 ) {
     // When each encoding last sent a frame.
     let mut last_sent: Vec<Option<Instant>> = vec![None; encoders.len()];
+    // Each encoder's failures in a row; `GIVE_UP` of them, let go.
+    let mut failures = vec![0u32; encoders.len()];
     'capture: while !control.stop.load(Ordering::Relaxed) {
         let switch = control.switch.lock().take();
         if let Some(id) = switch {
             if !switch_camera(&mut camera, id) {
                 break;
             }
-            // The far end sees the new camera from a keyframe.
+            // The far end sees the new camera from a keyframe; an
+            // encoding let go is tried again on it.
             control.keyframe_all();
+            failures.fill(0);
         }
         let Some(picture) = camera.capture.next() else {
             break;
@@ -247,12 +257,16 @@ fn run(
         // from it.
         let (w0, h0) = picture.fit(control.first);
 
-        for ((layer, encoder), last_sent) in control
+        for (i, ((layer, encoder), last_sent)) in control
             .layers
             .iter()
             .zip(encoders.iter_mut())
             .zip(last_sent.iter_mut())
+            .enumerate()
         {
+            if failures[i] >= GIVE_UP {
+                continue;
+            }
             let (target, changed) = {
                 let mut t = layer.target.lock();
                 let v = *t;
@@ -291,6 +305,7 @@ fn run(
             let keyframe = layer.keyframe.swap(false, Ordering::Relaxed);
             match encoder.encode(&scaled, keyframe) {
                 Ok(Some(encoded)) => {
+                    failures[i] = 0;
                     *last_sent = Some(scaled.captured);
                     let frame = CodedFrame {
                         data: encoded.data.into(),
@@ -302,13 +317,30 @@ fn run(
                     }
                 }
                 Ok(None) => {
+                    failures[i] = 0;
                     if keyframe {
                         layer.keyframe.store(true, Ordering::Relaxed);
                     }
                 }
                 Err(e) => {
-                    tracing::warn!(encoding = layer.id.0, "video encoder: {e}");
                     layer.keyframe.store(true, Ordering::Relaxed);
+                    let others = failures
+                        .iter()
+                        .enumerate()
+                        .any(|(j, &f)| j != i && f < GIVE_UP);
+                    if failures[i] + 1 < GIVE_UP || !others {
+                        // Said once a run of failures, not every picture.
+                        if failures[i] == 0 {
+                            tracing::warn!(encoding = layer.id.0, "video encoder: {e}");
+                        }
+                        failures[i] = (failures[i] + 1).min(GIVE_UP - 1);
+                    } else {
+                        failures[i] = GIVE_UP;
+                        tracing::warn!(
+                            encoding = layer.id.0,
+                            "video encoder failed {GIVE_UP} pictures in a row, its encoding let go: {e}"
+                        );
+                    }
                 }
             }
         }

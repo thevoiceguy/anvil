@@ -47,6 +47,14 @@ const START: [u8; 4] = [0, 0, 0, 1];
 pub(crate) struct VtCodecs;
 
 impl Codecs for VtCodecs {
+    /// Three: VideoToolbox runs a session per encoding, on the Mac's and
+    /// the iPhone's media engine where they have one (shown by
+    /// `videotoolbox_runs_a_simulcast_s_encoders_at_once`, on macOS and in
+    /// an iPhone simulator).
+    fn simulcast(&self) -> usize {
+        3
+    }
+
     fn caps(&self) -> Vec<VideoCodecCaps> {
         vec![VideoCodecCaps {
             codec: VideoCodec::H264,
