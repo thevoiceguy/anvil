@@ -270,6 +270,26 @@ mod tests {
             types.contains(&7) && types.contains(&8) && types.contains(&5),
             "{types:?}"
         );
+        // And a keyframe asked for later, as a far end that joined late or
+        // lost one asks: a decoder starting from it has only what it carries.
+        let mut later = None;
+        for i in 1..40 {
+            if let Some(e) = enc.encode(&Picture::pattern(320, 180, i), i == 20).unwrap() {
+                if i >= 20 && e.keyframe {
+                    later = Some(e);
+                    break;
+                }
+            }
+        }
+        let e = later.expect("the keyframe asked for");
+        let types: Vec<u8> = crate::mf::nal_units(&e.data)
+            .iter()
+            .map(|nal| nal[0] & 0x1F)
+            .collect();
+        assert!(
+            types.contains(&7) && types.contains(&8) && types.contains(&5),
+            "the later keyframe: {types:?}"
+        );
     }
 
     #[cfg(target_os = "android")]
