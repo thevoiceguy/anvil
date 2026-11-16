@@ -64,6 +64,10 @@ pub enum Command {
         members: Vec<String>,
         #[serde(default, skip_serializing_if = "is_false")]
         speaker: bool,
+        /// One of them large and kept first (the user's pin), the rest
+        /// small.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        pinned: Option<String>,
     },
     /// Our camera on or off in a call: a re-INVITE. On, an audio call
     /// becomes a video call.
@@ -321,7 +325,7 @@ pub enum RoomAction {
 fn room_line(words: &[&str]) -> Result<Command, String> {
     let usage = "room layout grid|speaker, room pin|spotlight <id>|off, \
                  room mute|camera <id> on|off, room remove <id>, room stop-share, \
-                 room view default|<id>|speaker … [call]";
+                 room view default|<id>|speaker|pin <id> … [call]";
     let word = |i: usize| words.get(i).map(|w| w.to_string());
     let call_at = |i: usize| -> Result<Option<u64>, String> {
         words
@@ -349,10 +353,18 @@ fn room_line(words: &[&str]) -> Result<Command, String> {
         };
         let mut members = Vec::new();
         let mut speaker = false;
-        for w in rest {
+        let mut pinned = None;
+        let mut words = rest.into_iter();
+        while let Some(w) = words.next() {
             match w.to_ascii_lowercase().as_str() {
                 "default" => {}
                 "speaker" => speaker = true,
+                // `pin p1`: p1, large.
+                "pin" => {
+                    let m = words.next().ok_or(usage)?;
+                    pinned = Some(m.to_string());
+                    members.push(m.to_string());
+                }
                 _ => members.push(w.to_string()),
             }
         }
@@ -360,6 +372,7 @@ fn room_line(words: &[&str]) -> Result<Command, String> {
             call,
             members,
             speaker,
+            pinned,
         });
     }
     let (action, call) = match what.as_str() {
@@ -960,15 +973,27 @@ mod tests {
             Command::View {
                 call: Some(4),
                 members: vec!["p1".into()],
-                speaker: true
+                speaker: true,
+                pinned: None,
             }
         );
+        assert_eq!(
+            p("room view p1 pin p2 p3"),
+            Command::View {
+                call: None,
+                members: vec!["p1".into(), "p2".into(), "p3".into()],
+                speaker: false,
+                pinned: Some("p2".into()),
+            }
+        );
+        assert!(Command::parse_line("room view pin").is_err());
         assert_eq!(
             p("room view default"),
             Command::View {
                 call: None,
                 members: vec![],
-                speaker: false
+                speaker: false,
+                pinned: None,
             }
         );
         assert!(Command::parse_line("room view").is_err());

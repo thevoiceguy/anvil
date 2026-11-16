@@ -199,6 +199,126 @@ void main() {
     expect(find.byKey(const ValueKey('content-9')), findsOneWidget);
     expect(find.byKey(const ValueKey('tile-7')), findsOneWidget);
     expect(phone.tiles.open, containsAll([9, 7]));
+    // The room composes: its tiles are its own, so no view is sent and
+    // the tiles carry no names.
+    expect(phone.log.where((l) => l.startsWith('view')), isEmpty);
+    expect(find.byKey(const ValueKey('name-7')), findsNothing);
+    expect(find.byKey(const Key('stageLayout')), findsNothing);
+  });
+
+  testWidgets('a room that forwards is laid out by the app and told so', (
+    tester,
+  ) async {
+    final phone = await signedIn(tester, seed: withMeetings);
+    await tapKey(tester, 'meetings');
+    await tapKey(tester, 'meetingJoin-m1');
+    const people = [...members, RoomMember(id: 'p3', name: 'Cy', camera: 'on')];
+    const streams = [
+      RoomStream(stream: 7, member: 'p1'),
+      RoomStream(stream: 8, member: 'p2'),
+      RoomStream(stream: 9, member: 'p2', speaker: true),
+    ];
+    final room = const RoomInfo(
+      number: '3000',
+      members: people,
+      speaker: 'p2',
+      forwards: true,
+      streams: streams,
+    );
+    inRoom(phone, 1, room);
+    for (final st in [7, 8, 9]) {
+      phone.streamIn(1, st);
+    }
+    await tester.pumpAndSettle();
+    List<String> views() => [
+      for (final l in phone.log)
+        if (l.startsWith('view')) l,
+    ];
+
+    // A grid, each tile named; whoever speaks ringed; the view asks for
+    // everyone.
+    expect(views(), ['view 1 p1,p2,p3']);
+    expect(find.byKey(const Key('largeStage')), findsNothing);
+    expect(
+      tester.widget<Text>(find.byKey(const ValueKey('name-7'))).data,
+      'Ann',
+    );
+    expect(
+      tester.widget<Text>(find.byKey(const ValueKey('name-8'))).data,
+      'Bob',
+    );
+    expect(find.byKey(const ValueKey('speaking-8')), findsOneWidget);
+    expect(find.byKey(const ValueKey('speaking-7')), findsNothing);
+
+    // A tile tapped is pinned: large, and asked for so.
+    await tester.tap(find.byKey(const ValueKey('tile-7')));
+    await tester.pumpAndSettle();
+    expect(views().last, 'view 1 p1,p2,p3 pin p1');
+    expect(find.byKey(const Key('largeStage')), findsOneWidget);
+    expect(find.byKey(const ValueKey('pinned-7')), findsOneWidget);
+    // Tapped again, let go: the grid again.
+    await tester.tap(find.byKey(const ValueKey('tile-7')));
+    await tester.pumpAndSettle();
+    expect(views().last, 'view 1 p1,p2,p3');
+    expect(find.byKey(const Key('largeStage')), findsNothing);
+
+    // The speaker's view: the stream that follows the speaker large.
+    await tapKey(tester, 'stageLayout');
+    expect(views().last, 'view 1 p1,p2,p3 speaker');
+    expect(find.byKey(const Key('largeStage')), findsOneWidget);
+
+    // A roster change that alters nothing asked sends nothing.
+    final sent = views().length;
+    inRoom(phone, 1, room.copyWith(speaker: () => 'p1'));
+    await tester.pumpAndSettle();
+    expect(views().length, sent);
+
+    // A host's spotlight is honoured while nobody is pinned.
+    inRoom(
+      phone,
+      1,
+      room.copyWith(
+        members: [
+          for (final m in people)
+            m.id == 'p1'
+                ? const RoomMember(
+                    id: 'p1',
+                    name: 'Ann',
+                    camera: 'on',
+                    spotlight: true,
+                    paused: true,
+                  )
+                : m,
+        ],
+      ),
+    );
+    await tester.pumpAndSettle();
+    expect(views().last, 'view 1 p1,p2,p3 pin p1');
+    expect(find.byKey(const ValueKey('pinned-7')), findsOneWidget);
+    // Held back by the network: said on the tile.
+    expect(find.byKey(const ValueKey('paused-7')), findsOneWidget);
+
+    // Someone pinned who then leaves is let go.
+    inRoom(phone, 1, room);
+    await tester.pumpAndSettle();
+    // The speaker's tile, large: it shows Bob now (tile 8 is under the
+    // self-view).
+    await tester.tap(find.byKey(const ValueKey('tile-9')));
+    await tester.pumpAndSettle();
+    expect(views().last, 'view 1 p1,p2,p3 pin p2');
+    inRoom(
+      phone,
+      1,
+      room.copyWith(
+        members: [
+          for (final m in people)
+            if (m.id != 'p2') m,
+        ],
+        streams: [streams.first],
+      ),
+    );
+    await tester.pumpAndSettle();
+    expect(views().last, 'view 1 p1,p3 speaker');
   });
 
   testWidgets('our share stopped by the room is said', (tester) async {

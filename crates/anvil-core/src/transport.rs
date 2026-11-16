@@ -107,19 +107,32 @@ pub(crate) async fn start_transports(
     // TCP on the same address and port as UDP, bound before this returns:
     // a peer calling the moment Anvil has started must find it listening.
     // A port the system chose for UDP can be one Windows keeps from TCP (an
-    // excluded range: os error 10013): another is chosen then.
+    // excluded range: os error 10013). The next UDP ports it hands out lie
+    // beside the first, in the same range, so after a refusal TCP chooses
+    // the port and UDP takes it.
     let any_port = bind_addr
         .rsplit_once(':')
         .is_some_and(|(_, port)| port == "0");
+    let host = bind_addr.rsplit_once(':').map_or(bind_addr, |(h, _)| h);
     let mut attempts = 0;
     let (udp_socket, tcp_bind, tcp_listener) = loop {
         attempts += 1;
-        let udp_socket = Arc::new(UdpSocket::bind(bind_addr).await?);
-        let tcp_bind = udp_socket.local_addr()?.to_string();
-        match bind_tcp(&tcp_bind) {
-            Ok(listener) => break (udp_socket, tcp_bind, listener),
-            Err(e) if any_port && attempts < 5 => {
-                tracing::debug!(%e, bind = %tcp_bind, "TCP cannot have UDP's port; choosing another");
+        let tried = if attempts == 1 || !any_port {
+            let udp = UdpSocket::bind(bind_addr).await?;
+            let addr = udp.local_addr()?.to_string();
+            bind_tcp(&addr).map(|tcp| (udp, addr, tcp))
+        } else {
+            let tcp = bind_tcp(&format!("{host}:0"))?;
+            let addr = tcp.local_addr()?.to_string();
+            UdpSocket::bind(&addr)
+                .await
+                .map(|udp| (udp, addr, tcp))
+                .map_err(anyhow::Error::from)
+        };
+        match tried {
+            Ok((udp, addr, tcp)) => break (Arc::new(udp), addr, tcp),
+            Err(e) if any_port && attempts < 10 => {
+                tracing::debug!(%e, attempts, "UDP and TCP cannot share that port; choosing another");
             }
             Err(e) => return Err(e),
         }

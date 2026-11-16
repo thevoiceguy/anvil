@@ -134,9 +134,38 @@ pub struct CallVideoView {
     /// until the user turns it on.
     #[serde(default)]
     pub requested: bool,
-    /// The shared screen coming in (a room's), apart from the cameras.
+    /// The shared screen coming in (a room's), apart from the cameras:
+    /// the newest of `contents`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub content: Option<u32>,
+    /// Every shared screen coming in, oldest first: a new share can start
+    /// before the last one's stream has ended, and the older is shown
+    /// again if the newer ends first.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub contents: Vec<u32>,
+}
+
+impl CallVideoView {
+    /// A shared screen started coming in: shown, the others kept.
+    pub(crate) fn content_started(&mut self, stream: u32) {
+        if !self.contents.contains(&stream) {
+            self.contents.push(stream);
+        }
+        self.content = Some(stream);
+    }
+
+    /// A stream ended, whichever it was: a shared screen shown gives way
+    /// to the newest still coming.
+    pub(crate) fn stopped(&mut self, stream: u32) {
+        self.streams.retain(|s| *s != stream);
+        self.contents.retain(|s| *s != stream);
+        if self.content == Some(stream) {
+            self.content = self.contents.last().copied();
+        }
+        if self.sending == Some(stream) {
+            self.sending = None;
+        }
+    }
 }
 
 /// The room a call is in (FCP's `docs/SOFTPHONE_VIDEO.md` §2.6).
@@ -855,9 +884,10 @@ pub enum Change {
     Lines {
         lines: Vec<LineView>,
     },
-    /// A call appeared or changed.
+    /// A call appeared or changed (boxed: a call is far larger than any
+    /// other change).
     Call {
-        call: CallView,
+        call: Box<CallView>,
     },
     CallEnded {
         id: u64,
@@ -944,4 +974,27 @@ pub enum Change {
     Meetings {
         count: u32,
     },
+}
+
+#[cfg(test)]
+mod video_tests {
+    use super::CallVideoView;
+
+    #[test]
+    fn a_second_shared_screen_is_shown_and_the_first_kept_until_it_ends() {
+        let mut v = CallVideoView::default();
+        v.content_started(7);
+        // A new share's stream before the old one's has ended.
+        v.content_started(9);
+        assert_eq!((v.content, v.contents.clone()), (Some(9), vec![7, 9]));
+        // The newer ends first: the older is shown again.
+        v.stopped(9);
+        assert_eq!((v.content, v.contents.clone()), (Some(7), vec![7]));
+        v.content_started(11);
+        // The older ends: the newer stays.
+        v.stopped(7);
+        assert_eq!((v.content, v.contents.clone()), (Some(11), vec![11]));
+        v.stopped(11);
+        assert_eq!((v.content, v.contents.is_empty()), (None, true));
+    }
 }

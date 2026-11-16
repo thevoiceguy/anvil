@@ -187,6 +187,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   List<RoomMember> dco_decode_list_room_member(dynamic raw);
 
   @protected
+  List<RoomStream> dco_decode_list_room_stream(dynamic raw);
+
+  @protected
   List<TrayIcon> dco_decode_list_tray_icon(dynamic raw);
 
   @protected
@@ -284,6 +287,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   RoomMember dco_decode_room_member(dynamic raw);
+
+  @protected
+  RoomStream dco_decode_room_stream(dynamic raw);
 
   @protected
   SignInMethods dco_decode_sign_in_methods(dynamic raw);
@@ -497,6 +503,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   List<RoomMember> sse_decode_list_room_member(SseDeserializer deserializer);
 
   @protected
+  List<RoomStream> sse_decode_list_room_stream(SseDeserializer deserializer);
+
+  @protected
   List<TrayIcon> sse_decode_list_tray_icon(SseDeserializer deserializer);
 
   @protected
@@ -604,6 +613,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   RoomMember sse_decode_room_member(SseDeserializer deserializer);
+
+  @protected
+  RoomStream sse_decode_room_stream(SseDeserializer deserializer);
 
   @protected
   SignInMethods sse_decode_sign_in_methods(SseDeserializer deserializer);
@@ -864,6 +876,12 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   );
 
   @protected
+  void sse_encode_list_room_stream(
+    List<RoomStream> self,
+    SseSerializer serializer,
+  );
+
+  @protected
   void sse_encode_list_tray_icon(List<TrayIcon> self, SseSerializer serializer);
 
   @protected
@@ -1000,6 +1018,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   void sse_encode_room_member(RoomMember self, SseSerializer serializer);
+
+  @protected
+  void sse_encode_room_stream(RoomStream self, SseSerializer serializer);
 
   @protected
   void sse_encode_sign_in_methods(SignInMethods self, SseSerializer serializer);
