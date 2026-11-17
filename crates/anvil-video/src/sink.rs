@@ -45,10 +45,15 @@ fn run(key: TileKey, mut decoder: Box<dyn Decoder>, rx: &mpsc::Receiver<Message>
     // Nothing is shown before a keyframe: a decoder fed anything else
     // makes garbage.
     let mut wait_for_key = true;
+    let (mut skipped, mut failed) = (0u64, 0u64);
     while let Ok(message) = rx.recv() {
         match message {
             Message::Frame(frame, at) => {
                 if wait_for_key && !frame.keyframe {
+                    skipped += 1;
+                    if skipped % 300 == 0 {
+                        tracing::warn!(?key, "video: {skipped} frames waiting for a keyframe");
+                    }
                     continue;
                 }
                 match decoder.decode(&frame.data) {
@@ -64,7 +69,10 @@ fn run(key: TileKey, mut decoder: Box<dyn Decoder>, rx: &mpsc::Receiver<Message>
                     }
                     Ok(None) => {}
                     Err(e) => {
-                        tracing::debug!(?key, "video decoder: {e}");
+                        failed += 1;
+                        if failed == 1 || failed % 100 == 0 {
+                            tracing::warn!(?key, "video decoder ({failed} failed): {e}");
+                        }
                         wait_for_key = true;
                         tiles.set_frozen(key);
                     }

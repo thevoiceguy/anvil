@@ -38,6 +38,7 @@ const AVC_BASELINE: i32 = 1;
 const CBR: i32 = 2;
 const BUFFER_FLAG_KEY_FRAME: u32 = 1;
 const BUFFER_FLAG_CODEC_CONFIG: u32 = 2;
+const BUFFER_FLAG_END_OF_STREAM: u32 = 4;
 const INFO_TRY_AGAIN_LATER: isize = -1;
 const INFO_OUTPUT_FORMAT_CHANGED: isize = -2;
 const INFO_OUTPUT_BUFFERS_CHANGED: isize = -3;
@@ -104,6 +105,19 @@ impl Format {
         // SAFETY: as in `set`; the value is copied.
         unsafe { ndk_sys::AMediaFormat_setString(self.0.as_ptr(), key.as_ptr(), value.as_ptr()) };
         self
+    }
+
+    /// The format as the codec describes it, for the log.
+    fn describe(&self) -> String {
+        // SAFETY: the string is the format's, valid until it changes; copied at once.
+        let text = unsafe { ndk_sys::AMediaFormat_toString(self.0.as_ptr()) };
+        if text.is_null() {
+            return String::new();
+        }
+        // SAFETY: a C string the format owns, read before anything changes it.
+        unsafe { CStr::from_ptr(text) }
+            .to_string_lossy()
+            .into_owned()
     }
 
     fn get(&self, key: &CStr) -> Option<i32> {
@@ -488,6 +502,32 @@ pub(crate) struct McDecoder {
     reader: Reader,
     size: (u32, u32),
     n: u64,
+    /// What it has done, for the log while it shows nothing.
+    seen: Seen,
+}
+
+/// A decoder's counts: frames in, buffers out (and how many said they were
+/// empty), pictures read, and frames larger than the codec's input buffer.
+#[derive(Default)]
+struct Seen {
+    frames: u64,
+    buffers: u64,
+    empty: u64,
+    pictures: u64,
+    too_big: u64,
+}
+
+impl std::fmt::Display for Seen {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let Seen {
+            frames,
+            buffers,
+            empty,
+            pictures,
+            too_big,
+        } = self;
+        write!(f, "{frames} frames in, {buffers} buffers out ({empty} said empty), {pictures} pictures, {too_big} cut")
+    }
 }
 
 impl McDecoder {
@@ -508,6 +548,7 @@ impl McDecoder {
             reader,
             size,
             n: 0,
+            seen: Seen::default(),
         })
     }
 
@@ -537,12 +578,22 @@ impl Decoder for McDecoder {
     fn decode(&mut self, data: &[u8]) -> Result<Option<Picture>, String> {
         let pts = self.n * 33_333;
         self.n += 1;
+        self.seen.frames += 1;
+        let mut too_big = false;
         if !self.codec.queue(WAIT, pts, |buf| {
+            too_big = data.len() > buf.len();
             let n = data.len().min(buf.len());
             buf[..n].copy_from_slice(&data[..n]);
             n
         })? {
             return Err("the decoder has no room".into());
+        }
+        if too_big {
+            self.seen.too_big += 1;
+            tracing::warn!(
+                "video decoder: a {}-byte frame cut to fit its input buffer",
+                data.len()
+            );
         }
         let until = Instant::now() + WAIT;
         let mut drawn = false;
@@ -551,10 +602,19 @@ impl Decoder for McDecoder {
             match self.codec.dequeue(left) {
                 Output::None if left.is_zero() => break,
                 Output::None => {}
-                Output::Format => self.resize()?,
+                Output::Format => {
+                    tracing::info!("video decoder: {}", self.codec.output_format().describe());
+                    self.resize()?;
+                }
                 Output::Failed(e) => return Err(e),
                 Output::Buffer(i, info) => {
-                    let show = info.size > 0;
+                    // Drawn on the reader's surface, a buffer may say it holds
+                    // nothing (some phones' decoders always do): only the
+                    // codec's own set-up and the end are not pictures.
+                    let show =
+                        info.flags & (BUFFER_FLAG_CODEC_CONFIG | BUFFER_FLAG_END_OF_STREAM) == 0;
+                    self.seen.buffers += 1;
+                    self.seen.empty += u64::from(info.size <= 0);
                     self.codec.release(i, show);
                     drawn |= show;
                     if info.presentationTimeUs as u64 >= pts {
@@ -563,9 +623,15 @@ impl Decoder for McDecoder {
                 }
             }
         }
-        if !drawn {
-            return Ok(None);
+        let picture = if drawn { self.reader.next(WAIT) } else { None };
+        if picture.is_some() {
+            self.seen.pictures += 1;
+            if self.seen.pictures == 1 {
+                tracing::info!("video decoder: its first picture: {}", self.seen);
+            }
+        } else if self.seen.pictures == 0 && self.seen.frames % 150 == 0 {
+            tracing::warn!("video decoder: no picture yet: {}", self.seen);
         }
-        Ok(self.reader.next(WAIT))
+        Ok(picture)
     }
 }
