@@ -30,7 +30,7 @@ use rand::RngCore;
 use tokio::sync::mpsc;
 use tokio::task::JoinHandle;
 
-use super::bwe::{BandwidthEstimator, RembEstimator, MIN_BPS};
+use super::bwe::{BandwidthEstimator, FeedbackWriter, RembEstimator, Uplink, MIN_BPS};
 use super::host::{
     CodedFrame, EncodingId, EncodingTarget, ReceiveConfig, Resolution, SendConfig, StreamId,
     VideoHost, VideoKind, VideoSink, VideoSource,
@@ -321,8 +321,15 @@ impl VideoSession {
             keyframe_requests: 0,
         }));
 
+        // Transport-cc (FCP's `docs/TRANSPORT_CC.md`): what we send is
+        // numbered and the far end's feedback is our estimate of it; what
+        // arrives is reported on.
+        let uplink = plan
+            .transport_cc
+            .map(|ext| Arc::new(Mutex::new(Uplink::new(ext))));
         let send_task = plan.send.clone().map(|cfg| {
             tokio::spawn(send_loop(SendLoop {
+                uplink: uplink.clone(),
                 host: Arc::clone(&host),
                 cfg,
                 kind: plan.kind,
@@ -349,6 +356,8 @@ impl VideoSession {
             incoming: HashMap::new(),
             outgoing,
             estimator: Box::new(RembEstimator::default()),
+            downlink: plan.transport_cc.map(|ext| (ext, FeedbackWriter::new())),
+            uplink,
             estimate: None,
             last_remb: None,
             rtt: None,
@@ -501,6 +510,19 @@ struct SendLoop {
     commands: mpsc::Receiver<SendCommand>,
     links: SessionLinks,
     outgoing: Arc<Mutex<Outgoing>>,
+    /// Transport-cc, when agreed: what we send is numbered as it leaves.
+    uplink: Option<Arc<Mutex<Uplink>>>,
+}
+
+impl SendLoop {
+    /// `packet` as it leaves: numbered for transport-cc when the section
+    /// has it, after the cache took it, so a resend is numbered anew.
+    fn numbered(&self, packet: Bytes) -> Bytes {
+        match &self.uplink {
+            Some(u) => u.lock().stamp(packet),
+            None => packet,
+        }
+    }
 }
 
 /// The next frame of `source`, or never when there is none.
@@ -687,7 +709,8 @@ async fn send_loop(mut s: SendLoop) {
                             break;
                         }
                         lane.resent.insert(seq, now);
-                        s.transport.send_rtp(packet.clone()).await;
+                        let packet = s.numbered(packet.clone());
+                        s.transport.send_rtp(packet).await;
                     }
                 }
                 Some(SendCommand::Target(bps)) => {
@@ -751,6 +774,7 @@ async fn send_loop(mut s: SendLoop) {
                     let packet = rtp.to_bytes().freeze();
                     sent = (sent.0 + 1, sent.1 + len, sent.2 + packet.len());
                     lane.cache.push(lane.seq, packet.clone());
+                    let packet = s.numbered(packet);
                     s.transport.send_rtp(packet).await;
                     lane.seq = lane.seq.wrapping_add(1);
                 }
@@ -844,6 +868,10 @@ struct RecvLoop {
     incoming: HashMap<u32, Incoming>,
     outgoing: Arc<Mutex<Outgoing>>,
     estimator: Box<dyn BandwidthEstimator>,
+    /// Transport-cc on what arrives: the extension's id and the writer.
+    downlink: Option<(u8, FeedbackWriter)>,
+    /// Transport-cc on what we send: the far end's feedback about it.
+    uplink: Option<Arc<Mutex<Uplink>>>,
     /// The latest estimate, in bits a second.
     estimate: Option<u64>,
     /// The last REMB sent: its value and when.
@@ -897,6 +925,21 @@ impl RecvLoop {
     async fn on_rtp(&mut self, packet: RtpPacket, at: Instant) {
         if packet.header.payload_type() != self.plan.pt {
             return;
+        }
+        // Transport-cc: every numbered packet noted, the feedback sent
+        // when due (every 100 ms while packets come).
+        let due = self.downlink.as_mut().and_then(|(ext, writer)| {
+            let seq = forge_rtp::transport_cc::transport_sequence(&packet, *ext)?;
+            writer.on_packet(seq, at);
+            writer.poll(at)
+        });
+        if let Some(fb) = due {
+            let p = RtcpPacket::TransportFeedback(RtpFeedback {
+                sender_ssrc: self.ssrc,
+                media_ssrc: packet.header.ssrc,
+                kind: TransportFeedback::TransportCc(fb),
+            });
+            self.transport.send_rtcp(feedback(self.ssrc, vec![p])).await;
         }
         let ssrc = packet.header.ssrc;
         if !self.incoming.contains_key(&ssrc) {
@@ -1081,8 +1124,26 @@ impl RecvLoop {
                     ..
                 }) => {
                     // A REMB is for whatever we send in this section,
-                    // whichever SSRCs a relay lists.
-                    let _ = self.commands.try_send(SendCommand::Target(bitrate_bps));
+                    // whichever SSRCs a relay lists — unless transport-cc
+                    // feedback is arriving, whose estimate we send by.
+                    if !self.uplink.as_ref().is_some_and(|u| u.lock().fresh(now)) {
+                        let _ = self.commands.try_send(SendCommand::Target(bitrate_bps));
+                    }
+                    continue;
+                }
+                RtcpPacket::TransportFeedback(RtpFeedback {
+                    kind: TransportFeedback::TransportCc(fb),
+                    ..
+                }) => {
+                    // About everything we send on the section, whichever
+                    // SSRC it names.
+                    let estimate = self
+                        .uplink
+                        .as_ref()
+                        .and_then(|u| u.lock().on_feedback(&fb, now));
+                    if let Some(bps) = estimate {
+                        let _ = self.commands.try_send(SendCommand::Target(bps));
+                    }
                     continue;
                 }
                 p if !p
@@ -1430,6 +1491,7 @@ mod tests {
                 encodings: SendConfig::single(Resolution::P720, 1500),
             }),
             simulcast: None,
+            transport_cc: None,
         }
     }
 
@@ -1438,6 +1500,7 @@ mod tests {
         pli: true,
         fir: true,
         remb: true,
+        transport_cc: false,
     };
 
     /// Two sessions joined by a loop: (a, b, a's transport, b's host).
@@ -1765,6 +1828,7 @@ mod tests {
             pli: true,
             fir: false,
             remb: false,
+            transport_cc: false,
         };
         let a_host = SyntheticVideoHost::new(&[VideoCodec::H264]).with_fps(50);
         let b_host = SyntheticVideoHost::new(&[VideoCodec::H264]).with_fps(50);
@@ -2101,6 +2165,71 @@ mod tests {
         )
         .await;
         assert!(calm.nacks < 50 && calm.keyframe_requests <= 1, "{calm:?}");
+    }
+
+    /// Transport-cc both ways, no REMB (FCP's `docs/TRANSPORT_CC.md`, R5d):
+    /// b reports on what arrives, and a sends by its own estimate of that.
+    #[tokio::test]
+    async fn with_transport_cc_the_sender_follows_its_own_estimate_down_a_bottleneck() {
+        let a_host = SyntheticVideoHost::new(&[VideoCodec::H264]).with_fps(30);
+        let b_host = SyntheticVideoHost::new(&[VideoCodec::H264]).with_fps(30);
+        let cc = |send| {
+            let mut p = plan(
+                VideoCodec::H264,
+                send,
+                Feedback {
+                    remb: false,
+                    transport_cc: true,
+                    ..ALL
+                },
+            );
+            p.transport_cc = Some(5);
+            p
+        };
+        let (a_tx, a_rx) = mpsc::channel(super::super::transport::INBOUND_QUEUE);
+        let (b_tx, b_rx) = mpsc::channel(super::super::transport::INBOUND_QUEUE);
+        let a_out = LoopTransport::new(b_tx);
+        let b_out = LoopTransport::new(a_tx);
+        let _a = VideoSession::start(
+            cc(true),
+            Arc::new(a_host.clone()),
+            a_out.clone(),
+            a_rx,
+            SessionLinks::default(),
+        );
+        let _b = VideoSession::start(
+            cc(false),
+            Arc::new(b_host.clone()),
+            b_out.clone(),
+            b_rx,
+            SessionLinks::default(),
+        );
+        // A 600 kb/s path under a 1.5 Mb/s camera.
+        a_out.limit_kbps(600);
+        until("the target follows the path down", || {
+            last_target(&a_host).is_some_and(|t| t <= 700)
+        })
+        .await;
+        // b said so by transport-cc alone: feedback, and never a REMB.
+        let rtcp = b_out.rtcp_log.lock().clone();
+        let packets: Vec<RtcpPacket> = rtcp
+            .iter()
+            .flat_map(|p| RtcpPacket::parse_compound(p))
+            .collect();
+        assert!(packets.iter().any(|p| matches!(
+            p,
+            RtcpPacket::TransportFeedback(RtpFeedback {
+                kind: TransportFeedback::TransportCc(_),
+                ..
+            })
+        )));
+        assert!(!packets.iter().any(|p| matches!(
+            p,
+            RtcpPacket::PayloadFeedback(PsFeedback {
+                kind: PayloadFeedback::Remb { .. },
+                ..
+            })
+        )));
     }
 
     #[tokio::test]

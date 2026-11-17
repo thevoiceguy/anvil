@@ -29,6 +29,9 @@ pub(crate) use super::Feedback;
 pub(crate) const RID_URI: &str = "urn:ietf:params:rtp-hdrext:sdes:rtp-stream-id";
 /// The id we offer it under (any of 1–14; a room answers with ours).
 const RID_EXT: u8 = 4;
+/// The id we offer the transport-wide sequence extension under.
+pub(crate) const TCC_EXT: u8 = 5;
+pub(crate) use forge_rtp::transport_cc::TRANSPORT_CC_URI;
 /// A simulcast camera's rids, largest first: the full picture, half its
 /// height, a quarter (FCP's `docs/FORWARDING_ROOMS.md` §2.4, §8 Q5).
 pub(crate) const RIDS: [&str; 3] = ["h", "m", "l"];
@@ -136,6 +139,8 @@ pub(crate) struct LocalSection {
     /// The encodings of our camera we offer to send (offered: every one
     /// we can make; answered: those the far end took).
     pub simulcast: Option<Simulcast>,
+    /// The transport-wide sequence extension's id, offered or mirrored.
+    pub tcc_ext: Option<u8>,
 }
 
 impl LocalSection {
@@ -161,6 +166,7 @@ impl LocalSection {
                     pli: true,
                     fir: true,
                     remb: true,
+                    transport_cc: true,
                 },
             })
             .collect();
@@ -172,6 +178,9 @@ impl LocalSection {
             direction,
             crypto,
             simulcast: None,
+            // The camera's: a shared screen sends one stream, and its
+            // section's lines would take the INVITE past what UDP carries.
+            tcc_ext: (kind == VideoKind::Camera).then_some(TCC_EXT),
         }
     }
 
@@ -194,6 +203,7 @@ impl LocalSection {
             direction: MediaDirection::Inactive,
             crypto: None,
             simulcast: None,
+            tcc_ext: None,
         }
         .with_formats(offered.formats.first().cloned())
     }
@@ -258,6 +268,14 @@ impl LocalSection {
                 let _ = write!(out, "a=rtcp-fb:{} goog-remb\r\n", c.pt);
             }
         }
+        // Transport-cc once for every format (`*`): a section's lines are
+        // what keeps an INVITE under the size UDP may carry.
+        if let Some(id) = self.tcc_ext {
+            if self.codecs.iter().any(|c| c.feedback.transport_cc) {
+                out.push_str("a=rtcp-fb:* transport-cc\r\n");
+            }
+            let _ = write!(out, "a=extmap:{id} {TRANSPORT_CC_URI}\r\n");
+        }
         if let Some(sc) = &self.simulcast {
             let _ = write!(out, "a=extmap:{} {RID_URI}\r\n", sc.ext);
             for rid in &sc.rids {
@@ -304,6 +322,8 @@ pub(crate) struct RemoteSection {
     /// The simulcast streams it takes from us (its `a=simulcast` receive
     /// list, each with an `a=rid … recv`, and the rid extension).
     pub simulcast_recv: Option<Simulcast>,
+    /// The transport-wide sequence extension's id, when it lists one.
+    pub tcc_ext: Option<u8>,
 }
 
 impl RemoteSection {
@@ -340,6 +360,8 @@ impl RemoteSection {
             // Simulcast we offer, not answer: a room's offer to us asks
             // for none.
             simulcast: None,
+            // Transport-cc under the offer's id, when it asked for it.
+            tcc_ext: self.tcc_ext.filter(|_| codec.feedback.transport_cc),
         }
     }
 }
@@ -498,6 +520,7 @@ impl Raw {
                     "nack pli" => feedback.pli = true,
                     "ccm fir" => feedback.fir = true,
                     "goog-remb" => feedback.remb = true,
+                    "transport-cc" => feedback.transport_cc = true,
                     _ => {}
                 }
             }
@@ -514,10 +537,20 @@ impl Raw {
             addr: self.addr.or(session_addr),
             profile,
             simulcast_recv: self.simulcast_recv(),
+            tcc_ext: self.tcc_ext(),
             formats: self.formats,
             codecs,
             direction,
             crypto,
+        })
+    }
+
+    /// The transport-wide sequence extension's id, when listed.
+    fn tcc_ext(&self) -> Option<u8> {
+        self.values("extmap").find_map(|v| {
+            let mut words = v.split_whitespace();
+            let id = words.next()?.split('/').next()?.parse::<u8>().ok()?;
+            (words.next()? == TRANSPORT_CC_URI && id > 0).then_some(id)
         })
     }
 
@@ -577,6 +610,54 @@ mod tests {
     }
 
     #[test]
+    fn transport_cc_is_offered_and_answered_only_where_the_offer_asks() {
+        let ours = LocalSection::offer(
+            VideoKind::Camera,
+            5000,
+            &[VideoCodec::H264],
+            MediaDirection::Sendrecv,
+            None,
+        );
+        let sdp = with_sections(audio(), &[ours]);
+        assert!(
+            sdp.contains(&format!("a=extmap:{TCC_EXT} {TRANSPORT_CC_URI}\r\n")),
+            "{sdp}"
+        );
+        assert!(sdp.contains("a=rtcp-fb:* transport-cc\r\n"), "{sdp}");
+        let read = &sections(sdp.as_bytes())[0];
+        assert_eq!(read.tcc_ext, Some(TCC_EXT));
+        assert!(read.codecs[0].feedback.transport_cc);
+
+        // A room's offer under its own id: answered under it.
+        let theirs = format!(
+            "{}m=video 6000 RTP/AVP 96\r\nc=IN IP4 192.0.2.9\r\na=rtpmap:96 H264/90000\r\n\
+             a=fmtp:96 profile-level-id=42e01f;packetization-mode=1\r\n\
+             a=rtcp-fb:96 transport-cc\r\na=extmap:9 {TRANSPORT_CC_URI}\r\na=sendrecv\r\n",
+            audio()
+        );
+        let offered = &sections(theirs.as_bytes())[0];
+        let answer = offered.answer(&offered.codecs[0], 5000, MediaDirection::Sendrecv, None);
+        assert_eq!(answer.tcc_ext, Some(9));
+        let mut out = String::new();
+        answer.write(&mut out);
+        assert!(
+            out.contains(&format!("a=extmap:9 {TRANSPORT_CC_URI}\r\n")),
+            "{out}"
+        );
+        assert!(out.contains("a=rtcp-fb:* transport-cc\r\n"), "{out}");
+        // Without it in the offer: nothing of it in the answer.
+        let bare = theirs
+            .replace("a=rtcp-fb:96 transport-cc\r\n", "")
+            .replace(&format!("a=extmap:9 {TRANSPORT_CC_URI}\r\n"), "");
+        let offered = &sections(bare.as_bytes())[0];
+        let answer = offered.answer(&offered.codecs[0], 5000, MediaDirection::Sendrecv, None);
+        assert_eq!(answer.tcc_ext, None);
+        let mut out = String::new();
+        answer.write(&mut out);
+        assert!(!out.contains("transport"), "{out}");
+    }
+
+    #[test]
     fn an_offer_of_ours_is_read_back_as_we_wrote_it() {
         let key = Crypto::generate(1, Suite::AesCm128HmacSha1_80);
         let camera = LocalSection::offer(
@@ -618,7 +699,8 @@ mod tests {
                 nack: true,
                 pli: true,
                 fir: true,
-                remb: true
+                remb: true,
+                transport_cc: true,
             }
         );
         assert_eq!(share.kind, VideoKind::Content);

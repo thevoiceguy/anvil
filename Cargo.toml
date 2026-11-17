@@ -15,7 +15,7 @@ members = [
 ]
 
 [workspace.package]
-version = "0.2.92"
+version = "0.2.93"
 edition = "2021"
 rust-version = "1.97"
 license = "MIT OR Apache-2.0"
@@ -65,11 +65,12 @@ sip-auth = { git = "https://github.com/thevoiceguy/siphon-rs", tag = "v2026.11.0
 sip-dns = { git = "https://github.com/thevoiceguy/siphon-rs", tag = "v2026.11.07" }
 
 # forge-media — pinned to a release tag
-forge-rtp = { git = "https://github.com/thevoiceguy/forge-media", tag = "v2026.10.07" }
-forge-core = { git = "https://github.com/thevoiceguy/forge-media", tag = "v2026.10.07" }
-forge-codecs = { git = "https://github.com/thevoiceguy/forge-media", tag = "v2026.10.07", features = ["g722"] }
-forge-dtmf = { git = "https://github.com/thevoiceguy/forge-media", tag = "v2026.10.07" }
-forge-resampler = { git = "https://github.com/thevoiceguy/forge-media", tag = "v2026.10.07" }
+forge-rtp = { git = "https://github.com/thevoiceguy/forge-media", tag = "v2026.11.16.4" }
+forge-core = { git = "https://github.com/thevoiceguy/forge-media", tag = "v2026.11.16.4" }
+forge-codecs = { git = "https://github.com/thevoiceguy/forge-media", tag = "v2026.11.16.4", features = ["g722"] }
+forge-dtmf = { git = "https://github.com/thevoiceguy/forge-media", tag = "v2026.11.16.4" }
+forge-resampler = { git = "https://github.com/thevoiceguy/forge-media", tag = "v2026.11.16.4" }
+forge-bwe = { git = "https://github.com/thevoiceguy/forge-media", tag = "v2026.11.16.4" }
 
 # Internal
 anvil-core  = { path = "crates/anvil-core"  }

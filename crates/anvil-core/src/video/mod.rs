@@ -116,6 +116,9 @@ pub(crate) struct Feedback {
     pub pli: bool,
     pub fir: bool,
     pub remb: bool,
+    /// Transport-wide congestion control feedback (FCP's
+    /// `docs/TRANSPORT_CC.md`); it needs its header extension too.
+    pub transport_cc: bool,
 }
 
 /// A session as its transport agreed it: no SDP, no sockets.
@@ -132,6 +135,10 @@ pub(crate) struct StreamPlan {
     /// Simulcast: the rids `send`'s encodings go under, in their order,
     /// and the header extension that carries them.
     pub simulcast: Option<sdp::Simulcast>,
+    /// Transport-cc, when both sides agreed it: the transport-wide
+    /// sequence extension's id. We number what we send under it and
+    /// report on what arrives numbered under it.
+    pub transport_cc: Option<u8>,
 }
 
 /// Tells the app of a call's streams.
@@ -858,6 +865,13 @@ impl CallVideo {
             codec: codec.codec,
             pt: codec.pt,
             direction,
+            // Transport-cc where we offered or answered it and the far end
+            // named it with its extension.
+            transport_cc: s
+                .local
+                .tcc_ext
+                .and(s.remote.as_ref().and_then(|r| r.tcc_ext))
+                .filter(|_| codec.feedback.transport_cc),
             feedback: codec.feedback,
             send: encodes.then(|| {
                 // A screen is text: sharper and slower than a camera.

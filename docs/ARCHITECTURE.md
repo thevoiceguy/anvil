@@ -295,13 +295,24 @@ Three layers, so a second transport adds itself and rewrites nothing:
 
 Within a session:
 
-- **Bandwidth both ways.** What arrives feeds a `BandwidthEstimator`; today's is
-  `RembEstimator`, receive-side and GCC-shaped (a delay trend for queues building,
-  loss on first arrival, AIMD), sent to the far end as REMB each second and at once
-  when it falls. A REMB from the far end sets the encoder's target through
-  `VideoSource::set_target`, within what the call was set up to send, with the
-  resolution stepped down the ladder (720p from 1 Mb/s, 360p from 450 kb/s, 180p
-  below). Send-side estimation (transport-cc) is to sit behind the same interface.
+- **Bandwidth both ways.** The estimators are forge-media's `forge-bwe`: one Google
+  Congestion Control core shared with FCP's rooms and gateway (FCP's
+  `docs/TRANSPORT_CC.md`).
+  - **REMB.** What arrives feeds a `RembEstimator`, receive-side and GCC-shaped (a
+    delay trend for queues building, loss on first arrival, AIMD). It is sent to the
+    far end as REMB each second, and at once when it falls.
+  - **Transport-cc.** It is offered on the camera's section (the transport-wide
+    sequence extension and `a=rtcp-fb:* transport-cc`). Where the far end agrees:
+    - what arrives is also reported as transport-cc feedback;
+    - what we send is numbered as it leaves (a resend anew);
+    - the far end's feedback is our own estimate of our uplink (`bwe::Uplink`).
+  - **The encoder's target.** While that feedback arrives, the estimate sets the
+    encoder's target. Otherwise the far end's REMB does, through
+    `VideoSource::set_target`, within what the call was set up to send. The
+    resolution steps down the ladder: 720p from 1 Mb/s, 360p from 450 kb/s, 180p
+    below.
+  - **The INVITE's size.** The shared screen's section does not offer transport-cc,
+    to keep an INVITE under the 1,300 bytes past which SIP must leave UDP.
 - **Reports.** Every second, an SR (or RR) with a block on each incoming stream, the
   call's audio CNAME (so the far end pairs our video with our voice) and the REMB.
   The far end's reports give the round trip and its loss on ours.
