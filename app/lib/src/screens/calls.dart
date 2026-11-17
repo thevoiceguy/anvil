@@ -233,6 +233,14 @@ class _InCallPanelState extends State<InCallPanel> {
                   tiles: model.api.videoTiles,
                   call: call,
                   name: name,
+                  onView: (view) => model.run(
+                    () => model.api.setRoomView(
+                      call.id,
+                      members: view.members,
+                      speaker: view.speaker,
+                      pinned: view.pinned,
+                    ),
+                  ),
                 ),
                 const SizedBox(height: 12),
               ] else

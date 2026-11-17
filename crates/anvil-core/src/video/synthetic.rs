@@ -5,9 +5,12 @@
 //! SPS and a PPS before each IDR; VP8 with the key-frame bit), so it is
 //! packetized and reassembled as a real one is. It carries its number as
 //! eight hex digits after the header; the rest is padding, sized so a
-//! keyframe is split across several packets.
+//! keyframe is split across several packets. Told it can simulcast
+//! ([`SyntheticVideoHost::with_simulcast`]), it makes each encoding asked
+//! for from every tick, a frame of encoding `n` carrying `n` in its
+//! number's top byte ([`layer_of`]).
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, VecDeque};
 use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
@@ -17,8 +20,8 @@ use bytes::{BufMut, Bytes, BytesMut};
 use parking_lot::Mutex;
 
 use super::host::{
-    CameraInfo, CodedFrame, EncodingId, ReceiveConfig, Resolution, ScreenInfo, SendConfig,
-    StreamId, VideoCodec, VideoCodecCaps, VideoHost, VideoSink, VideoSource,
+    CameraInfo, CodedFrame, EncodingId, EncodingTarget, ReceiveConfig, Resolution, ScreenInfo,
+    SendConfig, StreamId, VideoCodec, VideoCodecCaps, VideoHost, VideoSink, VideoSource,
 };
 use crate::error::AnvilError;
 
@@ -30,6 +33,8 @@ pub struct SyntheticVideoHost {
     fps: u32,
     /// Fixed sizes; `None`, sized by the target as an encoder would.
     sizes: Option<(usize, usize)>,
+    /// Encodings it makes at once.
+    simulcast: usize,
     record: Arc<Mutex<SyntheticRecord>>,
 }
 
@@ -55,7 +60,24 @@ pub struct SentSource {
     pub keyframe_requests: u32,
     /// Each target the core set: (kbps, max, fps).
     pub targets: Vec<(u32, Resolution, u32)>,
+    /// Simulcast: what each encoding made and was told.
+    pub encodings: BTreeMap<EncodingId, SentEncoding>,
     pub stopped: bool,
+}
+
+/// One encoding of a simulcast source.
+#[derive(Debug, Clone, Default)]
+pub struct SentEncoding {
+    pub frames: u32,
+    pub keyframe_requests: u32,
+    /// Each target the core set it; `None`, paused.
+    pub targets: Vec<Option<EncodingTarget>>,
+}
+
+/// The encoding a frame of a simulcast source came from, by the number
+/// it carries.
+pub fn layer_of(number: u32) -> EncodingId {
+    EncodingId((number >> 24) as u8)
 }
 
 #[derive(Debug, Clone)]
@@ -96,8 +118,15 @@ impl SyntheticVideoHost {
             codecs: codecs.to_vec(),
             fps: 30,
             sizes: None,
+            simulcast: 1,
             record: Arc::default(),
         }
+    }
+
+    /// Make up to `n` encodings of a source at once (simulcast).
+    pub fn with_simulcast(mut self, n: usize) -> Self {
+        self.simulcast = n.max(1);
+        self
     }
 
     pub fn with_fps(mut self, fps: u32) -> Self {
@@ -152,10 +181,20 @@ impl VideoHost for SyntheticVideoHost {
         self.record.lock().screen = screen.map(str::to_owned);
     }
 
+    fn simulcast(&self) -> usize {
+        self.simulcast
+    }
+
     fn start_send(&self, cfg: SendConfig) -> Result<Box<dyn VideoSource>, AnvilError> {
         if !self.codecs.contains(&cfg.codec) {
             return Err(AnvilError::Codec(format!("no {:?} encoder", cfg.codec)));
         }
+        let mut wanted = if cfg.encodings.is_empty() {
+            SendConfig::single(cfg.max, cfg.kbps)
+        } else {
+            cfg.encodings.clone()
+        };
+        wanted.truncate(self.simulcast);
         let index = {
             let mut record = self.record.lock();
             record.sent.push(SentSource {
@@ -163,6 +202,10 @@ impl VideoHost for SyntheticVideoHost {
                 frames: 0,
                 keyframe_requests: 0,
                 targets: Vec::new(),
+                encodings: wanted
+                    .iter()
+                    .map(|e| (e.id, SentEncoding::default()))
+                    .collect(),
                 stopped: false,
             });
             record.sent.len() - 1
@@ -174,13 +217,20 @@ impl VideoHost for SyntheticVideoHost {
         tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Burst);
         Ok(Box::new(SyntheticSource {
             codec: cfg.codec,
-            encoding: cfg.encodings.first().copied().unwrap_or(EncodingId(0)),
+            encodings: wanted
+                .iter()
+                .map(|e| Made {
+                    id: e.id,
+                    keyframe: AtomicBool::new(true),
+                    target_kbps: AtomicU32::new(e.kbps.max(1)),
+                    paused: AtomicBool::new(false),
+                })
+                .collect(),
+            pending: VecDeque::new(),
             tick,
             next: 0,
-            keyframe: Arc::new(AtomicBool::new(true)),
             fps: self.fps,
             sizes: self.sizes,
-            target_kbps: Arc::new(AtomicU32::new(cfg.kbps.max(1))),
             record: Arc::clone(&self.record),
             index,
             requests: Arc::new(AtomicU32::new(0)),
@@ -214,15 +264,25 @@ impl VideoHost for SyntheticVideoHost {
     }
 }
 
+/// One encoding a synthetic source makes.
+struct Made {
+    id: EncodingId,
+    keyframe: AtomicBool,
+    target_kbps: AtomicU32,
+    paused: AtomicBool,
+}
+
 struct SyntheticSource {
     codec: VideoCodec,
-    encoding: EncodingId,
+    /// Largest first; the first is the one a source without simulcast
+    /// has.
+    encodings: Vec<Made>,
+    /// This tick's frames of the other encodings, still to hand over.
+    pending: VecDeque<(EncodingId, CodedFrame)>,
     tick: tokio::time::Interval,
     next: u32,
-    keyframe: Arc<AtomicBool>,
     fps: u32,
     sizes: Option<(usize, usize)>,
-    target_kbps: Arc<AtomicU32>,
     record: Arc<Mutex<SyntheticRecord>>,
     index: usize,
     requests: Arc<AtomicU32>,
@@ -234,36 +294,57 @@ const KEYFRAME_EVERY: u32 = 300;
 #[async_trait]
 impl VideoSource for SyntheticSource {
     async fn next_frame(&mut self) -> Option<(EncodingId, CodedFrame)> {
-        self.tick.tick().await;
-        let number = self.next;
-        self.next += 1;
-        let keyframe =
-            self.keyframe.swap(false, Ordering::Relaxed) || number.is_multiple_of(KEYFRAME_EVERY);
-        let (key_bytes, frame_bytes) = self.sizes.unwrap_or_else(|| {
-            // A second's bytes over a GOP of one keyframe at four times
-            // the others' size, spread across the frames.
-            let per_frame =
-                self.target_kbps.load(Ordering::Relaxed) as usize * 125 / self.fps.max(1) as usize;
-            (per_frame * 4, per_frame.max(64))
-        });
-        let size = if keyframe { key_bytes } else { frame_bytes };
-        let data = frame(self.codec, number, keyframe, size);
-        if let Some(s) = self.record.lock().sent.get_mut(self.index) {
-            s.frames += 1;
-            s.keyframe_requests = self.requests.load(Ordering::Relaxed);
+        while self.pending.is_empty() {
+            self.tick.tick().await;
+            let number = self.next;
+            self.next += 1;
+            let captured = Instant::now();
+            let mut record = self.record.lock();
+            let mut sent = record.sent.get_mut(self.index);
+            for (i, e) in self.encodings.iter().enumerate() {
+                // A paused encoding makes nothing, and starts again on a
+                // keyframe.
+                if e.paused.load(Ordering::Relaxed) {
+                    continue;
+                }
+                let keyframe = e.keyframe.swap(false, Ordering::Relaxed)
+                    || number.is_multiple_of(KEYFRAME_EVERY);
+                let (key_bytes, frame_bytes) = self.sizes.unwrap_or_else(|| {
+                    // A second's bytes over a GOP of one keyframe at four
+                    // times the others' size, spread across the frames.
+                    let per_frame = e.target_kbps.load(Ordering::Relaxed) as usize * 125
+                        / self.fps.max(1) as usize;
+                    (per_frame * 4, per_frame.max(64))
+                });
+                let size = if keyframe { key_bytes } else { frame_bytes };
+                let label = (number & 0x00FF_FFFF) | (u32::from(e.id.0) << 24);
+                let data = frame(self.codec, label, keyframe, size);
+                if let Some(s) = sent.as_deref_mut() {
+                    if i == 0 {
+                        s.frames += 1;
+                        s.keyframe_requests = self.requests.load(Ordering::Relaxed);
+                    }
+                    if let Some(made) = s.encodings.get_mut(&e.id) {
+                        made.frames += 1;
+                    }
+                }
+                self.pending.push_back((
+                    e.id,
+                    CodedFrame {
+                        data,
+                        keyframe,
+                        captured,
+                    },
+                ));
+            }
         }
-        Some((
-            self.encoding,
-            CodedFrame {
-                data,
-                keyframe,
-                captured: Instant::now(),
-            },
-        ))
+        self.pending.pop_front()
     }
 
     fn request_keyframe(&self) {
-        self.keyframe.store(true, Ordering::Relaxed);
+        for e in &self.encodings {
+            e.keyframe.store(true, Ordering::Relaxed);
+        }
         let n = self.requests.fetch_add(1, Ordering::Relaxed) + 1;
         if let Some(s) = self.record.lock().sent.get_mut(self.index) {
             s.keyframe_requests = n;
@@ -271,9 +352,51 @@ impl VideoSource for SyntheticSource {
     }
 
     fn set_target(&self, kbps: u32, max: Resolution, fps: u32) {
-        self.target_kbps.store(kbps.max(1), Ordering::Relaxed);
+        if let Some(e) = self.encodings.first() {
+            e.target_kbps.store(kbps.max(1), Ordering::Relaxed);
+        }
         if let Some(s) = self.record.lock().sent.get_mut(self.index) {
             s.targets.push((kbps, max, fps));
+        }
+    }
+
+    fn request_keyframe_of(&self, encoding: EncodingId) {
+        let Some(e) = self.encodings.iter().find(|e| e.id == encoding) else {
+            return;
+        };
+        e.keyframe.store(true, Ordering::Relaxed);
+        if let Some(made) = self
+            .record
+            .lock()
+            .sent
+            .get_mut(self.index)
+            .and_then(|s| s.encodings.get_mut(&encoding))
+        {
+            made.keyframe_requests += 1;
+        }
+    }
+
+    fn set_encoding_target(&self, encoding: EncodingId, target: Option<EncodingTarget>) {
+        let Some(e) = self.encodings.iter().find(|e| e.id == encoding) else {
+            return;
+        };
+        match target {
+            Some(t) => {
+                e.target_kbps.store(t.kbps.max(1), Ordering::Relaxed);
+                if e.paused.swap(false, Ordering::Relaxed) {
+                    e.keyframe.store(true, Ordering::Relaxed);
+                }
+            }
+            None => e.paused.store(true, Ordering::Relaxed),
+        }
+        if let Some(made) = self
+            .record
+            .lock()
+            .sent
+            .get_mut(self.index)
+            .and_then(|s| s.encodings.get_mut(&encoding))
+        {
+            made.targets.push(target);
         }
     }
 }

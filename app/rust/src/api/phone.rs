@@ -627,6 +627,22 @@ pub struct Room {
     pub floor_refused: Option<String>,
     /// We share our screen in it.
     pub sharing: bool,
+    /// It forwards each person's own stream: the tiles are ours to lay
+    /// out (`streams` says whose each is), and `set_room_view` says which
+    /// to send.
+    pub forwards: bool,
+    /// Its camera streams coming in and whose each is, where it forwards.
+    pub streams: Vec<RoomStream>,
+}
+
+/// One camera stream of a room that forwards: its tile, and whose it is.
+pub struct RoomStream {
+    /// The tile (one of the call's `streams`).
+    pub stream: u32,
+    /// The member it shows, by the room's id, once the roster says.
+    pub member: Option<String>,
+    /// It follows whoever speaks.
+    pub speaker: bool,
 }
 
 /// One person in a room.
@@ -641,6 +657,11 @@ pub struct RoomMember {
     pub camera: Option<String>,
     pub speaking: bool,
     pub presenting: bool,
+    /// Where the room forwards: their stream to us is held back (the
+    /// network is short).
+    pub paused: bool,
+    /// A host's spotlight is on them.
+    pub spotlight: bool,
 }
 
 /// A meeting the user owns on FCP.
@@ -1164,12 +1185,24 @@ pub fn phone_state() -> anyhow::Result<PhoneState> {
                             camera: m.camera,
                             speaking: m.speaking,
                             presenting: m.presenting,
+                            paused: m.paused,
+                            spotlight: m.spotlight,
                         })
                         .collect(),
                     speaker: r.speaker,
                     presenter: r.presenter,
                     floor_refused: r.floor_refused,
                     sharing: r.sharing,
+                    forwards: r.forwards,
+                    streams: r
+                        .streams
+                        .into_iter()
+                        .map(|s| RoomStream {
+                            stream: s.stream,
+                            member: s.member,
+                            speaker: s.speaker,
+                        })
+                        .collect(),
                 }),
             })
             .collect(),
@@ -1555,6 +1588,25 @@ pub async fn room_control(
         other => anyhow::bail!("no room control {other}"),
     };
     execute(Command::Room { call, action }).await.map(|_| ())
+}
+
+/// What the room `call` is in sends us, where it forwards each person's
+/// stream (the user's own layout): `members`, with `speaker` the one who
+/// speaks large, or `pinned` large; neither, the room's default.
+pub async fn set_room_view(
+    call: Option<u64>,
+    members: Vec<String>,
+    speaker: bool,
+    pinned: Option<String>,
+) -> anyhow::Result<()> {
+    execute(Command::View {
+        call,
+        members,
+        speaker,
+        pinned,
+    })
+    .await
+    .map(|_| ())
 }
 
 /// Take appearance `index` of a shared line (by key): pick up the call

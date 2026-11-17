@@ -314,6 +314,49 @@ every recommendation:
           socket in the app group's container to `BroadcastScreens`; the
           share ends when either side closes it, or after a minute without
           the extension
+  - [ ] **A6** Rooms that forward each person's stream (FCP's
+        `docs/FORWARDING_ROOMS.md`)
+    - [x] **A6a** The core: a join with video says `Recv-Info: fcp-content,
+          fcp-view`, and the room's answer saying `fcp-view` makes it a
+          room that forwards (`Anvil::room_forwards`, `RoomRoster.forwards`);
+          the roster's `<src-id>`s, `fcp:paused`, the speaker stream and
+          `fcp:spotlight` read; `Event::RoomStreams` naming whose each
+          incoming camera stream is, whichever comes first, the packets or
+          the roster; `Anvil::set_room_view` sending the `fcp-view` INFO
+          (`RoomView`, `ViewStream`, `ViewTarget`); the app's room state
+          (`RoomView.forwards`, `streams`, members' `paused` and
+          `spotlight`) and the `view` command (`room view p1 speaker`);
+          proved against a scripted room and by three Anvils in a room on
+          FCP
+    - [x] **A6b** Simulcast send: a room's camera offered as three
+          encodings (`a=rid` h/m/l, `a=simulcast:send`, the RFC 8852 rid
+          extension) and sent as the room takes them (`a=simulcast:recv`),
+          each under its own SSRC, sequence, NACK cache and sender report,
+          every packet naming its rid; the far end's REMB shared smallest
+          first, a larger encoding paused until there is enough for it
+          (`session::share`); a PLI or NACK answered for the encoding it
+          names; the host interface's `Encoding`s, `VideoHost::simulcast`,
+          `set_encoding_target` and `request_keyframe_of`; the synthetic
+          host and the desktop `CameraSource` (an encoder per encoding,
+          each layer scaled from the capture), on in `SoftwareCodecs`
+          (Linux) and off elsewhere until A6c; proved against a scripted
+          room and on FCP, a viewer shown each sender at the height it
+          asks for
+    - [x] **A6c** Simulcast in the macOS, Windows, Android and iOS hosts:
+          `Codecs::simulcast` 3 for VideoToolbox, Media Foundation and
+          MediaCodec, each shown in CI to run three encoders of one camera
+          at once (macOS, Windows, the Android emulator, an iPhone
+          simulator); an encoder failing every picture for a second (a
+          phone's hardware out of instances) has its encoding let go while
+          another still codes
+    - [x] **A6d** The app: our own grid, a pin and the speaker as views,
+          names on tiles, more than one content stream kept — where the
+          room forwards, the stage lays out the tiles (a grid, or one large
+          — the user's pin, a host's spotlight or the speaker — with up to
+          four beside it), each named with a speaking ring and marks for
+          muted, pinned and held back, and sends the view each layout
+          needs (`set_room_view`, `room view … pin p1`); a new shared
+          screen is shown and the older kept until it ends
 - [ ] **U6** Accessibility, localisation, store listings
 - [ ] **W** The Windows client, finished (the 2026-10-12 survey)
   - [x] **W1** One app: a second start hands its arguments to the running

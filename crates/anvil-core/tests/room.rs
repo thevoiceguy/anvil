@@ -217,7 +217,8 @@ async fn a_room_joined_by_link_tells_its_roster_and_its_floor() {
     );
     assert_eq!(
         header(&room.invite, "Recv-Info").as_deref(),
-        Some("fcp-content")
+        Some("fcp-content"),
+        "without video, no streams of anyone's are asked for"
     );
     expect(&mut events, SOON, |e| match e {
         Event::CallEstablished { call: c, .. } if *c == call => Some(()),
@@ -225,6 +226,14 @@ async fn a_room_joined_by_link_tells_its_roster_and_its_floor() {
     })
     .await
     .expect("in the room");
+    assert!(!alice.room_forwards(call));
+    assert!(
+        alice
+            .set_room_view(call, &anvil_core::RoomView::default())
+            .await
+            .is_err(),
+        "a view is not asked of a room that does not forward"
+    );
 
     // The roster, subscribed to in the call.
     let (subscribe, from) = room.next("SUBSCRIBE ").await;
@@ -260,6 +269,7 @@ async fn a_room_joined_by_link_tells_its_roster_and_its_floor() {
             call: c,
             members,
             speaker,
+            ..
         } if *c == call => Some((members.clone(), speaker.clone())),
         _ => None,
     })
@@ -295,6 +305,7 @@ async fn a_room_joined_by_link_tells_its_roster_and_its_floor() {
             call: c,
             members,
             speaker,
+            ..
         } if *c == call => {
             assert_eq!(speaker.as_deref(), Some("p1"));
             Some(members.clone())
@@ -395,7 +406,11 @@ async fn a_room_dialed_with_video_is_offered_a_section_for_its_shared_screen() {
     .await
     .expect("an INVITE");
     assert_eq!(header(&invite, "X-FCP-Join"), None, "dialed by number");
-    assert_eq!(header(&invite, "Recv-Info").as_deref(), Some("fcp-content"));
+    assert_eq!(
+        header(&invite, "Recv-Info").as_deref(),
+        Some("fcp-content, fcp-view"),
+        "with video, each person's stream is asked for"
+    );
     let sdp = body(&invite);
     let video: Vec<&str> = sdp.split("m=").filter(|s| s.starts_with("video")).collect();
     assert_eq!(video.len(), 2, "a camera and the shared screen: {sdp}");
@@ -584,4 +599,382 @@ async fn a_share_the_room_refuses_stops_at_once_and_is_ended_by_re_invite() {
     room.next("ACK ").await;
     stop.await.unwrap().expect("the stop is answered");
     assert!(!alice.sharing(call));
+}
+
+/// A member of a forwarding room as FCP lists them to one subscriber: their
+/// own stream to us on `src`, and with `speaker` the speaker stream showing
+/// them.
+fn forwarded_user(id: &str, name: &str, src: u32, speaker: Option<u32>) -> String {
+    let speaker = speaker
+        .map(|s| {
+            format!(
+                "<media id=\"speaker\"><type>video</type><label>speaker</label>\
+                 <src-id>{s}</src-id><status>sendonly</status></media>"
+            )
+        })
+        .unwrap_or_default();
+    format!(
+        "<user entity=\"sip:{id}@room\" state=\"full\"><display-text>{name}</display-text>\
+         <roles><entry>participant</entry></roles>\
+         <endpoint entity=\"sip:{id}@room\" state=\"full\"><status>connected</status>\
+         <media id=\"audio\"><type>audio</type><status>sendrecv</status></media>\
+         <media id=\"video\"><type>video</type><src-id>{src}</src-id><status>sendrecv</status>\
+         <fcp:camera>on</fcp:camera></media>{speaker}\
+         <fcp:speaking>false</fcp:speaking><fcp:presenting>false</fcp:presenting>\
+         </endpoint></user>\n"
+    )
+}
+
+/// The port of the `m=` line in `section`.
+fn section_port(section: &str) -> u16 {
+    section
+        .split_whitespace()
+        .nth(1)
+        .and_then(|p| p.parse().ok())
+        .expect("a port")
+}
+
+/// A VP8 packet of `ssrc`: what a forwarding room sends each stream as.
+fn vp8_packet(pt: u8, ssrc: u32, seq: u16) -> Vec<u8> {
+    let mut p = vec![0x80, 0x80 | pt];
+    p.extend_from_slice(&seq.to_be_bytes());
+    p.extend_from_slice(&(u32::from(seq) * 3000).to_be_bytes());
+    p.extend_from_slice(&ssrc.to_be_bytes());
+    // The VP8 descriptor (start of a partition), then a keyframe's start.
+    p.extend_from_slice(&[
+        0x10, 0x50, 0x01, 0x00, 0x9d, 0x01, 0x2a, 0x40, 0x01, 0xf0, 0x00,
+    ]);
+    p
+}
+
+/// A room that forwards (FCP's `docs/FORWARDING_ROOMS.md` §2.2–2.3): its
+/// answer says `Recv-Info: fcp-view`, each person's stream comes down the
+/// camera section under an SSRC of its own, the roster's `<src-id>`s say
+/// whose each is (whichever arrives first), and a view is asked of it in
+/// the call as an `fcp-view` INFO.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_forwarding_room_names_each_stream_and_takes_a_view() {
+    use anvil_core::video::host::VideoCodec;
+    use anvil_core::{RoomStream, RoomView, ViewStream, ViewTarget};
+    let (alice, mut events) = start_with_video(
+        account(
+            "sip:alice@127.0.0.1",
+            "sip:127.0.0.1:9",
+            "alice",
+            "",
+            "127.0.0.1",
+            3600,
+        ),
+        MediaConfig::default(),
+        // One codec keeps the INVITE within UDP's size.
+        Some(SyntheticVideoHost::new(&[VideoCodec::Vp8])),
+    )
+    .await;
+    let alice = std::sync::Arc::new(alice);
+    let mut room = Room::bind("127.0.0.10").await;
+    let camera = UdpSocket::bind("127.0.0.10:0").await.unwrap();
+    let screen = UdpSocket::bind("127.0.0.10:0").await.unwrap();
+    let call = alice
+        .join_room(
+            &format!("sip:3000@{}", room.addr),
+            &RoomJoin::default(),
+            CallMedia::VIDEO,
+        )
+        .await
+        .expect("the room is dialed");
+    let (invite, from) = room.next("INVITE ").await;
+    room.invite = invite.clone();
+    room.phone = from;
+    assert_eq!(
+        header(&invite, "Recv-Info").as_deref(),
+        Some("fcp-content, fcp-view")
+    );
+    let offered = video_sections(body(&invite));
+    let pt = vp8_pt(&offered[0]);
+    let rtp_pt: u8 = pt.parse().unwrap();
+    let alice_camera = SocketAddr::from(([127, 0, 0, 1], section_port(&offered[0])));
+    assert!(
+        !offered[0].contains("a=simulcast"),
+        "a host that cannot simulcast offers one encoding"
+    );
+    let answer = video_answer(
+        "127.0.0.10",
+        &pt,
+        camera.local_addr().unwrap().port(),
+        screen.local_addr().unwrap().port(),
+        "sendonly",
+    );
+    room.answer(
+        &invite,
+        from,
+        "200 OK",
+        "Recv-Info: fcp-content, fcp-view\r\n",
+        "application/sdp",
+        &answer,
+    )
+    .await;
+    room.next("ACK ").await;
+    expect(&mut events, SOON, |e| match e {
+        Event::CallEstablished { call: c, .. } if *c == call => Some(()),
+        _ => None,
+    })
+    .await
+    .expect("in the room");
+    assert!(alice.room_forwards(call));
+
+    // Bob's stream arrives before the roster names anyone.
+    for seq in 0..3 {
+        camera
+            .send_to(&vp8_packet(rtp_pt, 2222, seq), alice_camera)
+            .await
+            .unwrap();
+    }
+    let unnamed = expect(&mut events, SOON, |e| match e {
+        Event::RoomStreams { call: c, streams } if *c == call => Some(streams.clone()),
+        _ => None,
+    })
+    .await
+    .expect("the first stream is told");
+    assert_eq!(unnamed.len(), 1);
+    assert_eq!(unnamed[0].member, None);
+    let bob_stream = unnamed[0].stream;
+
+    let (subscribe, from) = room.next("SUBSCRIBE ").await;
+    room.answer(&subscribe, from, "200 OK", "Expires: 600\r\n", "", "")
+        .await;
+    let whole = roster(
+        "full",
+        1,
+        &(forwarded_user("p1", "Carol", 1111, Some(3333))
+            + &forwarded_user("p2", "Bob", 2222, None)),
+    );
+    let ok = room
+        .send(
+            "NOTIFY",
+            "Event: conference\r\nSubscription-State: active;expires=600\r\n",
+            ROSTER_TYPE,
+            &whole,
+        )
+        .await;
+    assert!(ok.starts_with("SIP/2.0 200"), "{ok}");
+    expect(&mut events, SOON, |e| match e {
+        Event::RoomStreams { call: c, streams }
+            if *c == call
+                && streams
+                    == &vec![RoomStream {
+                        stream: bob_stream,
+                        member: Some("p2".into()),
+                        speaker: false,
+                    }] =>
+        {
+            Some(())
+        }
+        _ => None,
+    })
+    .await
+    .expect("the roster names Bob's stream");
+
+    // Carol's own stream and the speaker stream showing her, after it.
+    for seq in 0..3 {
+        for ssrc in [1111, 3333] {
+            camera
+                .send_to(&vp8_packet(rtp_pt, ssrc, seq), alice_camera)
+                .await
+                .unwrap();
+        }
+    }
+    let named = expect(&mut events, SOON, |e| match e {
+        Event::RoomStreams { call: c, streams } if *c == call && streams.len() == 3 => {
+            Some(streams.clone())
+        }
+        _ => None,
+    })
+    .await
+    .expect("every stream is named");
+    let carol: Vec<&RoomStream> = named
+        .iter()
+        .filter(|s| s.member.as_deref() == Some("p1"))
+        .collect();
+    assert_eq!(carol.len(), 2, "{named:?}");
+    assert_eq!(carol.iter().filter(|s| s.speaker).count(), 1, "{named:?}");
+
+    // A view: Carol large, the speaker small.
+    let view = RoomView {
+        streams: Some(vec![
+            ViewStream {
+                target: ViewTarget::Member("p1".into()),
+                max_height: Some(720),
+                priority: Some(1),
+            },
+            ViewStream {
+                target: ViewTarget::Speaker,
+                max_height: Some(180),
+                priority: None,
+            },
+        ]),
+        max_streams: Some(4),
+    };
+    let asked = {
+        let alice = std::sync::Arc::clone(&alice);
+        let view = view.clone();
+        tokio::spawn(async move { alice.set_room_view(call, &view).await })
+    };
+    let (info, from) = room.next("INFO ").await;
+    assert_eq!(header(&info, "Info-Package").as_deref(), Some("fcp-view"));
+    assert_eq!(
+        header(&info, "Content-Type").as_deref(),
+        Some("application/vnd.fcp.view+json")
+    );
+    assert_eq!(header(&info, "Call-ID"), header(&room.invite, "Call-ID"));
+    let sent: serde_json::Value = serde_json::from_str(body(&info)).unwrap();
+    assert_eq!(
+        sent,
+        serde_json::json!({
+            "streams": [
+                { "participant": "p1", "max_height": 720, "priority": 1 },
+                { "speaker": true, "max_height": 180 }
+            ],
+            "max_streams": 4
+        })
+    );
+    room.answer(&info, from, "200 OK", "", "", "").await;
+    asked.await.unwrap().expect("the view is taken");
+
+    // One the room refuses is an error.
+    let refused = {
+        let alice = std::sync::Arc::clone(&alice);
+        tokio::spawn(async move { alice.set_room_view(call, &view).await })
+    };
+    let (info, from) = room.next("INFO ").await;
+    room.answer(&info, from, "400 Bad Request", "", "", "")
+        .await;
+    let err = refused.await.unwrap().expect_err("refused");
+    assert!(err.to_string().contains("400"), "{err}");
+}
+
+/// A camera's RTP packets reaching `socket` within `within`: each SSRC
+/// with the rid its packets name under extension `ext`.
+async fn layers_arriving(
+    socket: &UdpSocket,
+    ext: u8,
+    within: std::time::Duration,
+) -> std::collections::BTreeMap<u32, String> {
+    let mut out = std::collections::BTreeMap::new();
+    let mut buf = [0u8; 2048];
+    let end = tokio::time::Instant::now() + within;
+    while let Ok(Ok((n, _))) = tokio::time::timeout_at(end, socket.recv_from(&mut buf)).await {
+        let p = &buf[..n];
+        // RTP (not RTCP: 200–206) with a one-byte header extension
+        // (RFC 8285).
+        if n < 16 || p[0] >> 6 != 2 || p[0] & 0x10 == 0 || (200..=206).contains(&p[1]) {
+            continue;
+        }
+        let ssrc = u32::from_be_bytes([p[8], p[9], p[10], p[11]]);
+        let at = 12 + 4 * usize::from(p[0] & 0x0f);
+        if p[at..at + 2] != [0xBE, 0xDE] {
+            continue;
+        }
+        let words = usize::from(u16::from_be_bytes([p[at + 2], p[at + 3]]));
+        let mut i = at + 4;
+        let stop = (i + 4 * words).min(n);
+        while i < stop {
+            let (id, len) = (p[i] >> 4, usize::from(p[i] & 0x0f) + 1);
+            if p[i] == 0 {
+                i += 1;
+                continue;
+            }
+            if id == ext {
+                let rid = String::from_utf8_lossy(&p[i + 1..i + 1 + len]).to_string();
+                out.insert(ssrc, rid);
+            }
+            i += 1 + len;
+        }
+    }
+    out
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_room_s_camera_is_sent_as_the_simulcast_the_room_takes() {
+    use anvil_core::video::host::VideoCodec;
+    let (alice, mut events) = start_with_video(
+        account(
+            "sip:alice@127.0.0.1",
+            "sip:127.0.0.1:9",
+            "alice",
+            "",
+            "127.0.0.1",
+            3600,
+        ),
+        MediaConfig::default(),
+        Some(SyntheticVideoHost::new(&[VideoCodec::Vp8]).with_simulcast(3)),
+    )
+    .await;
+    let mut room = Room::bind("127.0.0.11").await;
+    let camera = UdpSocket::bind("127.0.0.11:0").await.unwrap();
+    let screen = UdpSocket::bind("127.0.0.11:0").await.unwrap();
+    let call = alice
+        .join_room(
+            &format!("sip:3000@{}", room.addr),
+            &RoomJoin::default(),
+            CallMedia::VIDEO,
+        )
+        .await
+        .expect("the room is dialed");
+    let (invite, from) = room.next("INVITE ").await;
+    room.invite = invite.clone();
+    room.phone = from;
+    let offered = video_sections(body(&invite));
+    for line in [
+        "a=rid:h send",
+        "a=rid:m send",
+        "a=rid:l send",
+        "a=simulcast:send h;m;l",
+        "urn:ietf:params:rtp-hdrext:sdes:rtp-stream-id",
+    ] {
+        assert!(offered[0].contains(line), "{line} in {}", offered[0]);
+    }
+    assert!(
+        !offered[1].contains("a=simulcast"),
+        "the shared screen is not simulcast"
+    );
+    // The room takes two of them, under an extension id of its own.
+    let pt = vp8_pt(&offered[0]);
+    let answer = video_answer(
+        "127.0.0.11",
+        &pt,
+        camera.local_addr().unwrap().port(),
+        screen.local_addr().unwrap().port(),
+        "sendonly",
+    )
+    .replacen(
+        "a=sendrecv\r\n",
+        "a=extmap:9 urn:ietf:params:rtp-hdrext:sdes:rtp-stream-id\r\n\
+         a=rid:h recv\r\na=rid:l recv\r\na=simulcast:recv h;l\r\na=sendrecv\r\n",
+        1,
+    );
+    room.answer(
+        &invite,
+        from,
+        "200 OK",
+        "Recv-Info: fcp-content, fcp-view\r\n",
+        "application/sdp",
+        &answer,
+    )
+    .await;
+    room.next("ACK ").await;
+    expect(&mut events, SOON, |e| match e {
+        Event::CallEstablished { call: c, .. } if *c == call => Some(()),
+        _ => None,
+    })
+    .await
+    .expect("in the room");
+
+    let layers = layers_arriving(&camera, 9, std::time::Duration::from_secs(2)).await;
+    let mut rids: Vec<&String> = layers.values().collect();
+    rids.sort();
+    assert_eq!(
+        rids,
+        ["h", "l"],
+        "the two it took, each under an SSRC of its own: {layers:?}"
+    );
 }

@@ -48,8 +48,8 @@ pub use state::{
     AppearanceView, AudioDevice, AudioDevices, AudioProcessing, AudioTest, AudioTestStage,
     AudioVolume, Brand, CallState, CallVideoView, CallView, CameraView, Change, Contact,
     ContactNumber, Direction, DirectoryListing, H264View, LineView, MessageWaiting, MyPresence,
-    OwnStatus, Person, Push, Quality, Recent, Registration, Ringtone, RoomMemberView, RoomView,
-    State, VideoState, Voicemail,
+    OwnStatus, Person, Push, Quality, Recent, Registration, Ringtone, RoomMemberView,
+    RoomStreamView, RoomView, State, VideoState, Voicemail,
 };
 pub use video::OpenH264;
 
@@ -1075,6 +1075,15 @@ impl Phone {
                 self.room_control(call, action).await?;
                 Ok(Response::ok())
             }
+            Command::View {
+                call,
+                members,
+                speaker,
+                pinned,
+            } => {
+                self.set_view(call, members, speaker, pinned).await?;
+                Ok(Response::ok())
+            }
             Command::Camera { camera } => {
                 self.choose_camera(camera).await?;
                 Ok(Response::ok())
@@ -2018,7 +2027,9 @@ fn update_call(
     if view.capturing && inner.state.lock().capture.mode == CaptureMode::NextCall {
         inner.update_capture(|c| c.mode = CaptureMode::Off);
     }
-    let _ = inner.changes.send(Change::Call { call: view });
+    let _ = inner.changes.send(Change::Call {
+        call: Box::new(view),
+    });
 }
 
 /// A call's capture closed: the folder pruned (never this one) and the

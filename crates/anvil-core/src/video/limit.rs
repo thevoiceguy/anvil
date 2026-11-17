@@ -10,8 +10,8 @@ use parking_lot::Mutex;
 use tokio::sync::watch;
 
 use super::host::{
-    CameraInfo, CodedFrame, EncodingId, ReceiveConfig, Resolution, ScreenInfo, SendConfig,
-    StreamId, VideoCodecCaps, VideoHost, VideoSink, VideoSource,
+    CameraInfo, CodedFrame, Encoding, EncodingId, EncodingTarget, ReceiveConfig, Resolution,
+    ScreenInfo, SendConfig, StreamId, VideoCodecCaps, VideoHost, VideoSink, VideoSource,
 };
 use crate::AnvilError;
 
@@ -60,18 +60,34 @@ impl VideoHost for LimitedHost {
         self.inner.set_screen(screen);
     }
 
+    fn simulcast(&self) -> usize {
+        self.inner.simulcast()
+    }
+
+    /// Every encoding within the limit: a simulcast layer larger than it
+    /// is sent at the limit's size, as the one encoding is.
     fn start_send(&self, cfg: SendConfig) -> Result<Box<dyn VideoSource>, AnvilError> {
         let mut limit = self.limit.clone();
         let now = *limit.borrow_and_update();
         let asked = (cfg.kbps, cfg.max, cfg.fps);
+        let encodings = cfg
+            .encodings
+            .iter()
+            .map(|e| Encoding {
+                max: within(e.max, now),
+                ..*e
+            })
+            .collect();
         let inner = self.inner.start_send(SendConfig {
             max: within(cfg.max, now),
+            encodings,
             ..cfg
         })?;
         Ok(Box::new(LimitedSource {
             inner,
             limit,
             asked: Mutex::new(asked),
+            layers: Mutex::new(Vec::new()),
         }))
     }
 
@@ -89,13 +105,28 @@ struct LimitedSource {
     limit: watch::Receiver<Option<Resolution>>,
     /// The target the session last set, before the limit.
     asked: Mutex<(u32, Resolution, u32)>,
+    /// Simulcast: each encoding's last target, before the limit.
+    layers: Mutex<Vec<(EncodingId, Option<EncodingTarget>)>>,
 }
 
 impl LimitedSource {
     fn apply(&self) {
-        let (kbps, max, fps) = *self.asked.lock();
-        self.inner
-            .set_target(kbps, within(max, *self.limit.borrow()), fps);
+        let limit = *self.limit.borrow();
+        let layers = self.layers.lock().clone();
+        if layers.is_empty() {
+            let (kbps, max, fps) = *self.asked.lock();
+            self.inner.set_target(kbps, within(max, limit), fps);
+            return;
+        }
+        for (id, target) in layers {
+            self.inner.set_encoding_target(
+                id,
+                target.map(|t| EncodingTarget {
+                    max: within(t.max, limit),
+                    ..t
+                }),
+            );
+        }
     }
 }
 
@@ -116,6 +147,28 @@ impl VideoSource for LimitedSource {
     fn set_target(&self, kbps: u32, max: Resolution, fps: u32) {
         *self.asked.lock() = (kbps, max, fps);
         self.apply();
+    }
+
+    fn request_keyframe_of(&self, encoding: EncodingId) {
+        self.inner.request_keyframe_of(encoding);
+    }
+
+    fn set_encoding_target(&self, encoding: EncodingId, target: Option<EncodingTarget>) {
+        {
+            let mut layers = self.layers.lock();
+            match layers.iter_mut().find(|(id, _)| *id == encoding) {
+                Some(l) => l.1 = target,
+                None => layers.push((encoding, target)),
+            }
+        }
+        let limit = *self.limit.borrow();
+        self.inner.set_encoding_target(
+            encoding,
+            target.map(|t| EncodingTarget {
+                max: within(t.max, limit),
+                ..t
+            }),
+        );
     }
 }
 
@@ -138,7 +191,7 @@ mod tests {
             max: Resolution::P720,
             kbps: 1500,
             fps: 30,
-            encodings: vec![EncodingId(0)],
+            encodings: SendConfig::single(Resolution::P720, 1500),
         }
     }
 

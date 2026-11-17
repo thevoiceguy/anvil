@@ -36,6 +36,13 @@ pub trait Codecs: Send + Sync {
     fn caps(&self) -> Vec<VideoCodecCaps>;
     fn encoder(&self, codec: VideoCodec, kbps: u32, fps: u32) -> Result<Box<dyn Encoder>, String>;
     fn decoder(&self, codec: VideoCodec) -> Result<Box<dyn Decoder>, String>;
+    /// How many encoders of one camera it runs at once (simulcast): 1
+    /// unless the platform is shown to run more at once
+    /// (`simulcast_keeps_up` in the tests). An encoder that then fails
+    /// every picture has its encoding let go, the others going on.
+    fn simulcast(&self) -> usize {
+        1
+    }
 }
 
 /// Software codecs: H.264 once Cisco's OpenH264 is on disk, and VP8
@@ -96,6 +103,12 @@ impl Codecs for SoftwareCodecs {
             #[cfg(not(target_os = "linux"))]
             VideoCodec::Vp8 => Err("no VP8 encoder".into()),
         }
+    }
+
+    /// Three: the smaller two cost a quarter and a sixteenth of the
+    /// largest.
+    fn simulcast(&self) -> usize {
+        3
     }
 
     fn decoder(&self, codec: VideoCodec) -> Result<Box<dyn Decoder>, String> {
@@ -170,9 +183,23 @@ mod tests {
             }
             let got = dec
                 .decode(&e.data)
-                .unwrap_or_else(|e| panic!("{codec:?} picture {n}: {e}"))
-                .expect("a picture");
-            assert_eq!((got.width, got.height), size);
+                .unwrap_or_else(|e| panic!("{codec:?} picture {n}: {e}"));
+            // A decoder that runs behind (MediaCodec on the emulator) may
+            // hold a picture back and hand it out with a later frame.
+            let Some(got) = got else {
+                assert!(late > 0, "{codec:?} picture {n}: no picture");
+                continue;
+            };
+            let held_over = late > 0 && (30..30 + late).contains(&n) && got.width == 640;
+            assert!(
+                (got.width, got.height) == size || held_over,
+                "{codec:?} picture {n}: {}x{}",
+                got.width,
+                got.height
+            );
+            if held_over {
+                continue;
+            }
             let likeness = recent.iter().map(|p| got.psnr(p)).fold(0.0, f64::max);
             if likeness < worst {
                 (worst, worst_at) = (likeness, n);
@@ -194,6 +221,83 @@ mod tests {
             worst > 28.0,
             "{codec:?}: worst PSNR {worst:.1} dB at picture {worst_at}"
         );
+    }
+
+    /// A room's camera as simulcast: `codecs.simulcast()` encoders at
+    /// once (720p, 360p and 180p at the rates the session gives them), one
+    /// capture scaled for each, each layer decoded at its size, a keyframe
+    /// asked of one alone, and — where `real_time` — the lot coded faster
+    /// than the pictures come. Up to `late` pictures may still be inside
+    /// an encoder at the end (MediaCodec on the emulator runs behind).
+    pub(crate) fn simulcast_keeps_up(
+        codecs: &dyn Codecs,
+        codec: VideoCodec,
+        late: u32,
+        real_time: bool,
+    ) {
+        const LAYERS: [(u32, u32, u32); 3] = [(1280, 720, 1500), (640, 360, 500), (320, 180, 150)];
+        const PICTURES: u32 = 50;
+        const ASKED: u32 = 25;
+        let n = codecs.simulcast();
+        assert!(n >= 2, "{codec:?}: simulcast {n}");
+        let layers = &LAYERS[..n.min(LAYERS.len())];
+        let mut coders: Vec<_> = layers
+            .iter()
+            .map(|&(_, _, kbps)| {
+                (
+                    codecs.encoder(codec, kbps, 30).unwrap(),
+                    codecs.decoder(codec).unwrap(),
+                )
+            })
+            .collect();
+        let mut decoded = vec![0u32; layers.len()];
+        let mut keyframes: Vec<Vec<u32>> = vec![Vec::new(); layers.len()];
+        // The encoders' time alone: scaling and decoding are the test's.
+        let mut took = std::time::Duration::ZERO;
+        for p in 0..PICTURES {
+            let captured = Picture::pattern(1280, 720, p);
+            for (i, ((enc, dec), &(w, h, _))) in coders.iter_mut().zip(layers).enumerate() {
+                let picture = captured.scaled(w, h);
+                let asked = p == 0 || (i == 1 && p == ASKED);
+                let started = std::time::Instant::now();
+                let out = enc.encode(&picture, asked);
+                took += started.elapsed();
+                let out = out.unwrap_or_else(|e| panic!("{codec:?} layer {i} picture {p}: {e}"));
+                let Some(e) = out else { continue };
+                if e.keyframe {
+                    keyframes[i].push(p);
+                }
+                if let Some(got) = dec
+                    .decode(&e.data)
+                    .unwrap_or_else(|e| panic!("{codec:?} layer {i} picture {p}: {e}"))
+                {
+                    assert_eq!((got.width, got.height), (w, h), "{codec:?} layer {i}");
+                    decoded[i] += 1;
+                }
+            }
+        }
+        eprintln!(
+            "{codec:?}: {n} layers, {PICTURES} pictures in {took:?} (decoded {decoded:?}, keyframes {keyframes:?})"
+        );
+        for (i, got) in decoded.iter().enumerate() {
+            assert!(*got + late >= PICTURES, "{codec:?} layer {i}: {decoded:?}");
+        }
+        // The first frame out of each is a keyframe; the one asked of the
+        // middle layer is its alone.
+        for (i, k) in keyframes.iter().enumerate() {
+            assert!(
+                k.first().is_some_and(|&f| f <= late),
+                "{codec:?} layer {i}: {keyframes:?}"
+            );
+            let again = k.iter().any(|&f| (ASKED..=ASKED + late).contains(&f));
+            assert_eq!(again, i == 1, "{codec:?} layer {i}: {keyframes:?}");
+        }
+        if real_time {
+            // Coding every layer of every picture within the time the
+            // pictures span (a debug build, so a release has room).
+            let span = std::time::Duration::from_secs(1) * PICTURES / 30;
+            assert!(took < span, "{codec:?}: {took:?} for {span:?} of pictures");
+        }
     }
 
     #[cfg(target_os = "linux")]
@@ -227,6 +331,16 @@ mod tests {
 
     #[cfg(target_vendor = "apple")]
     #[test]
+    fn videotoolbox_runs_a_simulcast_s_encoders_at_once() {
+        // An iPhone simulator's encoder is software in a VM (3 s for
+        // 1.7 s of pictures on CI's runner): keeping up there is an
+        // iPhone's media engine's to show, as on the Android emulator.
+        let simulator = cfg!(target_abi = "sim");
+        simulcast_keeps_up(&crate::vt::VtCodecs, VideoCodec::H264, 0, !simulator);
+    }
+
+    #[cfg(target_vendor = "apple")]
+    #[test]
     fn h264_round_trips_the_pattern_through_videotoolbox() {
         round_trip(&crate::vt::VtCodecs, VideoCodec::H264);
         // Each IDR carries its parameter sets (the core needs them).
@@ -245,6 +359,17 @@ mod tests {
             types.starts_with(&[7, 8]) && types.contains(&5),
             "{types:?}"
         );
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn media_foundation_runs_a_simulcast_s_encoders_at_once() {
+        let codecs = crate::mf::MfCodecs;
+        if codecs.caps().is_empty() {
+            eprintln!("skipped: no Media Foundation H.264 here");
+            return;
+        }
+        simulcast_keeps_up(&codecs, VideoCodec::H264, 0, true);
     }
 
     #[cfg(windows)]
@@ -270,6 +395,17 @@ mod tests {
             types.contains(&7) && types.contains(&8) && types.contains(&5),
             "{types:?}"
         );
+    }
+
+    #[cfg(target_os = "android")]
+    #[test]
+    fn mediacodec_runs_a_simulcast_s_encoders_at_once() {
+        crate::binder_threads();
+        // The emulator's encoders are software and run behind (see the
+        // round trip); keeping up is a phone's hardware's to show.
+        for codec in [VideoCodec::H264, VideoCodec::Vp8] {
+            simulcast_keeps_up(&crate::mc::McCodecs, codec, 19, false);
+        }
     }
 
     #[cfg(target_os = "android")]
@@ -303,6 +439,23 @@ mod tests {
             types.starts_with(&[7, 8]) && types.contains(&5),
             "{types:?}"
         );
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn software_runs_a_simulcast_s_encoders_at_once() {
+        // Not held to real time: on CI's runner, beside the other tests,
+        // these software encoders have taken 6 s for 1.7 s of pictures
+        // (here, 0.3 s); Linux's sending was shown in A6b.
+        simulcast_keeps_up(&SoftwareCodecs::default(), VideoCodec::Vp8, 0, false);
+        if let Some(path) = openh264_for_tests() {
+            simulcast_keeps_up(
+                &SoftwareCodecs::with_openh264(Some(path)),
+                VideoCodec::H264,
+                0,
+                false,
+            );
+        }
     }
 
     #[test]

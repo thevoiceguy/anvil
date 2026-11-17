@@ -1215,6 +1215,12 @@ impl Fcp {
     /// A meeting with video at a fresh number, owned by `owner`: its id
     /// and number.
     async fn meeting(&self, owner: &str) -> (String, String) {
+        self.meeting_with(owner, json!({})).await
+    }
+
+    /// [`meeting`](Self::meeting) with `extra` fields (a forwarding room's
+    /// `video_mode`).
+    async fn meeting_with(&self, owner: &str, extra: Value) -> (String, String) {
         use rand::Rng;
         let room = format!("77{}", rand::thread_rng().gen_range(100_000..999_999));
         let made = self
@@ -1222,14 +1228,20 @@ impl Fcp {
             .post(format!("{}/api/v1/conferences/meetings", self.admin))
             .bearer_auth(&self.token)
             .header("X-FCP-Tenant-Id", &self.tenant)
-            .json(&json!({
-                "room_number": room,
-                "name": format!("Anvil room {room}"),
-                "owner_id": owner,
-                "video_enabled": true,
-                "play_entry_tone": false,
-                "play_exit_tone": false,
-            }))
+            .json(&{
+                let mut body = json!({
+                    "room_number": room,
+                    "name": format!("Anvil room {room}"),
+                    "owner_id": owner,
+                    "video_enabled": true,
+                    "play_entry_tone": false,
+                    "play_exit_tone": false,
+                });
+                if let (Some(b), Some(e)) = (body.as_object_mut(), extra.as_object()) {
+                    b.extend(e.clone());
+                }
+                body
+            })
             .send()
             .await
             .unwrap();
@@ -1517,4 +1529,275 @@ async fn a_screen_shared_in_a_room_on_fcp_takes_the_floor_and_frees_it_on_stop()
     .await;
     alice.hangup(a).await.expect("leaves");
     let _ = alice.shutdown().await;
+}
+
+/// The streams `call` is sent that `ok` takes, by the members they show.
+async fn streams_where(
+    events: &mut EventStream,
+    call: CallId,
+    within: Duration,
+    what: &str,
+    ok: impl Fn(&[anvil_core::RoomStream]) -> bool,
+) -> Vec<anvil_core::RoomStream> {
+    let mut last = Vec::new();
+    let found = expect(events, within, |e| match e {
+        Event::RoomStreams { call: c, streams } if *c == call => {
+            last = streams.clone();
+            ok(streams).then(|| streams.clone())
+        }
+        _ => None,
+    })
+    .await;
+    found.unwrap_or_else(|| panic!("no streams where {what}; last: {last:?}"))
+}
+
+/// The members `streams` show, apart from the speaker stream.
+fn shown(streams: &[anvil_core::RoomStream]) -> std::collections::BTreeSet<String> {
+    streams
+        .iter()
+        .filter(|s| !s.speaker)
+        .filter_map(|s| s.member.clone())
+        .collect()
+}
+
+/// Three Anvils in a room that forwards (FCP's `docs/FORWARDING_ROOMS.md`,
+/// a meeting with `video_mode: auto`): each is sent the other two's own
+/// streams, named by the roster, and none of its own; a view asking for
+/// one of them leaves only that one coming.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn three_anvils_in_a_forwarding_room_are_each_sent_the_others() {
+    use anvil_core::video::host::Resolution;
+    use anvil_core::{CallMedia, RoomJoin};
+    use anvil_fcp::JoinRole;
+    use anvil_video::{DesktopVideoHost, PatternCamera, PatternScreen, SoftwareCodecs};
+    let fcp = fcp_or_skip!();
+    let (owner_client, owner) = signed_in(&fcp, "fwd-alice").await;
+    let (meeting, room) = fcp
+        .meeting_with(&owner, json!({ "video_mode": "auto" }))
+        .await;
+    let link = owner_client
+        .join_link(&meeting, JoinRole::Guest, None, None)
+        .await
+        .expect("a join link");
+    let domain = owner_client.softphone().await.unwrap().account.domain;
+    let target = format!("sip:{room}@{domain}");
+    let clients = [
+        owner_client,
+        signed_in(&fcp, "fwd-bob").await.0,
+        signed_in(&fcp, "fwd-carol").await.0,
+    ];
+    let mut people = Vec::new();
+    for (i, (who, client)) in ["alice", "bob", "carol"].iter().zip(&clients).enumerate() {
+        // Real VP8: the room forwards from a keyframe it can read.
+        let host = DesktopVideoHost::new(
+            PatternCamera::new(Resolution {
+                width: 320,
+                height: 180,
+            }),
+            SoftwareCodecs::default(),
+        )
+        .with_screens(PatternScreen::new(Resolution {
+            width: 320,
+            height: 180,
+        }));
+        let (anvil, mut events) = softphone_with_video(
+            client,
+            &format!("127.0.0.{}", 76 + i),
+            MediaConfig::default(),
+            Box::new(Quiet),
+            Some(Box::new(host)),
+        )
+        .await;
+        let join = if i == 0 {
+            RoomJoin::default()
+        } else {
+            RoomJoin::from_link(&link.link()).expect("the link's token")
+        };
+        let call = anvil
+            .join_room(&target, &join, CallMedia::VIDEO)
+            .await
+            .expect("joins");
+        let call = established(&mut events, Some(call)).await;
+        assert!(anvil.room_forwards(call), "{who}: the room forwards");
+        people.push((anvil, events, call));
+    }
+
+    // Each is sent two people's streams, named; together they name all
+    // three, each leaving out one (themselves).
+    let mut everyone = std::collections::BTreeSet::new();
+    let mut seen = Vec::new();
+    for (_, events, call) in people.iter_mut() {
+        let streams = streams_where(events, *call, Duration::from_secs(20), "two named", |s| {
+            shown(s).len() == 2
+        })
+        .await;
+        let members = shown(&streams);
+        everyone.extend(members.iter().cloned());
+        seen.push(members);
+    }
+    assert_eq!(everyone.len(), 3, "{seen:?}");
+    assert!(seen[0] != seen[1] && seen[1] != seen[2], "{seen:?}");
+
+    // Alice asks for one of them alone: the other's stream stops coming.
+    let (alice, alice_events, a) = &mut people[0];
+    let keep = seen[0].iter().next().unwrap().clone();
+    let view = anvil_core::RoomView {
+        streams: Some(vec![anvil_core::ViewStream {
+            target: anvil_core::ViewTarget::Member(keep.clone()),
+            max_height: Some(360),
+            priority: None,
+        }]),
+        max_streams: Some(1),
+    };
+    alice.set_room_view(*a, &view).await.expect("the view");
+    streams_where(
+        alice_events,
+        *a,
+        Duration::from_secs(20),
+        "only the one asked for",
+        |s| shown(s) == std::collections::BTreeSet::from([keep.clone()]),
+    )
+    .await;
+    // The roster stops naming the other at once; the room stops sending it,
+    // so its stream falls silent and ends.
+    streams_where(
+        alice_events,
+        *a,
+        Duration::from_secs(20),
+        "the other's stream ended",
+        |s| s.len() == 1 && s[0].member.as_deref() == Some(keep.as_str()),
+    )
+    .await;
+
+    for (anvil, _, call) in &people {
+        let _ = anvil.hangup(*call).await;
+    }
+    for (anvil, _, _) in people {
+        let _ = anvil.shutdown().await;
+    }
+}
+
+/// A forwarding room sends each viewer the simulcast layer it asks for
+/// (FCP's `docs/FORWARDING_ROOMS.md` §2.4–2.5): two Anvils send their
+/// 640x360 camera as three encodings, and a third, asking for one of them
+/// at 360 and the other at 90, is shown each at that size; asked the other
+/// way round, the sizes change places.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_simulcast_camera_reaches_each_viewer_at_the_size_it_asks_for() {
+    use anvil_core::video::host::Resolution;
+    use anvil_core::{CallMedia, RoomJoin, RoomView, ViewStream, ViewTarget};
+    use anvil_fcp::JoinRole;
+    use anvil_video::{DesktopVideoHost, PatternCamera, SoftwareCodecs, TileKey};
+    let fcp = fcp_or_skip!();
+    let (owner_client, owner) = signed_in(&fcp, "sim-alice").await;
+    let (meeting, room) = fcp
+        .meeting_with(&owner, json!({ "video_mode": "auto" }))
+        .await;
+    let link = owner_client
+        .join_link(&meeting, JoinRole::Guest, None, None)
+        .await
+        .expect("a join link");
+    let domain = owner_client.softphone().await.unwrap().account.domain;
+    let target = format!("sip:{room}@{domain}");
+    let clients = [
+        owner_client,
+        signed_in(&fcp, "sim-bob").await.0,
+        signed_in(&fcp, "sim-carol").await.0,
+    ];
+    let mut people = Vec::new();
+    let mut tiles = Vec::new();
+    for (i, (who, client)) in ["alice", "bob", "carol"].iter().zip(&clients).enumerate() {
+        let host = DesktopVideoHost::new(
+            PatternCamera::new(Resolution {
+                width: 640,
+                height: 360,
+            }),
+            SoftwareCodecs::default(),
+        );
+        tiles.push(host.tiles());
+        let (anvil, mut events) = softphone_with_video(
+            client,
+            &format!("127.0.0.{}", 79 + i),
+            MediaConfig::default(),
+            Box::new(Quiet),
+            Some(Box::new(host)),
+        )
+        .await;
+        let join = if i == 0 {
+            RoomJoin::default()
+        } else {
+            RoomJoin::from_link(&link.link()).expect("the link's token")
+        };
+        let call = anvil
+            .join_room(&target, &join, CallMedia::VIDEO)
+            .await
+            .expect("joins");
+        let call = established(&mut events, Some(call)).await;
+        assert!(anvil.room_forwards(call), "{who}: the room forwards");
+        people.push((anvil, events, call));
+    }
+
+    let carol_tiles = tiles.pop().unwrap();
+    let (carol, carol_events, c) = &mut people[2];
+    let streams = streams_where(
+        carol_events,
+        *c,
+        Duration::from_secs(20),
+        "two named",
+        |s| shown(s).len() == 2,
+    )
+    .await;
+    let named: Vec<(String, anvil_core::video::host::StreamId)> = streams
+        .iter()
+        .filter(|s| !s.speaker)
+        .filter_map(|s| Some((s.member.clone()?, s.stream)))
+        .collect();
+    let (one, two) = (named[0].clone(), named[1].clone());
+    let ask = |big: &str, small: &str| RoomView {
+        streams: Some(vec![
+            ViewStream {
+                target: ViewTarget::Member(big.to_string()),
+                max_height: Some(360),
+                priority: Some(1),
+            },
+            ViewStream {
+                target: ViewTarget::Member(small.to_string()),
+                max_height: Some(90),
+                priority: None,
+            },
+        ]),
+        max_streams: Some(2),
+    };
+    // The heights `one` and `two` are shown at, once both are as asked.
+    let shown_at = async |want: (u32, u32), what: &str| {
+        let deadline = std::time::Instant::now() + Duration::from_secs(30);
+        let mut last = (None, None);
+        while std::time::Instant::now() < deadline {
+            let h = |id| carol_tiles.stats(TileKey::Stream(id)).map(|t| t.height);
+            last = (h(one.1), h(two.1));
+            if last == (Some(want.0), Some(want.1)) {
+                return;
+            }
+            tokio::time::sleep(Duration::from_millis(100)).await;
+        }
+        panic!("{what}: shown at {last:?}, not {want:?}");
+    };
+
+    carol
+        .set_room_view(*c, &ask(&one.0, &two.0))
+        .await
+        .expect("the view");
+    shown_at((360, 90), "one large, the other small").await;
+    carol
+        .set_room_view(*c, &ask(&two.0, &one.0))
+        .await
+        .expect("the view");
+    shown_at((90, 360), "the other way round").await;
+
+    for (anvil, _, call) in &people {
+        let _ = anvil.hangup(*call).await;
+    }
+    for (anvil, _, _) in people {
+        let _ = anvil.shutdown().await;
+    }
 }

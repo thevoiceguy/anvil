@@ -37,6 +37,13 @@ use crate::picture::Picture;
 pub(crate) struct MfCodecs;
 
 impl Codecs for MfCodecs {
+    /// Three: Microsoft's H.264 encoder is software, and the smaller two
+    /// cost a quarter and a sixteenth of the largest (shown by
+    /// `media_foundation_runs_a_simulcast_s_encoders_at_once`).
+    fn simulcast(&self) -> usize {
+        3
+    }
+
     fn caps(&self) -> Vec<VideoCodecCaps> {
         if !available() {
             return Vec::new();

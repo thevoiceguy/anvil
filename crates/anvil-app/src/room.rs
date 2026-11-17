@@ -8,7 +8,7 @@ use anvil_core::{Event, FloorState, RoomAudio, RoomJoin, RoomMember};
 use anvil_fcp::{JoinRole, RoomLayout};
 
 use crate::command::RoomAction;
-use crate::state::{CallView, Change, Direction, RoomMemberView, RoomView};
+use crate::state::{CallView, Change, Direction, RoomMemberView, RoomStreamView, RoomView};
 use crate::{update_call, CallState, Inner, Phone, PhoneError};
 
 /// What `join` was given: a room's number, or a join link.
@@ -164,6 +164,28 @@ impl Phone {
         Ok(done?)
     }
 
+    /// What the room `call` is in sends us, where it forwards each
+    /// person's stream: `members` and with `speaker` whoever speaks, each
+    /// at the height its tile has; `pinned` large; neither, the room's
+    /// default.
+    pub(crate) async fn set_view(
+        &self,
+        call: Option<u64>,
+        members: Vec<String>,
+        speaker: bool,
+        pinned: Option<String>,
+    ) -> Result<(), PhoneError> {
+        let id = self.pick(call, "no call in a room", |c| {
+            c.room.is_some() && c.state == CallState::Connected
+        })?;
+        let view = view_of(&members, speaker, pinned.as_deref());
+        Ok(self
+            .anvil()
+            .await?
+            .set_room_view(anvil_core::CallId(id), &view)
+            .await?)
+    }
+
     /// A host's control over the room `call` is in.
     pub(crate) async fn room_control(
         &self,
@@ -256,6 +278,48 @@ pub(crate) async fn refresh_meetings(inner: &Inner, fcp: &anvil_fcp::FcpClient) 
     }
 }
 
+/// The view for a layout of `members` (and the speaker): one large (the
+/// pinned, else the speaker) and kept first, the rest small beside it;
+/// without one large, each as tall as a grid of that many lets a tile be.
+fn view_of(members: &[String], speaker: bool, pinned: Option<&str>) -> anvil_core::RoomView {
+    if members.is_empty() && !speaker && pinned.is_none() {
+        return anvil_core::RoomView::default();
+    }
+    let large = |target| anvil_core::ViewStream {
+        target,
+        max_height: Some(720),
+        priority: Some(1),
+    };
+    let mut streams = Vec::new();
+    if let Some(p) = pinned {
+        streams.push(large(anvil_core::ViewTarget::Member(p.to_string())));
+    } else if speaker {
+        streams.push(large(anvil_core::ViewTarget::Speaker));
+    }
+    let others: Vec<&String> = members
+        .iter()
+        .filter(|m| Some(m.as_str()) != pinned)
+        .collect();
+    let tile = if !streams.is_empty() {
+        180
+    } else {
+        match others.len() {
+            1 => 720,
+            2..=4 => 360,
+            _ => 180,
+        }
+    };
+    streams.extend(others.into_iter().map(|m| anvil_core::ViewStream {
+        target: anvil_core::ViewTarget::Member(m.clone()),
+        max_height: Some(tile),
+        priority: None,
+    }));
+    anvil_core::RoomView {
+        max_streams: Some(streams.len().min(25) as u8),
+        streams: Some(streams),
+    }
+}
+
 fn member_view(m: &RoomMember) -> RoomMemberView {
     RoomMemberView {
         id: m.id.clone(),
@@ -270,6 +334,8 @@ fn member_view(m: &RoomMember) -> RoomMemberView {
         camera: m.camera.clone(),
         speaking: m.speaking,
         presenting: m.presenting,
+        paused: m.paused,
+        spotlight: m.spotlight,
     }
 }
 
@@ -301,6 +367,7 @@ pub(crate) fn on_event(inner: &Arc<Inner>, event: &Event) -> bool {
             call,
             members,
             speaker,
+            forwards,
         } if in_room(call.0) => {
             let members: Vec<RoomMemberView> = members.iter().map(member_view).collect();
             let presenter = members
@@ -315,6 +382,27 @@ pub(crate) fn on_event(inner: &Arc<Inner>, event: &Event) -> bool {
                         r.members = members;
                         r.speaker = speaker.clone();
                         r.presenter = presenter;
+                        r.forwards = *forwards;
+                    }
+                },
+                || crate::outgoing(call.0),
+            );
+        }
+        Event::RoomStreams { call, streams } if in_room(call.0) => {
+            let streams: Vec<RoomStreamView> = streams
+                .iter()
+                .map(|s| RoomStreamView {
+                    stream: s.stream.0,
+                    member: s.member.clone(),
+                    speaker: s.speaker,
+                })
+                .collect();
+            update_call(
+                inner,
+                call.0,
+                |c| {
+                    if let Some(r) = c.room.as_mut() {
+                        r.streams = streams;
                     }
                 },
                 || crate::outgoing(call.0),
@@ -359,7 +447,7 @@ pub(crate) fn on_event(inner: &Arc<Inner>, event: &Event) -> bool {
             },
             || crate::outgoing(call.0),
         ),
-        Event::RoomRoster { .. } | Event::RoomFloor { .. } => {}
+        Event::RoomRoster { .. } | Event::RoomFloor { .. } | Event::RoomStreams { .. } => {}
         _ => return false,
     }
     true
@@ -378,6 +466,58 @@ mod tests {
             "{}.sig",
             base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(payload)
         )
+    }
+
+    /// A view as (target, height, kept first).
+    fn sizes(view: &anvil_core::RoomView) -> Vec<(String, u32, bool)> {
+        view.streams
+            .iter()
+            .flatten()
+            .map(|s| {
+                let who = match &s.target {
+                    anvil_core::ViewTarget::Member(m) => m.clone(),
+                    anvil_core::ViewTarget::Speaker => "speaker".into(),
+                };
+                (who, s.max_height.unwrap_or(0), s.priority == Some(1))
+            })
+            .collect()
+    }
+
+    #[test]
+    fn a_view_asks_for_each_tile_at_its_height() {
+        let m = |v: &[&str]| v.iter().map(|s| s.to_string()).collect::<Vec<_>>();
+        // A grid: as tall as a grid of that many lets a tile be.
+        assert_eq!(
+            sizes(&view_of(&m(&["a"]), false, None)),
+            [("a".into(), 720, false)]
+        );
+        let four = sizes(&view_of(&m(&["a", "b", "c", "d"]), false, None));
+        assert!(four.iter().all(|s| s.1 == 360 && !s.2), "{four:?}");
+        let five = sizes(&view_of(&m(&["a", "b", "c", "d", "e"]), false, None));
+        assert!(five.iter().all(|s| s.1 == 180), "{five:?}");
+        // Pinned: large and first, the others small.
+        assert_eq!(
+            sizes(&view_of(&m(&["a", "b", "c"]), false, Some("b"))),
+            [
+                ("b".into(), 720, true),
+                ("a".into(), 180, false),
+                ("c".into(), 180, false)
+            ]
+        );
+        // The speaker large; a pin wins over it.
+        assert_eq!(
+            sizes(&view_of(&m(&["a", "b"]), true, None)),
+            [
+                ("speaker".into(), 720, true),
+                ("a".into(), 180, false),
+                ("b".into(), 180, false)
+            ]
+        );
+        assert_eq!(
+            sizes(&view_of(&m(&["a"]), true, Some("a"))),
+            [("a".into(), 720, true)]
+        );
+        assert_eq!(view_of(&[], false, None), anvil_core::RoomView::default());
     }
 
     #[test]

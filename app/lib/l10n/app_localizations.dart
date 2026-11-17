@@ -2120,6 +2120,30 @@ abstract class Strings {
   /// **'You'**
   String get selfView;
 
+  /// No description provided for @stageGrid.
+  ///
+  /// In en, this message translates to:
+  /// **'Everyone the same size'**
+  String get stageGrid;
+
+  /// No description provided for @stageSpeaker.
+  ///
+  /// In en, this message translates to:
+  /// **'The speaker large'**
+  String get stageSpeaker;
+
+  /// No description provided for @stagePinned.
+  ///
+  /// In en, this message translates to:
+  /// **'Pinned'**
+  String get stagePinned;
+
+  /// No description provided for @stagePaused.
+  ///
+  /// In en, this message translates to:
+  /// **'Held back: the network is short'**
+  String get stagePaused;
+
   /// No description provided for @settingsVideo.
   ///
   /// In en, this message translates to:

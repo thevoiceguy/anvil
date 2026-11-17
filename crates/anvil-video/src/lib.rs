@@ -290,10 +290,28 @@ impl VideoHost for DesktopVideoHost {
         self.live_screens.lock().retain(|s| s.to(screen));
     }
 
+    fn simulcast(&self) -> usize {
+        self.codecs.simulcast()
+    }
+
     fn start_send(&self, cfg: SendConfig) -> Result<Box<dyn VideoSource>, AnvilError> {
-        let encoder = self
-            .codecs
-            .encoder(cfg.codec, cfg.kbps, cfg.fps)
+        // An encoder per encoding asked for, as many as the codecs run.
+        let mut wanted = if cfg.encodings.is_empty() {
+            SendConfig::single(cfg.max, cfg.kbps)
+        } else {
+            cfg.encodings.clone()
+        };
+        wanted.truncate(self.codecs.simulcast().max(1));
+        let encodings = wanted
+            .iter()
+            .map(|e| {
+                Ok(source::Encoding {
+                    id: e.id,
+                    encoder: self.codecs.encoder(cfg.codec, e.kbps, cfg.fps)?,
+                    target: (e.kbps, e.max, cfg.fps),
+                })
+            })
+            .collect::<Result<Vec<_>, String>>()
             .map_err(AnvilError::Codec)?;
         // A screen is captured as a camera is, through the same source.
         let (devices, id, live, view): (Arc<dyn Cameras>, _, _, _) = match cfg.kind {
@@ -323,12 +341,7 @@ impl VideoHost for DesktopVideoHost {
             fps: cfg.fps,
             view,
         };
-        let source = source::CameraSource::start(
-            camera,
-            encoder,
-            (cfg.kbps, cfg.max, cfg.fps),
-            self.tiles.clone(),
-        );
+        let source = source::CameraSource::start(camera, encodings, self.tiles.clone());
         let mut live = live.lock();
         live.retain(source::Switch::alive);
         live.push(source.switch());
@@ -372,7 +385,7 @@ pub(crate) fn binder_threads() {
 #[cfg(all(test, target_os = "linux"))]
 mod tests {
     use super::*;
-    use anvil_core::video::host::{EncodingId, VideoCodec};
+    use anvil_core::video::host::{Encoding, EncodingId, EncodingTarget, VideoCodec};
 
     /// Two pattern cameras, each opening recorded; one open at a time.
     #[derive(Clone, Default)]
@@ -415,7 +428,7 @@ mod tests {
             max: Resolution::P720,
             kbps: 300,
             fps: 30,
-            encodings: vec![EncodingId(0)],
+            encodings: SendConfig::single(Resolution::P720, 300),
         }
     }
 
@@ -465,6 +478,265 @@ mod tests {
         assert_eq!(
             cameras.opened.lock().last().cloned().flatten().as_deref(),
             Some("front")
+        );
+    }
+
+    /// Software codecs whose encoders at `fails_at` kb/s fail every
+    /// picture (a hardware encoder out of sessions), counting the tries.
+    #[derive(Clone)]
+    struct FailingAt {
+        fails_at: u32,
+        tries: Arc<std::sync::atomic::AtomicU32>,
+    }
+
+    struct Failing(Arc<std::sync::atomic::AtomicU32>);
+
+    impl codec::Encoder for Failing {
+        fn encode(
+            &mut self,
+            _: &picture::Picture,
+            _: bool,
+        ) -> Result<Option<codec::Encoded>, String> {
+            self.0.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+            Err("no session".into())
+        }
+        fn set_rate(&mut self, _: u32, _: u32) {}
+    }
+
+    impl Codecs for FailingAt {
+        fn caps(&self) -> Vec<anvil_core::video::host::VideoCodecCaps> {
+            SoftwareCodecs::default().caps()
+        }
+        fn encoder(
+            &self,
+            codec: VideoCodec,
+            kbps: u32,
+            fps: u32,
+        ) -> Result<Box<dyn codec::Encoder>, String> {
+            if kbps == self.fails_at {
+                return Ok(Box::new(Failing(Arc::clone(&self.tries))));
+            }
+            SoftwareCodecs::default().encoder(codec, kbps, fps)
+        }
+        fn decoder(&self, codec: VideoCodec) -> Result<Box<dyn codec::Decoder>, String> {
+            SoftwareCodecs::default().decoder(codec)
+        }
+        fn simulcast(&self) -> usize {
+            3
+        }
+    }
+
+    #[tokio::test]
+    async fn an_encoding_whose_encoder_keeps_failing_is_let_go_and_the_others_go_on() {
+        let tries = Arc::new(std::sync::atomic::AtomicU32::new(0));
+        let host = DesktopVideoHost::new(
+            PatternCamera::new(Resolution {
+                width: 640,
+                height: 360,
+            }),
+            FailingAt {
+                fails_at: 100,
+                tries: Arc::clone(&tries),
+            },
+        );
+        let size = |width, height| Resolution { width, height };
+        let layers = [
+            (0, size(640, 360), 600),
+            (1, size(320, 180), 200),
+            (2, size(160, 90), 100),
+        ];
+        let mut source = host
+            .start_send(SendConfig {
+                max: layers[0].1,
+                kbps: layers[0].2,
+                encodings: layers
+                    .iter()
+                    .map(|&(id, max, kbps)| Encoding {
+                        id: EncodingId(id),
+                        max,
+                        kbps,
+                    })
+                    .collect(),
+                ..send_config()
+            })
+            .unwrap();
+        // Two frames a picture: past the pictures it takes to let go.
+        let mut sent = [0u32; 3];
+        for _ in 0..2 * (source::GIVE_UP + 10) {
+            let (id, _) = source.next_frame().await.unwrap();
+            sent[usize::from(id.0)] += 1;
+        }
+        assert_eq!(sent[2], 0, "{sent:?}");
+        assert!(
+            sent[0] > source::GIVE_UP && sent[1] > source::GIVE_UP,
+            "{sent:?}"
+        );
+        let tried = tries.load(std::sync::atomic::Ordering::Relaxed);
+        assert_eq!(tried, source::GIVE_UP, "tried once a picture, then let go");
+
+        // Alone, an encoder that fails is never let go: it is the call's
+        // video.
+        let tries = Arc::new(std::sync::atomic::AtomicU32::new(0));
+        let host = DesktopVideoHost::new(
+            PatternCamera::new(Resolution {
+                width: 640,
+                height: 360,
+            }),
+            FailingAt {
+                fails_at: 300,
+                tries: Arc::clone(&tries),
+            },
+        );
+        let _source = host.start_send(send_config()).unwrap();
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+        while tries.load(std::sync::atomic::Ordering::Relaxed) < 2 * source::GIVE_UP {
+            assert!(
+                std::time::Instant::now() < deadline,
+                "the only encoder let go"
+            );
+            tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+        }
+    }
+
+    #[tokio::test]
+    async fn simulcast_codes_each_encoding_at_its_size_and_pauses_one_alone() {
+        let host = DesktopVideoHost::new(
+            PatternCamera::new(Resolution {
+                width: 640,
+                height: 360,
+            }),
+            SoftwareCodecs::default(),
+        );
+        assert_eq!(host.simulcast(), 3);
+        let size = |width, height| Resolution { width, height };
+        let layers = [
+            (0, size(640, 360), 600),
+            (1, size(320, 180), 200),
+            (2, size(160, 90), 100),
+        ];
+        let mut source = host
+            .start_send(SendConfig {
+                max: layers[0].1,
+                kbps: layers[0].2,
+                encodings: layers
+                    .iter()
+                    .map(|&(id, max, kbps)| Encoding {
+                        id: EncodingId(id),
+                        max,
+                        kbps,
+                    })
+                    .collect(),
+                ..send_config()
+            })
+            .unwrap();
+        let codecs = SoftwareCodecs::default();
+        let mut decoders: Vec<_> = (0..3)
+            .map(|_| codecs.decoder(VideoCodec::Vp8).unwrap())
+            .collect();
+        // Frames of the encodings asked for, decoded: their sizes, and
+        // whether each was a keyframe.
+        async fn take_from(
+            source: &mut Box<dyn VideoSource>,
+            decoders: &mut [Box<dyn codec::Decoder>],
+            n: usize,
+        ) -> Vec<(u8, (u32, u32), bool)> {
+            let mut out = Vec::new();
+            for _ in 0..n {
+                let (id, frame) = source.next_frame().await.unwrap();
+                let picture = decoders[usize::from(id.0)]
+                    .decode(&frame.data)
+                    .unwrap()
+                    .expect("a picture");
+                out.push((id.0, (picture.width, picture.height), frame.keyframe));
+            }
+            out
+        }
+        let first = take_from(&mut source, &mut decoders, 9).await;
+        for (id, max, _) in layers {
+            let of: Vec<_> = first.iter().filter(|f| f.0 == id).collect();
+            assert!(of.len() >= 2, "encoding {id} sends: {first:?}");
+            assert!(of[0].2, "each starts on a keyframe");
+            assert!(of.iter().all(|f| f.1 == (max.width, max.height)), "{of:?}");
+        }
+
+        // 320x180 paused: the others go on without it.
+        source.set_encoding_target(EncodingId(1), None);
+        let paused = take_from(&mut source, &mut decoders, 12).await;
+        let after = paused
+            .iter()
+            .skip_while(|f| f.0 == 1)
+            .skip(2)
+            .collect::<Vec<_>>();
+        assert!(after.iter().all(|f| f.0 != 1), "{paused:?}");
+        assert!(after.iter().any(|f| f.0 == 0) && after.iter().any(|f| f.0 == 2));
+
+        // Back, from a keyframe; a keyframe of the smallest alone.
+        source.set_encoding_target(
+            EncodingId(1),
+            Some(EncodingTarget {
+                kbps: 200,
+                max: layers[1].1,
+                fps: 30,
+            }),
+        );
+        let back = take_from(&mut source, &mut decoders, 9).await;
+        let again = back.iter().find(|f| f.0 == 1).expect("320x180 again");
+        assert!(again.2, "back on a keyframe: {back:?}");
+        source.request_keyframe_of(EncodingId(2));
+        let keyed = take_from(&mut source, &mut decoders, 9).await;
+        assert!(keyed.iter().any(|f| f.0 == 2 && f.2), "{keyed:?}");
+        assert!(
+            keyed.iter().all(|f| f.0 == 2 || !f.2),
+            "only the smallest's: {keyed:?}"
+        );
+    }
+
+    #[tokio::test]
+    async fn a_camera_smaller_than_the_first_layer_scales_every_layer_with_it() {
+        // 320x180 under layers asked for at 720p, 360p and 180p.
+        let host = DesktopVideoHost::new(
+            PatternCamera::new(Resolution {
+                width: 320,
+                height: 180,
+            }),
+            SoftwareCodecs::default(),
+        );
+        let size = |width, height| Resolution { width, height };
+        let layers = [
+            (0, Resolution::P720),
+            (1, size(640, 360)),
+            (2, size(320, 180)),
+        ];
+        let mut source = host
+            .start_send(SendConfig {
+                encodings: layers
+                    .iter()
+                    .map(|&(id, max)| Encoding {
+                        id: EncodingId(id),
+                        max,
+                        kbps: 200,
+                    })
+                    .collect(),
+                ..send_config()
+            })
+            .unwrap();
+        let codecs = SoftwareCodecs::default();
+        let mut decoders: Vec<_> = (0..3)
+            .map(|_| codecs.decoder(VideoCodec::Vp8).unwrap())
+            .collect();
+        let mut sizes = std::collections::BTreeMap::new();
+        for _ in 0..9 {
+            let (id, frame) = source.next_frame().await.unwrap();
+            let p = decoders[usize::from(id.0)]
+                .decode(&frame.data)
+                .unwrap()
+                .unwrap();
+            sizes.insert(id.0, (p.width, p.height));
+        }
+        assert_eq!(
+            sizes,
+            [(0, (320, 180)), (1, (160, 90)), (2, (80, 44))].into(),
+            "half and a quarter of what the camera gives"
         );
     }
 

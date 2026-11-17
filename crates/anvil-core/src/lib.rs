@@ -26,7 +26,10 @@ pub(crate) mod rtcp;
 pub use rtcp::RemoteReport;
 pub mod quality;
 pub mod room;
-pub use room::{FloorNotice, FloorState, JoinDetails, RoomAudio, RoomJoin, RoomMember};
+pub use room::{
+    FloorNotice, FloorState, JoinDetails, RoomAudio, RoomJoin, RoomMember, RoomStream, RoomView,
+    ViewStream, ViewTarget,
+};
 pub mod sca;
 mod srtp;
 pub(crate) mod stun;
@@ -861,7 +864,7 @@ impl Anvil {
         // key of ours when media is to be encrypted.
         let ours = (self.srtp != config::SrtpMode::Off)
             .then(|| srtp::Crypto::generate(1, srtp::Suite::AesCm128HmacSha1_80));
-        let call_video = match (&self.video, media.video) {
+        let mut call_video = match (&self.video, media.video) {
             (Some(host), true) => {
                 video::CallVideo::offer(
                     Arc::clone(host),
@@ -897,11 +900,22 @@ impl Anvil {
         if let Some(call_info) = call_info {
             extra.push(("Call-Info", call_info));
         }
+        // With video, a room that forwards may send each person's own
+        // stream (`fcp-view`, FCP's `docs/FORWARDING_ROOMS.md` §2.3).
+        let room_call = room.map(|_| call::RoomCall::default());
         if let Some(room) = room {
             if let Some(token) = &room.token {
                 extra.push((room::JOIN_HEADER, token.clone()));
             }
-            extra.push(("Recv-Info", room::INFO_PACKAGE.to_string()));
+            let packages = if call_video.is_some() {
+                format!("{}, {}", room::INFO_PACKAGE, room::VIEW_PACKAGE)
+            } else {
+                room::INFO_PACKAGE.to_string()
+            };
+            extra.push(("Recv-Info", packages));
+        }
+        if let (Some(v), Some(r)) = (call_video.as_mut(), room_call.as_ref()) {
+            v.set_owners(Arc::clone(&r.owners));
         }
         let handle = if extra.is_empty() {
             self.uac
@@ -938,7 +952,7 @@ impl Anvil {
                 server_call: None,
                 video: call_video,
                 held: false,
-                room: room.map(|_| call::RoomCall::default()),
+                room: room_call,
             },
         );
 
@@ -1134,6 +1148,55 @@ impl Anvil {
     /// without a shared-screen section (not a room joined with video).
     pub async fn share_screen(&self, call: CallId, on: bool) -> Result<(), AnvilError> {
         self.reoffer_video(call, VideoChange::Share(on)).await
+    }
+
+    /// Whether the room `call` is in forwards each person's own stream
+    /// ([`Event::RoomStreams`] names them), so a view may be asked of it.
+    pub fn room_forwards(&self, call: CallId) -> bool {
+        self.calls
+            .get(&call)
+            .and_then(|e| e.room.as_ref().map(|r| r.forwards))
+            .unwrap_or(false)
+    }
+
+    /// Ask a room that forwards for the streams our layout shows (FCP's
+    /// `fcp-view` INFO): each member at no more than the tile's height, or
+    /// the speaker; whoever is left out is not sent. What the room grants
+    /// follows in [`Event::RoomStreams`]. Fails on a call not in such a
+    /// room, or when the room refuses the view.
+    pub async fn set_room_view(&self, call: CallId, view: &RoomView) -> Result<(), AnvilError> {
+        if !self.room_forwards(call) {
+            return Err(AnvilError::Config(
+                "not in a room that forwards each person's stream".into(),
+            ));
+        }
+        let mut dialog = call_dialog(&self.calls, call)
+            .await
+            .ok_or_else(|| AnvilError::Config(format!("no dialog for {call:?}")))?;
+        let request = room::in_dialog_request(
+            &dialog,
+            sip_core::Method::Info,
+            &[
+                ("Info-Package", room::VIEW_PACKAGE.to_string()),
+                ("Content-Type", room::VIEW_TYPE.to_string()),
+            ],
+            &view.body(),
+        )
+        .map_err(AnvilError::Transport)?;
+        let result = self
+            .uac
+            .send_in_dialog_non_invite(&mut dialog, request)
+            .await;
+        keep_dialog(&self.calls, call, dialog).await;
+        match result {
+            Ok(resp) if (200..300).contains(&resp.code()) => Ok(()),
+            Ok(resp) => Err(AnvilError::Transport(format!(
+                "view refused: {} {}",
+                resp.code(),
+                resp.reason()
+            ))),
+            Err(e) => Err(AnvilError::Transport(format!("view INFO: {e}"))),
+        }
     }
 
     /// Whether we share a screen in `call`.
@@ -2308,15 +2371,19 @@ async fn room_notify(
         let Some(room) = entry.room.as_mut() else {
             return (481, "Subscription Does Not Exist");
         };
-        let mut told = None;
+        let mut told = Vec::new();
         if let Some(doc) = doc {
             match room.roster.apply(doc) {
                 room::Applied::Changed => {
-                    told = Some(Event::RoomRoster {
+                    told.push(Event::RoomRoster {
                         call,
                         members: room.roster.members(),
                         speaker: room.roster.speaker(),
-                    })
+                        forwards: room.forwards,
+                    });
+                    if let Some(streams) = room.owners.named(&room.roster) {
+                        told.push(Event::RoomStreams { call, streams });
+                    }
                 }
                 room::Applied::Gap => room.resubscribe.notify_one(),
                 room::Applied::Stale => {}
@@ -2332,7 +2399,7 @@ async fn room_notify(
         }
         told
     };
-    if let Some(event) = told {
+    for event in told {
         let _ = handler.events.send(event).await;
     }
     (200, "OK")
@@ -2611,9 +2678,18 @@ async fn drive_outgoing_call(
                 }
             };
 
+            // In a room: whether it forwards, known before anyone hears the
+            // call is up.
+            let forwards = resp.headers().get_all("Recv-Info").any(|v| {
+                v.split(',')
+                    .any(|p| p.trim().eq_ignore_ascii_case(room::VIEW_PACKAGE))
+            });
             if let Some(mut entry) = calls.get_mut(&call_id) {
                 entry.negotiated_codec = Some(codec);
                 entry.pipeline = pipeline;
+                if let Some(room) = entry.room.as_mut() {
+                    room.forwards = forwards;
+                }
                 let audio = entry
                     .pipeline
                     .as_ref()

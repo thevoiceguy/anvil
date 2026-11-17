@@ -14,6 +14,8 @@
 
 use std::collections::BTreeMap;
 
+use crate::video::host::StreamId;
+
 use quick_xml::events::Event as Xml;
 use quick_xml::{Reader, XmlVersion};
 
@@ -23,6 +25,12 @@ pub(crate) const JOIN_HEADER: &str = "X-FCP-Join";
 pub(crate) const INFO_PACKAGE: &str = "fcp-content";
 /// The floor notice's type.
 pub(crate) const INFO_TYPE: &str = "application/vnd.fcp.content+json";
+/// The info package a forwarding room's view is asked in, and what a
+/// join says it takes: each person's own stream (FCP's
+/// `docs/FORWARDING_ROOMS.md` §2.3).
+pub(crate) const VIEW_PACKAGE: &str = "fcp-view";
+/// The view's type.
+pub(crate) const VIEW_TYPE: &str = "application/vnd.fcp.view+json";
 /// The roster's type (RFC 4575).
 pub(crate) const ROSTER_TYPE: &str = "application/conference-info+xml";
 /// How long a roster subscription is asked for; it is renewed before then.
@@ -151,6 +159,163 @@ pub struct RoomMember {
     pub speaking: bool,
     /// They share their screen.
     pub presenting: bool,
+    /// In a room that forwards: their stream to us is held back (the
+    /// network is short, or the view left no room for it). Their tile
+    /// keeps their name, without a picture.
+    pub paused: bool,
+    /// A host has put the spotlight on them: a layout of our own shows
+    /// them large.
+    pub spotlight: bool,
+}
+
+/// The SSRCs a forwarding room sends a member to us on (RFC 4575's
+/// `<src-id>`): their own stream, and the speaker stream while it shows
+/// them.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub(crate) struct MemberSources {
+    pub camera: Option<u32>,
+    pub speaker: Option<u32>,
+}
+
+/// One incoming camera stream of a room that forwards, and whose it is
+/// ([`Event::RoomStreams`](crate::Event::RoomStreams)).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RoomStream {
+    pub stream: StreamId,
+    /// The member it shows, by the room's id; `None` until the roster
+    /// names it (a room that does not forward sends one stream, its
+    /// picture, which no member owns).
+    pub member: Option<String>,
+    /// It is the speaker stream: it follows whoever speaks, and `member`
+    /// is whom it shows now.
+    pub speaker: bool,
+}
+
+/// What to be sent by a room that forwards ([`crate::Anvil::set_room_view`]).
+/// The default (no streams named) is the room's own: the speaker large and
+/// those who spoke last small.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct RoomView {
+    /// The streams wanted; `None`, the room's default.
+    pub streams: Option<Vec<ViewStream>>,
+    /// At most this many at once.
+    pub max_streams: Option<u8>,
+}
+
+/// A stream a view asks for.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ViewStream {
+    pub target: ViewTarget,
+    /// No taller than this (the tile's height); `None`, the room's choice.
+    pub max_height: Option<u32>,
+    /// Lower is kept first when the network is short.
+    pub priority: Option<u8>,
+}
+
+/// Whom a stream shows.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ViewTarget {
+    /// A member, by the room's id.
+    Member(String),
+    /// Whoever speaks.
+    Speaker,
+}
+
+impl RoomView {
+    /// The INFO body (`application/vnd.fcp.view+json`).
+    pub(crate) fn body(&self) -> Vec<u8> {
+        let mut v = serde_json::Map::new();
+        if let Some(streams) = &self.streams {
+            let list: Vec<serde_json::Value> = streams
+                .iter()
+                .map(|s| {
+                    let mut e = serde_json::Map::new();
+                    match &s.target {
+                        ViewTarget::Member(id) => {
+                            e.insert("participant".into(), id.clone().into());
+                        }
+                        ViewTarget::Speaker => {
+                            e.insert("speaker".into(), true.into());
+                        }
+                    }
+                    if let Some(h) = s.max_height {
+                        e.insert("max_height".into(), h.into());
+                    }
+                    if let Some(p) = s.priority {
+                        e.insert("priority".into(), p.into());
+                    }
+                    e.into()
+                })
+                .collect();
+            v.insert("streams".into(), list.into());
+        }
+        if let Some(m) = self.max_streams {
+            v.insert("max_streams".into(), m.into());
+        }
+        serde_json::to_vec(&serde_json::Value::Object(v)).unwrap_or_default()
+    }
+}
+
+/// A forwarding room's incoming camera streams, joined to the roster's
+/// `<src-id>`s: the session says which SSRCs arrived, the roster whose
+/// they are, in either order. Each change that alters the answer gives it.
+#[derive(Debug, Default)]
+pub(crate) struct StreamOwners {
+    state: parking_lot::Mutex<OwnersState>,
+}
+
+#[derive(Debug, Default)]
+struct OwnersState {
+    arrived: BTreeMap<u32, StreamId>,
+    /// SSRC → (member, the speaker stream).
+    named: BTreeMap<u32, (String, bool)>,
+    told: Option<Vec<RoomStream>>,
+}
+
+impl StreamOwners {
+    /// A stream arrived on `ssrc`.
+    pub(crate) fn arrived(&self, ssrc: u32, stream: StreamId) -> Option<Vec<RoomStream>> {
+        let mut s = self.state.lock();
+        s.arrived.insert(ssrc, stream);
+        s.changed()
+    }
+
+    /// The stream on `ssrc` ended.
+    pub(crate) fn left(&self, ssrc: u32) -> Option<Vec<RoomStream>> {
+        let mut s = self.state.lock();
+        s.arrived.remove(&ssrc)?;
+        s.changed()
+    }
+
+    /// The roster's sources, as it stands now.
+    pub(crate) fn named(&self, roster: &Roster) -> Option<Vec<RoomStream>> {
+        let mut s = self.state.lock();
+        s.named = roster.sources();
+        s.changed()
+    }
+}
+
+impl OwnersState {
+    fn changed(&mut self) -> Option<Vec<RoomStream>> {
+        let mut now: Vec<RoomStream> = self
+            .arrived
+            .iter()
+            .map(|(ssrc, stream)| {
+                let named = self.named.get(ssrc);
+                RoomStream {
+                    stream: *stream,
+                    member: named.map(|(m, _)| m.clone()),
+                    speaker: named.is_some_and(|(_, sp)| *sp),
+                }
+            })
+            .collect();
+        now.sort_by_key(|s| s.stream);
+        if self.told.as_ref() == Some(&now) {
+            return None;
+        }
+        self.told = Some(now.clone());
+        Some(now)
+    }
 }
 
 /// What a roster document says.
@@ -159,7 +324,7 @@ pub(crate) struct RosterDoc {
     pub full: bool,
     pub version: u32,
     /// Each user listed: in full, or `None` when they left.
-    pub users: Vec<(String, Option<RoomMember>)>,
+    pub users: Vec<(String, Option<(RoomMember, MemberSources)>)>,
 }
 
 /// What applying a document did.
@@ -177,6 +342,7 @@ pub(crate) enum Applied {
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub(crate) struct Roster {
     members: BTreeMap<String, RoomMember>,
+    sources: BTreeMap<String, MemberSources>,
     version: Option<u32>,
     speaker: Option<String>,
 }
@@ -187,17 +353,22 @@ impl Roster {
             (_, Some(v)) if doc.version <= v => return Applied::Stale,
             (false, None) => return Applied::Gap,
             (false, Some(v)) if doc.version != v + 1 => return Applied::Gap,
-            (true, _) => self.members.clear(),
+            (true, _) => {
+                self.members.clear();
+                self.sources.clear();
+            }
             (false, _) => {}
         }
         self.version = Some(doc.version);
         for (id, member) in doc.users {
             match member {
-                Some(m) => {
-                    self.members.insert(id, m);
+                Some((m, src)) => {
+                    self.members.insert(id.clone(), m);
+                    self.sources.insert(id, src);
                 }
                 None => {
                     self.members.remove(&id);
+                    self.sources.remove(&id);
                 }
             }
         }
@@ -232,6 +403,24 @@ impl Roster {
         self.speaker.clone()
     }
 
+    /// Every SSRC the roster names: whose, and whether it is the speaker
+    /// stream.
+    pub(crate) fn sources(&self) -> BTreeMap<u32, (String, bool)> {
+        let mut out = BTreeMap::new();
+        for (id, s) in &self.sources {
+            if let Some(ssrc) = s.camera {
+                out.insert(ssrc, (id.clone(), false));
+            }
+        }
+        // The speaker stream after: an SSRC is one or the other.
+        for (id, s) in &self.sources {
+            if let Some(ssrc) = s.speaker {
+                out.insert(ssrc, (id.clone(), true));
+            }
+        }
+        out
+    }
+
     /// Forget what was told: the next document must be whole.
     pub(crate) fn reset(&mut self) {
         self.version = None;
@@ -258,12 +447,26 @@ struct UserBuild {
     camera: Option<String>,
     speaking: bool,
     presenting: bool,
-    /// The media element being read: its `<type>`, `<status>`, `<label>`.
-    media: Option<(String, String, String)>,
+    spotlight: bool,
+    paused: bool,
+    sources: MemberSources,
+    /// The media element being read.
+    media: Option<MediaBuild>,
+}
+
+/// A `<media>` being read.
+#[derive(Default)]
+struct MediaBuild {
+    id: String,
+    kind: String,
+    status: String,
+    label: String,
+    src: Option<u32>,
+    paused: bool,
 }
 
 impl UserBuild {
-    fn finish(self) -> (String, Option<RoomMember>) {
+    fn finish(self) -> (String, Option<(RoomMember, MemberSources)>) {
         if self.deleted {
             return (self.id, None);
         }
@@ -275,8 +478,10 @@ impl UserBuild {
             camera: self.camera,
             speaking: self.speaking,
             presenting: self.presenting,
+            paused: self.paused,
+            spotlight: self.spotlight,
         };
-        (self.id, Some(member))
+        (self.id, Some((member, self.sources)))
     }
 }
 
@@ -318,7 +523,10 @@ pub(crate) fn parse_roster(xml: &str) -> Option<RosterDoc> {
                     }
                     "media" => {
                         if let Some(u) = user.as_mut() {
-                            u.media = Some(Default::default());
+                            u.media = Some(MediaBuild {
+                                id: attr("id").unwrap_or_default(),
+                                ..Default::default()
+                            });
                         }
                     }
                     _ => {}
@@ -381,22 +589,41 @@ fn end(
         ("entry", Some("roles")) => u.host |= value.eq_ignore_ascii_case("host"),
         ("type", Some("media")) => {
             if let Some(m) = u.media.as_mut() {
-                m.0 = value.to_ascii_lowercase();
+                m.kind = value.to_ascii_lowercase();
             }
         }
         ("status", Some("media")) => {
             if let Some(m) = u.media.as_mut() {
-                m.1 = value.to_ascii_lowercase();
+                m.status = value.to_ascii_lowercase();
             }
         }
         ("label", Some("media")) => {
             if let Some(m) = u.media.as_mut() {
-                m.2 = value.to_string();
+                m.label = value.to_string();
+            }
+        }
+        ("src-id", Some("media")) => {
+            if let Some(m) = u.media.as_mut() {
+                m.src = value.parse().ok();
+            }
+        }
+        ("paused", Some("media")) => {
+            if let Some(m) = u.media.as_mut() {
+                m.paused = value.eq_ignore_ascii_case("true");
             }
         }
         ("camera", Some("media")) => u.camera = Some(value.to_string()),
         ("media", _) => {
-            if let Some((kind, status, label)) = u.media.take() {
+            if let Some(MediaBuild {
+                id,
+                kind,
+                status,
+                label,
+                src,
+                paused,
+            }) = u.media.take()
+            {
+                let speaker = id == "speaker" || label == "speaker";
                 match kind.as_str() {
                     "audio" => {
                         u.audio = Some(match status.as_str() {
@@ -405,17 +632,18 @@ fn end(
                             _ => RoomAudio::Sending,
                         })
                     }
-                    // The camera's state is its `fcp:camera`; a room
-                    // that does not say it has the status.
-                    "video" if label != "content" && u.camera.is_none() => {
-                        u.camera = Some(
-                            if matches!(status.as_str(), "sendrecv" | "sendonly") {
-                                "on"
-                            } else {
-                                "off"
-                            }
-                            .to_string(),
-                        )
+                    // The stream that follows the speaker, while it
+                    // shows them.
+                    "video" if speaker => u.sources.speaker = src,
+                    "video" if label != "content" => {
+                        u.sources.camera = src;
+                        u.paused = paused;
+                        // The camera's state is its `fcp:camera`; a room
+                        // that does not say it has the status.
+                        if u.camera.is_none() {
+                            let on = matches!(status.as_str(), "sendrecv" | "sendonly");
+                            u.camera = Some(if on { "on" } else { "off" }.to_string());
+                        }
                     }
                     _ => {}
                 }
@@ -423,6 +651,7 @@ fn end(
         }
         ("speaking", _) => u.speaking = value.eq_ignore_ascii_case("true"),
         ("presenting", _) => u.presenting = value.eq_ignore_ascii_case("true"),
+        ("spotlight", _) => u.spotlight = value.eq_ignore_ascii_case("true"),
         _ => {}
     }
 }
@@ -639,17 +868,132 @@ mod tests {
         let doc = parse_roster(&xml).expect("a roster");
         assert!(doc.full);
         assert_eq!(doc.version, 1);
-        let ann = doc.users[0].1.clone().unwrap();
+        let ann = doc.users[0].1.clone().unwrap().0;
         assert_eq!(doc.users[0].0, "p1");
         assert_eq!(ann.name, "Ann <Lee> & Co");
         assert!(ann.host);
         assert_eq!(ann.audio, RoomAudio::Sending);
         assert_eq!(ann.camera.as_deref(), Some("on"));
-        let bob = doc.users[1].1.clone().unwrap();
+        let bob = doc.users[1].1.clone().unwrap().0;
         assert!(!bob.host);
         assert_eq!(bob.audio, RoomAudio::Muted);
         assert_eq!(bob.camera.as_deref(), Some("off"));
         assert!(bob.speaking && bob.presenting);
+    }
+
+    /// A forwarding room's roster for one subscriber, as FCP writes it:
+    /// Ann's own stream to us on 1111 and the speaker stream (3333) showing
+    /// her, Bob's on 2222 held back, a spotlight on Bob.
+    fn forwarded_doc(version: u32) -> String {
+        let ann = fcp_user("p1", "Ann", true, "sendrecv", "on", true, false)
+            .replace(
+                "<media id=\"video\"><type>video</type><status>",
+                "<media id=\"video\"><type>video</type><src-id>1111</src-id><status>",
+            )
+            .replace(
+                "        <fcp:speaking>",
+                "        <media id=\"speaker\"><type>video</type><label>speaker</label><src-id>3333</src-id><status>sendonly</status></media>\n        <fcp:speaking>",
+            );
+        let bob = fcp_user("p2", "Bob", false, "sendrecv", "on", false, false)
+            .replace(
+                "<status>sendrecv</status><fcp:camera>on</fcp:camera></media>",
+                "<src-id>2222</src-id><status>sendrecv</status><fcp:camera>on</fcp:camera><fcp:paused>true</fcp:paused></media>",
+            )
+            .replace(
+                "      </endpoint>",
+                "        <fcp:spotlight>true</fcp:spotlight>\n      </endpoint>",
+            );
+        fcp_doc("full", version, &(ann + &bob))
+    }
+
+    #[test]
+    fn a_forwarding_rooms_roster_says_whose_each_stream_is() {
+        let doc = parse_roster(&forwarded_doc(1)).expect("a roster");
+        let (ann, ann_src) = doc.users[0].1.clone().unwrap();
+        let (bob, bob_src) = doc.users[1].1.clone().unwrap();
+        assert_eq!(
+            ann_src,
+            MemberSources {
+                camera: Some(1111),
+                speaker: Some(3333)
+            }
+        );
+        assert_eq!(ann.camera.as_deref(), Some("on"));
+        assert!(!ann.paused && !ann.spotlight);
+        assert_eq!(bob_src.camera, Some(2222));
+        assert_eq!(bob_src.speaker, None);
+        assert!(bob.paused && bob.spotlight);
+
+        let mut roster = Roster::default();
+        roster.apply(doc);
+        let sources = roster.sources();
+        assert_eq!(sources[&1111], ("p1".to_string(), false));
+        assert_eq!(sources[&2222], ("p2".to_string(), false));
+        assert_eq!(sources[&3333], ("p1".to_string(), true));
+    }
+
+    #[test]
+    fn streams_are_named_whichever_comes_first_the_packets_or_the_roster() {
+        let owners = StreamOwners::default();
+        // Ann's stream arrives before the roster: unnamed.
+        assert_eq!(
+            owners.arrived(1111, StreamId(7)),
+            Some(vec![RoomStream {
+                stream: StreamId(7),
+                member: None,
+                speaker: false
+            }])
+        );
+        let mut roster = Roster::default();
+        roster.apply(parse_roster(&forwarded_doc(1)).unwrap());
+        let named = owners.named(&roster).unwrap();
+        assert_eq!(named[0].member.as_deref(), Some("p1"));
+        // The same roster again changes nothing.
+        assert_eq!(owners.named(&roster), None);
+        // The speaker stream arrives after: named at once.
+        let both = owners.arrived(3333, StreamId(8)).unwrap();
+        assert_eq!(
+            both[1],
+            RoomStream {
+                stream: StreamId(8),
+                member: Some("p1".into()),
+                speaker: true
+            }
+        );
+        // An SSRC the roster never named, and one that ends.
+        assert_eq!(owners.left(9999), None);
+        assert_eq!(owners.left(1111).unwrap().len(), 1);
+    }
+
+    #[test]
+    fn a_view_is_written_as_fcp_reads_it() {
+        assert_eq!(RoomView::default().body(), b"{}");
+        let view = RoomView {
+            streams: Some(vec![
+                ViewStream {
+                    target: ViewTarget::Member("p-1a2b".into()),
+                    max_height: Some(720),
+                    priority: Some(1),
+                },
+                ViewStream {
+                    target: ViewTarget::Speaker,
+                    max_height: None,
+                    priority: None,
+                },
+            ]),
+            max_streams: Some(9),
+        };
+        let v: serde_json::Value = serde_json::from_slice(&view.body()).unwrap();
+        assert_eq!(
+            v,
+            serde_json::json!({
+                "streams": [
+                    { "participant": "p-1a2b", "max_height": 720, "priority": 1 },
+                    { "speaker": true }
+                ],
+                "max_streams": 9
+            })
+        );
     }
 
     #[test]

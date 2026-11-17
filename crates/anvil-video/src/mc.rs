@@ -56,6 +56,14 @@ fn mime(codec: VideoCodec) -> &'static CStr {
 pub(crate) struct McCodecs;
 
 impl Codecs for McCodecs {
+    /// Three: a codec instance per encoding. A phone whose hardware has
+    /// fewer to spare fails the rest, and the source lets those encodings
+    /// go (`source::GIVE_UP`); the emulator's software codecs run three
+    /// (`mediacodec_runs_a_simulcast_s_encoders_at_once`).
+    fn simulcast(&self) -> usize {
+        3
+    }
+
     fn caps(&self) -> Vec<VideoCodecCaps> {
         // Asked once: making a codec to see takes a moment.
         static CAPS: OnceLock<Vec<VideoCodecCaps>> = OnceLock::new();
@@ -629,7 +637,7 @@ impl Decoder for McDecoder {
             if self.seen.pictures == 1 {
                 tracing::info!("video decoder: its first picture: {}", self.seen);
             }
-        } else if self.seen.pictures == 0 && self.seen.frames % 150 == 0 {
+        } else if self.seen.pictures == 0 && self.seen.frames.is_multiple_of(150) {
             tracing::warn!("video decoder: no picture yet: {}", self.seen);
         }
         Ok(picture)

@@ -134,14 +134,34 @@ class _VideoTileState extends State<VideoTile> {
   }
 }
 
+/// What a stage shows, as a room that forwards each person's stream is
+/// asked for it (`PhoneApi.setRoomView`).
+class StageView {
+  const StageView({required this.members, this.speaker = false, this.pinned});
+
+  /// Everyone in the room, by id (the room leaves out our own).
+  final List<String> members;
+
+  /// The one who speaks, large.
+  final bool speaker;
+
+  /// This member large: the user's pin, or a host's spotlight.
+  final String? pinned;
+
+  String get _key => '${members.join(',')}|$speaker|$pinned';
+}
+
 /// A call's pictures: theirs filling it, ours in a corner the user can
-/// drag.
+/// drag. In a room that forwards each person's stream the app lays the
+/// tiles out: a grid, or one large (the user's pin, a host's spotlight, or
+/// the speaker) with the others beside it; each tile named.
 class CallVideoStage extends StatefulWidget {
   const CallVideoStage({
     super.key,
     required this.tiles,
     required this.call,
     required this.name,
+    this.onView,
   });
 
   final VideoTiles tiles;
@@ -149,6 +169,9 @@ class CallVideoStage extends StatefulWidget {
 
   /// Whom the call is with: said while their camera is off.
   final String name;
+
+  /// In a room that forwards, what to send it, each time that changes.
+  final void Function(StageView view)? onView;
 
   @override
   State<CallVideoStage> createState() => _CallVideoStageState();
@@ -159,13 +182,152 @@ class _CallVideoStageState extends State<CallVideoStage> {
   /// stage is first laid out (then bottom right).
   Offset? _self;
 
+  /// The member the user pinned, by id.
+  String? _pinned;
+
+  /// The speaker large rather than a grid.
+  bool _speakerView = false;
+
+  /// The view last sent, as a key.
+  String? _sent;
+
   static const _margin = 12.0;
+
+  @override
+  void initState() {
+    super.initState();
+    _sendView();
+  }
+
+  @override
+  void didUpdateWidget(CallVideoStage old) {
+    super.didUpdateWidget(old);
+    _sendView();
+  }
+
+  bool get _forwards => widget.call.room?.forwards ?? false;
+
+  /// Whom to show large: the user's pin, else a host's spotlight.
+  String? _large(RoomInfo room) => _pinned ?? room.spotlit?.id;
+
+  void _sendView() {
+    final room = widget.call.room;
+    final onView = widget.onView;
+    if (room == null || !room.forwards || !widget.call.isConnected) return;
+    // A pin on someone who left is let go.
+    if (_pinned != null && room.member(_pinned) == null) _pinned = null;
+    final large = _large(room);
+    final view = StageView(
+      members: [for (final m in room.members) m.id],
+      speaker: large == null && _speakerView,
+      pinned: large,
+    );
+    if (view._key == _sent || onView == null) return;
+    _sent = view._key;
+    onView(view);
+  }
+
+  void _change(void Function() change) {
+    setState(change);
+    _sendView();
+  }
+
+  /// A tile tapped: its person pinned, or let go if they were.
+  void _pin(String? member) {
+    if (member == null) return;
+    _change(() => _pinned = _pinned == member ? null : member);
+  }
+
+  /// The stream to show large, where the room forwards: the pinned or
+  /// spotlit person's, else (in the speaker's view) the speaker's.
+  int? _largeStream(RoomInfo room, List<int> streams) {
+    final large = _large(room);
+    RoomStream? found;
+    for (final st in room.streams) {
+      if (!streams.contains(st.stream)) continue;
+      if (large != null && st.member == large) {
+        // Their own stream before the speaker's that shows them now.
+        if (found == null || found.speaker) found = st;
+      } else if (large == null && _speakerView && st.speaker) {
+        found = st;
+      }
+    }
+    return found?.stream;
+  }
+
+  Widget _tile(int stream) {
+    final room = widget.call.room;
+    if (room == null || !room.forwards) {
+      return VideoTile(
+        key: ValueKey('tile-$stream'),
+        tiles: widget.tiles,
+        stream: stream,
+      );
+    }
+    final st = room.stream(stream);
+    final member = room.member(st?.member);
+    return _NamedTile(
+      key: ValueKey('tile-$stream'),
+      tiles: widget.tiles,
+      stream: stream,
+      member: member,
+      pinned: member != null && member.id == _large(room),
+      onTap: () => _pin(member?.id),
+    );
+  }
+
+  Widget _theirs(BuildContext context) {
+    final call = widget.call;
+    final streams = call.streams;
+    final content = call.contentStream;
+    if (content != null) {
+      return _Large(
+        key: const Key('sharedStage'),
+        large: VideoTile(
+          key: ValueKey('content-$content'),
+          tiles: widget.tiles,
+          stream: content,
+        ),
+        others: [for (final st in streams.take(4)) _tile(st)],
+      );
+    }
+    if (streams.isEmpty) {
+      return ColoredBox(
+        key: const Key('videoTheirsOff'),
+        color: Colors.black87,
+        child: Center(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const Icon(Icons.videocam_off, color: Colors.white54, size: 40),
+              const SizedBox(height: 8),
+              Text(widget.name, style: const TextStyle(color: Colors.white70)),
+            ],
+          ),
+        ),
+      );
+    }
+    final room = call.room;
+    if (room != null && room.forwards) {
+      final large = _largeStream(room, streams);
+      if (large != null) {
+        return _Large(
+          key: const Key('largeStage'),
+          large: _tile(large),
+          others: [
+            for (final st in streams.where((st) => st != large).take(4))
+              _tile(st),
+          ],
+        );
+      }
+    }
+    return _Grid(streams: streams, tile: _tile);
+  }
 
   @override
   Widget build(BuildContext context) {
     final s = Strings.of(context);
     final call = widget.call;
-    final streams = call.streams;
     return AspectRatio(
       aspectRatio: 16 / 9,
       child: ClipRRect(
@@ -181,37 +343,25 @@ class _CallVideoStageState extends State<CallVideoStage> {
             final at = _clamp(_self ?? limit, limit);
             return Stack(
               children: [
-                Positioned.fill(
-                  child: call.contentStream != null
-                      ? _Shared(
-                          tiles: widget.tiles,
-                          content: call.contentStream!,
-                          streams: streams,
-                        )
-                      : streams.isEmpty
-                      ? ColoredBox(
-                          key: const Key('videoTheirsOff'),
-                          color: Colors.black87,
-                          child: Center(
-                            child: Column(
-                              mainAxisSize: MainAxisSize.min,
-                              children: [
-                                const Icon(
-                                  Icons.videocam_off,
-                                  color: Colors.white54,
-                                  size: 40,
-                                ),
-                                const SizedBox(height: 8),
-                                Text(
-                                  widget.name,
-                                  style: const TextStyle(color: Colors.white70),
-                                ),
-                              ],
-                            ),
-                          ),
-                        )
-                      : _Grid(tiles: widget.tiles, streams: streams),
-                ),
+                Positioned.fill(child: _theirs(context)),
+                if (_forwards && call.contentStream == null)
+                  Positioned(
+                    right: 8,
+                    top: 8,
+                    child: _StageButton(
+                      key: const Key('stageLayout'),
+                      icon: _speakerView && _pinned == null
+                          ? Icons.grid_view
+                          : Icons.co_present,
+                      tooltip: _speakerView && _pinned == null
+                          ? s.stageGrid
+                          : s.stageSpeaker,
+                      onPressed: () => _change(() {
+                        _speakerView = !(_speakerView && _pinned == null);
+                        _pinned = null;
+                      }),
+                    ),
+                  ),
                 if (call.camera)
                   Positioned(
                     left: at.dx,
@@ -257,42 +407,167 @@ class _CallVideoStageState extends State<CallVideoStage> {
   );
 }
 
-/// A shared screen (a room's) large, and the cameras beside it.
-class _Shared extends StatelessWidget {
-  const _Shared({
+/// A small round button on the stage.
+class _StageButton extends StatelessWidget {
+  const _StageButton({
+    super.key,
+    required this.icon,
+    required this.tooltip,
+    required this.onPressed,
+  });
+  final IconData icon;
+  final String tooltip;
+  final VoidCallback onPressed;
+
+  @override
+  Widget build(BuildContext context) => Material(
+    color: Colors.black54,
+    shape: const CircleBorder(),
+    child: IconButton(
+      icon: Icon(icon, color: Colors.white, size: 20),
+      tooltip: tooltip,
+      onPressed: onPressed,
+    ),
+  );
+}
+
+/// One person's tile in a room that forwards: their picture, their name,
+/// a ring while they speak, and marks for muted, pinned and held back.
+/// Tapped, it is pinned (or let go).
+class _NamedTile extends StatelessWidget {
+  const _NamedTile({
+    super.key,
     required this.tiles,
-    required this.content,
-    required this.streams,
+    required this.stream,
+    required this.member,
+    required this.pinned,
+    required this.onTap,
   });
   final VideoTiles tiles;
-  final int content;
-  final List<int> streams;
+  final int stream;
+
+  /// Whom it shows; null until the roster says.
+  final RoomMember? member;
+  final bool pinned;
+  final VoidCallback onTap;
 
   @override
   Widget build(BuildContext context) {
-    final shared = VideoTile(
-      key: ValueKey('content-$content'),
-      tiles: tiles,
-      stream: content,
+    final s = Strings.of(context);
+    final m = member;
+    return GestureDetector(
+      onTap: onTap,
+      child: Stack(
+        fit: StackFit.expand,
+        children: [
+          VideoTile(tiles: tiles, stream: stream),
+          if (m != null && m.speaking)
+            IgnorePointer(
+              child: DecoratedBox(
+                key: ValueKey('speaking-$stream'),
+                decoration: BoxDecoration(
+                  border: Border.all(color: Colors.greenAccent, width: 3),
+                ),
+              ),
+            ),
+          if (m != null)
+            Positioned(
+              left: 6,
+              bottom: 6,
+              right: 6,
+              child: Align(
+                alignment: Alignment.bottomLeft,
+                child: DecoratedBox(
+                  decoration: BoxDecoration(
+                    color: Colors.black54,
+                    borderRadius: BorderRadius.circular(4),
+                  ),
+                  child: Padding(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 6,
+                      vertical: 2,
+                    ),
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        if (m.muted)
+                          const Padding(
+                            padding: EdgeInsets.only(right: 4),
+                            child: Icon(
+                              Icons.mic_off,
+                              color: Colors.white70,
+                              size: 14,
+                            ),
+                          ),
+                        Flexible(
+                          child: Text(
+                            m.name,
+                            key: ValueKey('name-$stream'),
+                            overflow: TextOverflow.ellipsis,
+                            style: const TextStyle(
+                              color: Colors.white,
+                              fontSize: 12,
+                            ),
+                          ),
+                        ),
+                        if (pinned)
+                          Padding(
+                            padding: const EdgeInsets.only(left: 4),
+                            child: Icon(
+                              Icons.push_pin,
+                              key: ValueKey('pinned-$stream'),
+                              semanticLabel: s.stagePinned,
+                              color: Colors.white70,
+                              size: 14,
+                            ),
+                          ),
+                        if (m.paused)
+                          Padding(
+                            padding: const EdgeInsets.only(left: 4),
+                            child: Tooltip(
+                              message: s.stagePaused,
+                              child: Icon(
+                                Icons
+                                    .signal_cellular_connected_no_internet_0_bar,
+                                key: ValueKey('paused-$stream'),
+                                color: Colors.white70,
+                                size: 14,
+                              ),
+                            ),
+                          ),
+                      ],
+                    ),
+                  ),
+                ),
+              ),
+            ),
+        ],
+      ),
     );
-    if (streams.isEmpty) return shared;
+  }
+}
+
+/// One tile large, and up to four beside it.
+class _Large extends StatelessWidget {
+  const _Large({super.key, required this.large, required this.others});
+  final Widget large;
+  final List<Widget> others;
+
+  @override
+  Widget build(BuildContext context) {
+    if (others.isEmpty) return large;
     return Row(
-      key: const Key('sharedStage'),
       children: [
-        Expanded(flex: 3, child: shared),
+        Expanded(flex: 3, child: large),
         const SizedBox(width: 2),
         Expanded(
           child: Column(
             children: [
-              for (final stream in streams.take(4))
+              for (final other in others)
                 Expanded(
                   child: Padding(
                     padding: const EdgeInsets.only(bottom: 2),
-                    child: VideoTile(
-                      key: ValueKey('tile-$stream'),
-                      tiles: tiles,
-                      stream: stream,
-                    ),
+                    child: other,
                   ),
                 ),
             ],
@@ -305,20 +580,18 @@ class _Shared extends StatelessWidget {
 
 /// The streams coming in: one fills the stage; more share it.
 class _Grid extends StatelessWidget {
-  const _Grid({required this.tiles, required this.streams});
-  final VideoTiles tiles;
+  const _Grid({required this.streams, required this.tile});
   final List<int> streams;
+  final Widget Function(int stream) tile;
 
   @override
   Widget build(BuildContext context) {
-    if (streams.length == 1) {
-      return VideoTile(
-        key: ValueKey('tile-${streams.first}'),
-        tiles: tiles,
-        stream: streams.first,
-      );
-    }
-    final columns = streams.length <= 4 ? 2 : 3;
+    if (streams.length == 1) return tile(streams.first);
+    final columns = streams.length <= 4
+        ? 2
+        : streams.length <= 9
+        ? 3
+        : 4;
     final rows = (streams.length / columns).ceil();
     return Column(
       children: [
@@ -331,11 +604,7 @@ class _Grid extends StatelessWidget {
                     child: r * columns + c < streams.length
                         ? Padding(
                             padding: const EdgeInsets.all(1),
-                            child: VideoTile(
-                              key: ValueKey('tile-${streams[r * columns + c]}'),
-                              tiles: tiles,
-                              stream: streams[r * columns + c],
-                            ),
+                            child: tile(streams[r * columns + c]),
                           )
                         : const SizedBox.shrink(),
                   ),
