@@ -29,6 +29,12 @@ pub trait Encoder: Send {
 pub trait Decoder: Send {
     /// A coded frame decoded; `None` when it gave no picture.
     fn decode(&mut self, data: &[u8]) -> Result<Option<Picture>, String>;
+    /// What it has done so far, in its own words, for a stream that shows
+    /// nothing ([`crate::tiles::Received::decoder`]); `None` when it keeps
+    /// no account.
+    fn report(&self) -> Option<String> {
+        None
+    }
 }
 
 /// The codecs a platform has.

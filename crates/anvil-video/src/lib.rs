@@ -79,7 +79,7 @@ pub use camera::{Cameras, Capture, NoCameras, PatternCamera};
 pub use codec::{Codecs, Decoder, Encoded, Encoder, SoftwareCodecs};
 pub use picture::Picture;
 pub use screen::{NoScreens, PatternScreen, Screens};
-pub use tiles::{Renderer, TileKey, TileStats, Tiles};
+pub use tiles::{Received, Renderer, TileKey, TileStats, Tiles};
 
 /// The desktop's video host.
 #[derive(Clone)]

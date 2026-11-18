@@ -523,6 +523,13 @@ struct Seen {
     empty: u64,
     pictures: u64,
     too_big: u64,
+    /// Buffers released to be drawn on the reader's surface.
+    drawn: u64,
+    /// The largest frame given, bytes.
+    largest: usize,
+    /// The codec's output format, as it last said it (the keys that say
+    /// how it draws).
+    format: String,
 }
 
 impl std::fmt::Display for Seen {
@@ -533,8 +540,15 @@ impl std::fmt::Display for Seen {
             empty,
             pictures,
             too_big,
+            drawn,
+            largest,
+            format,
         } = self;
-        write!(f, "{frames} frames in, {buffers} buffers out ({empty} said empty), {pictures} pictures, {too_big} cut")
+        write!(f, "{frames} frames in (largest {largest} B, {too_big} cut), {buffers} buffers out ({empty} said empty, {drawn} drawn), {pictures} pictures")?;
+        if !format.is_empty() {
+            write!(f, "; output {format}")?;
+        }
+        Ok(())
     }
 }
 
@@ -587,6 +601,7 @@ impl Decoder for McDecoder {
         let pts = self.n * 33_333;
         self.n += 1;
         self.seen.frames += 1;
+        self.seen.largest = self.seen.largest.max(data.len());
         let mut too_big = false;
         if !self.codec.queue(WAIT, pts, |buf| {
             too_big = data.len() > buf.len();
@@ -611,7 +626,19 @@ impl Decoder for McDecoder {
                 Output::None if left.is_zero() => break,
                 Output::None => {}
                 Output::Format => {
-                    tracing::info!("video decoder: {}", self.codec.output_format().describe());
+                    let f = self.codec.output_format();
+                    tracing::info!("video decoder: {}", f.describe());
+                    self.seen.format = [
+                        c"width",
+                        c"height",
+                        c"color-format",
+                        c"stride",
+                        c"slice-height",
+                    ]
+                    .iter()
+                    .filter_map(|k| Some(format!("{}={}", k.to_string_lossy(), f.get(k)?)))
+                    .collect::<Vec<_>>()
+                    .join(" ");
                     self.resize()?;
                 }
                 Output::Failed(e) => return Err(e),
@@ -623,6 +650,7 @@ impl Decoder for McDecoder {
                         info.flags & (BUFFER_FLAG_CODEC_CONFIG | BUFFER_FLAG_END_OF_STREAM) == 0;
                     self.seen.buffers += 1;
                     self.seen.empty += u64::from(info.size <= 0);
+                    self.seen.drawn += u64::from(show);
                     self.codec.release(i, show);
                     drawn |= show;
                     if info.presentationTimeUs as u64 >= pts {
@@ -641,5 +669,9 @@ impl Decoder for McDecoder {
             tracing::warn!("video decoder: no picture yet: {}", self.seen);
         }
         Ok(picture)
+    }
+
+    fn report(&self) -> Option<String> {
+        Some(format!("{}; reader: {}", self.seen, self.reader.report()))
     }
 }
