@@ -7,7 +7,7 @@ use std::time::Instant;
 use anvil_core::video::host::{CodedFrame, StreamId, VideoSink};
 
 use crate::codec::Decoder;
-use crate::tiles::{TileKey, Tiles};
+use crate::tiles::{Received, TileKey, Tiles};
 
 enum Message {
     Frame(CodedFrame, Instant),
@@ -45,18 +45,42 @@ fn run(key: TileKey, mut decoder: Box<dyn Decoder>, rx: &mpsc::Receiver<Message>
     // Nothing is shown before a keyframe: a decoder fed anything else
     // makes garbage.
     let mut wait_for_key = true;
-    let (mut skipped, mut failed) = (0u64, 0u64);
+    // What became of each frame, for whoever asks why the tile is empty.
+    let mut seen = Received::default();
+    tiles.set_received(key, seen.clone());
     while let Ok(message) = rx.recv() {
         match message {
             Message::Frame(frame, at) => {
+                seen.frames += 1;
+                seen.keyframes += u64::from(frame.keyframe);
                 if wait_for_key && !frame.keyframe {
-                    skipped += 1;
-                    if skipped % 300 == 0 {
-                        tracing::warn!(?key, "video: {skipped} frames waiting for a keyframe");
+                    seen.skipped += 1;
+                    if seen.skipped % 300 == 0 {
+                        tracing::warn!(
+                            ?key,
+                            "video: {} frames waiting for a keyframe",
+                            seen.skipped
+                        );
                     }
+                    tiles.set_received(key, seen.clone());
                     continue;
                 }
-                match decoder.decode(&frame.data) {
+                let decoded = decoder.decode(&frame.data);
+                match &decoded {
+                    Ok(Some(_)) => seen.pictures += 1,
+                    Ok(None) => seen.empty += 1,
+                    Err(e) => {
+                        seen.failed += 1;
+                        seen.error = Some(e.clone());
+                    }
+                }
+                // The decoder's account while it shows nothing, and now and
+                // then after (it is a string made each time).
+                if seen.pictures <= 1 || seen.frames % 30 == 0 {
+                    seen.decoder = decoder.report();
+                }
+                tiles.set_received(key, seen.clone());
+                match decoded {
                     Ok(Some(mut picture)) => {
                         wait_for_key = false;
                         // Decoded early; shown on time (a late frame at once).
@@ -69,9 +93,8 @@ fn run(key: TileKey, mut decoder: Box<dyn Decoder>, rx: &mpsc::Receiver<Message>
                     }
                     Ok(None) => {}
                     Err(e) => {
-                        failed += 1;
-                        if failed == 1 || failed % 100 == 0 {
-                            tracing::warn!(?key, "video decoder ({failed} failed): {e}");
+                        if seen.failed == 1 || seen.failed % 100 == 0 {
+                            tracing::warn!(?key, "video decoder ({} failed): {e}", seen.failed);
                         }
                         wait_for_key = true;
                         tiles.set_frozen(key);

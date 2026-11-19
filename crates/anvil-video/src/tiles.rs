@@ -41,6 +41,28 @@ pub struct TileStats {
     pub ended: bool,
 }
 
+/// What an incoming stream's sink did with the frames it was given: where
+/// a stream that shows nothing stops.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct Received {
+    /// Coded frames given to the sink.
+    pub frames: u64,
+    /// Those that were keyframes.
+    pub keyframes: u64,
+    /// Frames let go while waiting for a keyframe.
+    pub skipped: u64,
+    /// Frames the decoder failed on.
+    pub failed: u64,
+    /// Frames the decoder took and gave no picture for.
+    pub empty: u64,
+    /// Pictures decoded.
+    pub pictures: u64,
+    /// The decoder's last error.
+    pub error: Option<String>,
+    /// The decoder's own account ([`crate::Decoder::report`]).
+    pub decoder: Option<String>,
+}
+
 struct Tile {
     renderer: Option<Arc<dyn Renderer>>,
     last: Option<Arc<Picture>>,
@@ -51,6 +73,8 @@ struct Tile {
 #[derive(Clone, Default)]
 pub struct Tiles {
     inner: Arc<Mutex<HashMap<TileKey, Tile>>>,
+    /// Each incoming stream's sink's account, while the stream runs.
+    received: Arc<Mutex<HashMap<TileKey, Received>>>,
 }
 
 impl Tiles {
@@ -88,6 +112,16 @@ impl Tiles {
         self.inner.lock().get(&key).map(|t| t.stats)
     }
 
+    /// What the stream's sink did with its frames so far; `None` when no
+    /// stream is being received for the tile.
+    pub fn received(&self, key: TileKey) -> Option<Received> {
+        self.received.lock().get(&key).cloned()
+    }
+
+    pub(crate) fn set_received(&self, key: TileKey, received: Received) {
+        self.received.lock().insert(key, received);
+    }
+
     /// The tiles there are.
     pub fn keys(&self) -> Vec<TileKey> {
         self.inner.lock().keys().copied().collect()
@@ -120,6 +154,7 @@ impl Tiles {
 
     /// The stream has ended: the tile goes once nothing shows it.
     pub(crate) fn end(&self, key: TileKey) {
+        self.received.lock().remove(&key);
         let mut tiles = self.inner.lock();
         if let Some(t) = tiles.get_mut(&key) {
             if t.renderer.is_none() {
@@ -144,6 +179,22 @@ impl Tile {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_streams_account_is_kept_while_it_runs() {
+        let tiles = Tiles::default();
+        let key = TileKey::Stream(StreamId(7));
+        assert!(tiles.received(key).is_none());
+        let seen = Received {
+            frames: 3,
+            skipped: 3,
+            ..Received::default()
+        };
+        tiles.set_received(key, seen.clone());
+        assert_eq!(tiles.received(key), Some(seen));
+        tiles.end(key);
+        assert!(tiles.received(key).is_none());
+    }
     use std::sync::atomic::{AtomicU32, Ordering};
 
     #[derive(Default)]

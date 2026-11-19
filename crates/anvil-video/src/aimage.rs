@@ -6,6 +6,7 @@
 
 use std::ffi::c_void;
 use std::ptr::{self, NonNull};
+use std::sync::atomic::{AtomicI32, AtomicU64, Ordering};
 use std::time::{Duration, Instant};
 
 use ndk_sys::{
@@ -20,6 +21,23 @@ use crate::picture::Picture;
 struct Ready {
     count: Mutex<u64>,
     cv: Condvar,
+    /// Every image the producer said it drew.
+    drawn: AtomicU64,
+}
+
+/// What became of the images asked for ([`Reader::report`]).
+#[derive(Default)]
+struct Taken {
+    /// Images acquired.
+    acquired: AtomicU64,
+    /// Asked for and not given, and the last status saying so.
+    refused: AtomicU64,
+    status: AtomicI32,
+    /// Acquired, with a layout no picture could be read from; the last
+    /// one's format and plane count.
+    unreadable: AtomicU64,
+    format: AtomicI32,
+    planes: AtomicI32,
 }
 
 /// An image reader, and the pictures drawn into it.
@@ -28,6 +46,7 @@ pub(crate) struct Reader {
     rgba: bool,
     /// Boxed: its address is the listener's context.
     ready: Box<Ready>,
+    taken: Taken,
 }
 
 // SAFETY: an AImageReader may be used from any thread.
@@ -45,6 +64,7 @@ unsafe extern "C" fn image_available(context: *mut c_void, _: *mut AImageReader)
     // SAFETY: the context is the reader's boxed `Ready`, which outlives
     // the listener (cleared before the reader is deleted).
     let ready = unsafe { &*(context as *const Ready) };
+    ready.drawn.fetch_add(1, Ordering::Relaxed);
     *ready.count.lock() += 1;
     ready.cv.notify_all();
 }
@@ -94,6 +114,7 @@ impl Reader {
             reader,
             rgba,
             ready,
+            taken: Taken::default(),
         })
     }
 
@@ -128,21 +149,67 @@ impl Reader {
                 ndk_sys::AImageReader_acquireLatestImage(self.reader.as_ptr(), &mut image)
             };
             if let (true, Some(image)) = (s.0 == 0, NonNull::new(image)) {
+                self.taken.acquired.fetch_add(1, Ordering::Relaxed);
                 let picture = if self.rgba {
                     rgba_picture(image)
                 } else {
                     picture(image)
                 };
+                if picture.is_none() {
+                    let (mut format, mut planes) = (-1, -1);
+                    // SAFETY: plain out-parameter calls on the acquired image.
+                    unsafe {
+                        ndk_sys::AImage_getFormat(image.as_ptr(), &mut format);
+                        ndk_sys::AImage_getNumberOfPlanes(image.as_ptr(), &mut planes);
+                    }
+                    self.taken.unreadable.fetch_add(1, Ordering::Relaxed);
+                    self.taken.format.store(format, Ordering::Relaxed);
+                    self.taken.planes.store(planes, Ordering::Relaxed);
+                }
                 // SAFETY: acquired above, released once.
                 unsafe { ndk_sys::AImage_delete(image.as_ptr()) };
                 if picture.is_some() {
                     return picture;
                 }
+            } else {
+                self.taken.refused.fetch_add(1, Ordering::Relaxed);
+                self.taken.status.store(s.0, Ordering::Relaxed);
             }
             if Instant::now() >= until {
                 return None;
             }
         }
+    }
+}
+
+impl Reader {
+    /// What the reader has seen, for a producer that shows nothing: images
+    /// drawn into it, acquired, refused (and the last status), and
+    /// acquired but unreadable (and the last one's format and planes).
+    pub(crate) fn report(&self) -> String {
+        let t = &self.taken;
+        let n = |a: &AtomicU64| a.load(Ordering::Relaxed);
+        let mut text = format!(
+            "{} images drawn, {} taken",
+            n(&self.ready.drawn),
+            n(&t.acquired)
+        );
+        if n(&t.refused) > 0 {
+            text += &format!(
+                ", {} refused (status {})",
+                n(&t.refused),
+                t.status.load(Ordering::Relaxed)
+            );
+        }
+        if n(&t.unreadable) > 0 {
+            text += &format!(
+                ", {} unreadable (format {:#x}, {} planes)",
+                n(&t.unreadable),
+                t.format.load(Ordering::Relaxed),
+                t.planes.load(Ordering::Relaxed)
+            );
+        }
+        text
     }
 }
 
