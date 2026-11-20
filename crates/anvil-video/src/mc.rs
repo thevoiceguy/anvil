@@ -6,8 +6,12 @@
 //! encoder takes 4:2:0 from buffers (NV12 or planar, whichever it
 //! accepts), in real time, constant bit rate, baseline H.264, keyframes
 //! when asked; each keyframe carries its parameter sets, which MediaCodec
-//! gives once apart. The decoder draws into an [`aimage::Reader`], whose
-//! images say their own layout, so no vendor's buffer layout is guessed.
+//! gives once apart. The decoder gives its pictures in buffers too, asked
+//! for as NV12 and read by the layout its output format says (NV12 or
+//! planar, with its stride and slice height). It does not draw on a
+//! surface: there a phone's hardware may draw a format of its vendor's
+//! that no reader can read (Qualcomm's compressed UBWC, 0x7fa30c06, on a
+//! Galaxy S26: every buffer drawn, no picture).
 //!
 //! Keys are written as strings, not the NDK's constants, so the library
 //! loads on Android 8 (the app's minimum) though some keys are newer:
@@ -22,7 +26,7 @@ use std::time::{Duration, Instant};
 use anvil_core::video::host::{VideoCodec, VideoCodecCaps};
 use ndk_sys::{media_status_t, AMediaCodec, AMediaCodecBufferInfo, AMediaFormat};
 
-use crate::aimage::{ok, Reader};
+use crate::aimage::ok;
 use crate::codec::{Codecs, Decoder, Encoded, Encoder};
 use crate::picture::Picture;
 
@@ -32,6 +36,13 @@ const VP8: &CStr = c"video/x-vnd.on2.vp8";
 /// `MediaCodecInfo.CodecCapabilities`' 4:2:0 layouts.
 const COLOR_PLANAR: i32 = 19;
 const COLOR_SEMI_PLANAR: i32 = 21;
+/// The same two under their other names: packed, and Qualcomm's own NV12
+/// (plain, and with its "32m" alignment, which the stride and the slice
+/// height say).
+const COLOR_PACKED_PLANAR: i32 = 20;
+const COLOR_PACKED_SEMI_PLANAR: i32 = 39;
+const COLOR_QCOM_SEMI_PLANAR: i32 = 0x7fa3_0c00;
+const COLOR_QCOM_SEMI_PLANAR_32M: i32 = 0x7fa3_0c04;
 /// `MediaCodecInfo.CodecProfileLevel.AVCProfileBaseline`.
 const AVC_BASELINE: i32 = 1;
 /// `MediaCodecInfo.EncoderCapabilities.BITRATE_MODE_CBR`.
@@ -506,12 +517,59 @@ fn layout(p: &Picture, color: i32, out: &mut Vec<u8>) {
 
 pub(crate) struct McDecoder {
     codec: Codec,
-    /// Where it draws; made again when the stream's size changes.
-    reader: Reader,
-    size: (u32, u32),
+    /// How its output buffers are laid out, once it said (and again when
+    /// the stream's size changes).
+    layout: Option<Layout>,
     n: u64,
     /// What it has done, for the log while it shows nothing.
     seen: Seen,
+}
+
+/// A decoder's output buffers: the picture's size, a row's bytes, the
+/// rows kept for the luma before the chroma starts, and whether the
+/// chroma is interleaved (NV12) or two planes.
+#[derive(Clone, Copy)]
+struct Layout {
+    width: u32,
+    height: u32,
+    stride: usize,
+    slice_height: usize,
+    interleaved: bool,
+}
+
+impl Layout {
+    /// The layout an output format says. A colour format not known here is
+    /// an error that names it, not a guess.
+    fn of(f: &Format) -> Result<Self, String> {
+        let (Some(width), Some(height)) = (f.get(c"width"), f.get(c"height")) else {
+            return Err("the decoder's output has no size".into());
+        };
+        if width < 2 || height < 2 {
+            return Err(format!("the decoder's output is {width}×{height}"));
+        }
+        let interleaved = match f.get(c"color-format") {
+            Some(COLOR_PLANAR | COLOR_PACKED_PLANAR) => false,
+            Some(
+                COLOR_SEMI_PLANAR
+                | COLOR_PACKED_SEMI_PLANAR
+                | COLOR_QCOM_SEMI_PLANAR
+                | COLOR_QCOM_SEMI_PLANAR_32M,
+            ) => true,
+            other => {
+                return Err(format!(
+                    "the decoder's buffers are in a layout not known here (color-format {other:?})"
+                ))
+            }
+        };
+        Ok(Self {
+            width: width as u32,
+            height: height as u32,
+            // A codec that says neither packs its rows.
+            stride: f.get(c"stride").unwrap_or(width).max(width) as usize,
+            slice_height: f.get(c"slice-height").unwrap_or(height).max(height) as usize,
+            interleaved,
+        })
+    }
 }
 
 /// A decoder's counts: frames in, buffers out (and how many said they were
@@ -523,12 +581,12 @@ struct Seen {
     empty: u64,
     pictures: u64,
     too_big: u64,
-    /// Buffers released to be drawn on the reader's surface.
-    drawn: u64,
     /// The largest frame given, bytes.
     largest: usize,
+    /// The last output buffer's bytes.
+    last: usize,
     /// The codec's output format, as it last said it (the keys that say
-    /// how it draws).
+    /// how its buffers are laid out).
     format: String,
 }
 
@@ -540,11 +598,11 @@ impl std::fmt::Display for Seen {
             empty,
             pictures,
             too_big,
-            drawn,
             largest,
+            last,
             format,
         } = self;
-        write!(f, "{frames} frames in (largest {largest} B, {too_big} cut), {buffers} buffers out ({empty} said empty, {drawn} drawn), {pictures} pictures")?;
+        write!(f, "{frames} frames in (largest {largest} B, {too_big} cut), {buffers} buffers out ({empty} said empty, last {last} B), {pictures} pictures")?;
         if !format.is_empty() {
             write!(f, "; output {format}")?;
         }
@@ -555,44 +613,44 @@ impl std::fmt::Display for Seen {
 impl McDecoder {
     fn new(kind: VideoCodec) -> Result<Self, String> {
         let mut codec = Codec::decoder(mime(kind))?;
-        let size = (640, 480);
-        let reader = Reader::new(size.0, size.1, 4)?;
         let f = Format::new();
         f.set_str(c"mime", mime(kind))
-            .set(c"width", size.0 as i32)
-            .set(c"height", size.1 as i32)
+            .set(c"width", 640)
+            .set(c"height", 480)
+            // NV12 is every hardware decoder's own; one that has only
+            // planar says so in its output format.
+            .set(c"color-format", COLOR_SEMI_PLANAR)
             .set(c"low-latency", 1)
             .set(c"priority", 0);
-        codec.configure(&f, reader.window()?, 0)?;
+        // No surface: its pictures come in buffers.
+        codec.configure(&f, ptr::null_mut(), 0)?;
         codec.start()?;
         Ok(Self {
             codec,
-            reader,
-            size,
+            layout: None,
             n: 0,
             seen: Seen::default(),
         })
     }
 
-    /// The stream's size changed: a reader of that size.
-    fn resize(&mut self) -> Result<(), String> {
+    /// The codec's output format, kept as the layout of its buffers.
+    fn read_format(&mut self) -> Result<Layout, String> {
         let f = self.codec.output_format();
-        let (Some(w), Some(h)) = (f.get(c"width"), f.get(c"height")) else {
-            return Ok(());
-        };
-        let size = (w.max(2) as u32, h.max(2) as u32);
-        if size == self.size {
-            return Ok(());
-        }
-        let reader = Reader::new(size.0, size.1, 4)?;
-        // SAFETY: the window is the new reader's, which the decoder now
-        // draws into; the old reader goes after.
-        ok("output surface", unsafe {
-            ndk_sys::AMediaCodec_setOutputSurface(self.codec.ptr(), reader.window()?)
-        })?;
-        self.reader = reader;
-        self.size = size;
-        Ok(())
+        tracing::info!("video decoder: {}", f.describe());
+        self.seen.format = [
+            c"width",
+            c"height",
+            c"color-format",
+            c"stride",
+            c"slice-height",
+        ]
+        .iter()
+        .filter_map(|k| Some(format!("{}={}", k.to_string_lossy(), f.get(k)?)))
+        .collect::<Vec<_>>()
+        .join(" ");
+        let layout = Layout::of(&f)?;
+        self.layout = Some(layout);
+        Ok(layout)
     }
 }
 
@@ -619,47 +677,63 @@ impl Decoder for McDecoder {
             );
         }
         let until = Instant::now() + WAIT;
-        let mut drawn = false;
+        let mut picture = None;
         loop {
             let left = until.saturating_duration_since(Instant::now());
             match self.codec.dequeue(left) {
                 Output::None if left.is_zero() => break,
                 Output::None => {}
                 Output::Format => {
-                    let f = self.codec.output_format();
-                    tracing::info!("video decoder: {}", f.describe());
-                    self.seen.format = [
-                        c"width",
-                        c"height",
-                        c"color-format",
-                        c"stride",
-                        c"slice-height",
-                    ]
-                    .iter()
-                    .filter_map(|k| Some(format!("{}={}", k.to_string_lossy(), f.get(k)?)))
-                    .collect::<Vec<_>>()
-                    .join(" ");
-                    self.resize()?;
+                    self.read_format()?;
                 }
                 Output::Failed(e) => return Err(e),
                 Output::Buffer(i, info) => {
-                    // Drawn on the reader's surface, a buffer may say it holds
-                    // nothing (some phones' decoders always do): only the
-                    // codec's own set-up and the end are not pictures.
-                    let show =
-                        info.flags & (BUFFER_FLAG_CODEC_CONFIG | BUFFER_FLAG_END_OF_STREAM) == 0;
                     self.seen.buffers += 1;
                     self.seen.empty += u64::from(info.size <= 0);
-                    self.seen.drawn += u64::from(show);
-                    self.codec.release(i, show);
-                    drawn |= show;
+                    // The codec's own set-up and the end are not pictures.
+                    let shown = info.size > 0
+                        && info.flags & (BUFFER_FLAG_CODEC_CONFIG | BUFFER_FLAG_END_OF_STREAM) == 0;
+                    let read = if shown {
+                        // A codec that never said its format is asked.
+                        let layout = match self.layout {
+                            Some(l) => Ok(l),
+                            None => self.read_format(),
+                        };
+                        let bytes = self.codec.output(i, &info);
+                        self.seen.last = bytes.len();
+                        layout.and_then(|l| {
+                            Picture::from_codec_buffer(
+                                bytes,
+                                (l.width, l.height),
+                                (l.stride, l.slice_height),
+                                l.interleaved,
+                            )
+                            .ok_or_else(|| {
+                                format!(
+                                    "a {}-byte buffer does not hold the decoder's {}×{} (stride {}, slice height {})",
+                                    bytes.len(),
+                                    l.width,
+                                    l.height,
+                                    l.stride,
+                                    l.slice_height
+                                )
+                            })
+                        })
+                        .map(Some)
+                    } else {
+                        Ok(None)
+                    };
+                    self.codec.release(i, false);
+                    // The newest picture is the one shown.
+                    if let Some(p) = read? {
+                        picture = Some(p);
+                    }
                     if info.presentationTimeUs as u64 >= pts {
                         break;
                     }
                 }
             }
         }
-        let picture = if drawn { self.reader.next(WAIT) } else { None };
         if picture.is_some() {
             self.seen.pictures += 1;
             if self.seen.pictures == 1 {
@@ -672,6 +746,6 @@ impl Decoder for McDecoder {
     }
 
     fn report(&self) -> Option<String> {
-        Some(format!("{}; reader: {}", self.seen, self.reader.report()))
+        Some(self.seen.to_string())
     }
 }

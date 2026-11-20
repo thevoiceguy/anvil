@@ -139,6 +139,45 @@ impl Picture {
         p
     }
 
+    /// From a codec's output buffer: the luma's rows `stride` apart, then
+    /// from row `slice_height` the chroma, interleaved (NV12) or as two
+    /// planes of half the stride (I420). A slice height the buffer is too
+    /// short for is taken as the picture's height (some codecs say more
+    /// rows than they give). `None` when the buffer cannot hold the picture.
+    pub fn from_codec_buffer(
+        data: &[u8],
+        (width, height): (u32, u32),
+        (stride, slice_height): (usize, usize),
+        interleaved: bool,
+    ) -> Option<Self> {
+        let (w, h) = (width as usize, height as usize);
+        let (cw, ch) = chroma(width, height);
+        if w == 0 || h == 0 {
+            return None;
+        }
+        let stride = stride.max(w);
+        // Where U and V start, the chroma's row stride and pixel stride,
+        // for luma of `slice` rows; `None` if the last sample is past the end.
+        let planes = |slice: usize| {
+            let u = stride * slice;
+            let (v, rows, step) = if interleaved {
+                (u + 1, stride, 2)
+            } else {
+                let rows = stride.div_ceil(2);
+                (u + rows * slice.div_ceil(2), rows, 1)
+            };
+            (v + (ch - 1) * rows + (cw - 1) * step < data.len()).then_some((u, v, rows, step))
+        };
+        let (u, v, rows, step) = planes(slice_height.max(h)).or_else(|| planes(h))?;
+        Some(Self::from_yuv_420_888(
+            width,
+            height,
+            (data, stride),
+            (&data[u..], &data[v..]),
+            (rows, step),
+        ))
+    }
+
     /// From Android's YUV_420_888: three planes, each with a row stride,
     /// and the chroma with a pixel stride too (1 is planar, 2 interleaved).
     /// Only `width` × `height` from the top left is read (a crop).
@@ -464,6 +503,70 @@ fn scale_plane(src: &[u8], sw: usize, sh: usize, dst: &mut [u8], dw: usize, dh: 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A codec's buffer of `p`: rows `stride` apart, luma of `slice` rows,
+    /// the padding filled with 7 (which no picture here holds).
+    fn codec_buffer(p: &Picture, stride: usize, slice: usize, interleaved: bool) -> Vec<u8> {
+        let (w, h) = (p.width as usize, p.height as usize);
+        let (cw, ch) = chroma(p.width, p.height);
+        let rows = if interleaved {
+            stride
+        } else {
+            stride.div_ceil(2)
+        };
+        let chroma_len = if interleaved {
+            rows * ch
+        } else {
+            rows * slice.div_ceil(2) + rows * ch
+        };
+        let mut b = vec![7u8; stride * slice + chroma_len];
+        for r in 0..h {
+            b[r * stride..r * stride + w].copy_from_slice(&p.y()[r * w..(r + 1) * w]);
+        }
+        let u0 = stride * slice;
+        for r in 0..ch {
+            for x in 0..cw {
+                let (u, v) = (p.u()[r * cw + x], p.v()[r * cw + x]);
+                if interleaved {
+                    b[u0 + r * rows + 2 * x] = u;
+                    b[u0 + r * rows + 2 * x + 1] = v;
+                } else {
+                    b[u0 + r * rows + x] = u;
+                    b[u0 + rows * slice.div_ceil(2) + r * rows + x] = v;
+                }
+            }
+        }
+        b
+    }
+
+    #[test]
+    fn a_codec_s_buffer_is_read_by_its_stride_and_slice_height() {
+        let p = Picture::pattern(318, 178, 3);
+        for interleaved in [true, false] {
+            // packed, and padded as a phone's hardware pads (rows of 384, 192 kept for the luma)
+            for (stride, slice) in [(318, 178), (384, 192)] {
+                let b = codec_buffer(&p, stride, slice, interleaved);
+                let read = Picture::from_codec_buffer(&b, (318, 178), (stride, slice), interleaved)
+                    .unwrap();
+                assert!(
+                    read.y() == p.y() && read.u() == p.u() && read.v() == p.v(),
+                    "{interleaved} {stride} {slice}"
+                );
+            }
+            // a slice height the buffer does not have: the picture's own
+            let b = codec_buffer(&p, 320, 178, interleaved);
+            let read = Picture::from_codec_buffer(&b, (318, 178), (320, 192), interleaved).unwrap();
+            assert!(read.y() == p.y() && read.u() == p.u() && read.v() == p.v());
+            // too short for the picture however it is read
+            assert!(Picture::from_codec_buffer(
+                &b[..b.len() / 2],
+                (318, 178),
+                (320, 178),
+                interleaved
+            )
+            .is_none());
+        }
+    }
 
     #[test]
     fn a_screens_pixels_come_back_as_they_went() {
