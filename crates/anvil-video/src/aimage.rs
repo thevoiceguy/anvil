@@ -186,6 +186,7 @@ impl Reader {
     /// What the reader has seen, for a producer that shows nothing: images
     /// drawn into it, acquired, refused (and the last status), and
     /// acquired but unreadable (and the last one's format and planes).
+    #[allow(dead_code)] // no producer asks now (the decoder reads buffers); kept for the next that shows nothing
     pub(crate) fn report(&self) -> String {
         let t = &self.taken;
         let n = |a: &AtomicU64| a.load(Ordering::Relaxed);
