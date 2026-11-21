@@ -43,12 +43,12 @@ use tokio::sync::{broadcast, RwLock};
 pub use anvil_fcp::{CallingSettings, CallingUpdate};
 pub use capture::{CaptureMode, CaptureState};
 pub use clip::{decode_wav, Clip};
-pub use command::{AudioKind, Command, Imported, Response, RoomAction};
+pub use command::{AudienceAction, AudioKind, Command, Imported, Response, RoomAction};
 pub use state::{
     AppearanceView, AudioDevice, AudioDevices, AudioProcessing, AudioTest, AudioTestStage,
-    AudioVolume, Brand, CallState, CallVideoView, CallView, CameraView, Change, Contact,
+    AudioVolume, Brand, CallState, CallVideoView, CallView, CameraView, Change, ChatItem, Contact,
     ContactNumber, Direction, DirectoryListing, H264View, LineView, MessageWaiting, MyPresence,
-    OwnStatus, Person, Push, Quality, Recent, Registration, Ringtone, RoomMemberView,
+    OwnStatus, Person, Push, Quality, QuestionItem, Recent, Registration, Ringtone, RoomMemberView,
     RoomStreamView, RoomView, State, VideoState, Voicemail,
 };
 pub use video::OpenH264;
@@ -1073,6 +1073,10 @@ impl Phone {
             }),
             Command::Room { call, action } => {
                 self.room_control(call, action).await?;
+                Ok(Response::ok())
+            }
+            Command::Audience { call, action } => {
+                self.audience(call, action).await?;
                 Ok(Response::ok())
             }
             Command::View {

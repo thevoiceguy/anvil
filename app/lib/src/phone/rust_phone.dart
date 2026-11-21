@@ -426,6 +426,9 @@ class RustPhone implements PhoneApi {
           presenting: m.presenting,
           paused: m.paused,
           spotlight: m.spotlight,
+          panelist: m.panelist,
+          attendee: m.attendee,
+          hand: m.hand,
         ),
     ],
     speaker: r.speaker,
@@ -437,6 +440,40 @@ class RustPhone implements PhoneApi {
       for (final st in r.streams)
         RoomStream(stream: st.stream, member: st.member, speaker: st.speaker),
     ],
+    role: r.role,
+    webinar: r.webinar,
+    lobby: r.lobby,
+    hand: r.hand,
+    onStage: r.onStage,
+    audience: r.audience?.toInt(),
+    questions: [
+      for (final q in r.questions)
+        RoomQuestion(
+          id: q.id,
+          text: q.text,
+          asker: q.asker,
+          mine: q.mine,
+          status: q.status,
+          published: q.published,
+          upvotes: q.upvotes,
+          upvoted: q.upvoted,
+          answer: q.answer,
+          answeredLive: q.answeredLive,
+        ),
+    ],
+    chat: [
+      for (final m in r.chat)
+        RoomChatMessage(
+          id: m.id,
+          text: m.text,
+          sender: m.sender,
+          senderId: m.senderId,
+          fromStage: m.fromStage,
+          mine: m.mine,
+          toHosts: m.toHosts,
+        ),
+    ],
+    chatMuted: r.chatMuted,
   );
 
   static AudioDevice _device(rust.AudioDevice d) =>
@@ -471,9 +508,32 @@ class RustPhone implements PhoneApi {
     call: _id(call),
     action: switch (control) {
       RoomControl.stopShare => 'stop_share',
+      RoomControl.goLive => 'go_live',
+      RoomControl.endWebinar => 'end_webinar',
+      RoomControl.lowerHand => 'lower_hand',
+      RoomControl.lowerAllHands => 'lower_all_hands',
+      RoomControl.muteChat => 'mute_chat',
       _ => control.name,
     },
     member: member,
+    on_: on,
+  );
+
+  @override
+  Future<void> roomAudience(
+    int call,
+    AudienceAction action, {
+    String? id,
+    String? text,
+    bool on = false,
+  }) => rust.roomAudience(
+    call: _id(call),
+    action: switch (action) {
+      AudienceAction.deleteMessage => 'delete_message',
+      _ => action.name,
+    },
+    id: id,
+    text: text,
     on_: on,
   );
 

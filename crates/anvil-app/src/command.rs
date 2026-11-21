@@ -54,6 +54,13 @@ pub enum Command {
         call: Option<u64>,
         action: RoomAction,
     },
+    /// Our voice in the room a call is in (FCP's `docs/WEBINARS.md` §2.5):
+    /// a hand, a question, chat; and for the stage, moderating them.
+    Audience {
+        #[serde(default)]
+        call: Option<u64>,
+        action: AudienceAction,
+    },
     /// What a room that forwards each person's stream sends us: these
     /// people, and with `speaker` whoever speaks; neither, the room's
     /// default (the speaker large, those who spoke last small).
@@ -319,12 +326,62 @@ pub enum RoomAction {
     Remove { member: String },
     /// End whoever's share is on.
     StopShare,
+    /// Take the webinar live: the lobby is let in.
+    GoLive,
+    /// End the webinar: everyone is released.
+    EndWebinar,
+    /// Lower one person's raised hand.
+    LowerHand { member: String },
+    /// Lower every raised hand.
+    LowerAllHands,
+    /// Bring an attendee to the stage, heard by the room, or send them back.
+    Stage { member: String, on: bool },
+    /// Mute one person's chat for the sitting, or unmute it.
+    MuteChat { member: String, on: bool },
+}
+
+/// What we say in a room: our own hand, questions and chat, and for a host
+/// or panelist, moderating questions and chat. Each is an INFO in the call.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "action", rename_all = "snake_case")]
+pub enum AudienceAction {
+    /// Raise our hand, or lower it.
+    Hand { raised: bool },
+    /// Ask a question, anonymously where the room allows.
+    Ask {
+        text: String,
+        #[serde(default)]
+        anonymous: bool,
+    },
+    /// Upvote a question, or take the vote back.
+    Upvote { id: String, on: bool },
+    /// For the stage: show a question to the room.
+    Publish { id: String },
+    /// For the stage: answer in text, or say it was answered aloud.
+    Answer {
+        id: String,
+        #[serde(default)]
+        text: Option<String>,
+        #[serde(default)]
+        live: bool,
+    },
+    /// For the stage: drop a question.
+    Dismiss { id: String },
+    /// Post to the room, or to its hosts and panelists alone.
+    Chat {
+        text: String,
+        #[serde(default)]
+        to_hosts: bool,
+    },
+    /// For the stage: delete a message for everyone.
+    DeleteMessage { id: String },
 }
 
 /// `room <what> …` at the prompt.
 fn room_line(words: &[&str]) -> Result<Command, String> {
     let usage = "room layout grid|speaker, room pin|spotlight <id>|off, \
                  room mute|camera <id> on|off, room remove <id>, room stop-share, \
+                 room live|end, room lower <id>|all, room stage|chat-mute <id> on|off, \
                  room view default|<id>|speaker|pin <id> … [call]";
     let word = |i: usize| words.get(i).map(|w| w.to_string());
     let call_at = |i: usize| -> Result<Option<u64>, String> {
@@ -415,6 +472,22 @@ fn room_line(words: &[&str]) -> Result<Command, String> {
             call_at(3)?,
         ),
         "stop-share" => (RoomAction::StopShare, call_at(2)?),
+        "live" => (RoomAction::GoLive, call_at(2)?),
+        "end" => (RoomAction::EndWebinar, call_at(2)?),
+        "lower" => match word(2).ok_or(usage)? {
+            all if all.eq_ignore_ascii_case("all") => (RoomAction::LowerAllHands, call_at(3)?),
+            member => (RoomAction::LowerHand { member }, call_at(3)?),
+        },
+        "stage" | "chat-mute" => {
+            let member = word(2).ok_or(usage)?;
+            let on = on_off(words.get(3)).ok_or(usage)?;
+            let action = if what == "stage" {
+                RoomAction::Stage { member, on }
+            } else {
+                RoomAction::MuteChat { member, on }
+            };
+            (action, call_at(4)?)
+        }
         _ => return Err(usage.into()),
     };
     Ok(Command::Room { call, action })
@@ -576,6 +649,40 @@ impl Command {
             // `room remove p2`, `room stop-share`; a trailing call id names
             // the call.
             "room" => room_line(&words)?,
+            // Our own voice in a room: `hand up`, `ask When?`, `chat Hello`.
+            "hand" => Command::Audience {
+                call: None,
+                action: AudienceAction::Hand {
+                    raised: match words.get(1).map(|w| w.to_ascii_lowercase()).as_deref() {
+                        Some("up") => true,
+                        Some("down") => false,
+                        _ => return Err("hand up|down".into()),
+                    },
+                },
+            },
+            "ask" | "chat" | "chat-hosts" => {
+                let text = words.get(1..).unwrap_or_default().join(" ");
+                if text.trim().is_empty() {
+                    return Err(format!("{} <text>", words[0]));
+                }
+                Command::Audience {
+                    call: None,
+                    action: match words[0] {
+                        "ask" => AudienceAction::Ask {
+                            text,
+                            anonymous: false,
+                        },
+                        "chat" => AudienceAction::Chat {
+                            text,
+                            to_hosts: false,
+                        },
+                        _ => AudienceAction::Chat {
+                            text,
+                            to_hosts: true,
+                        },
+                    },
+                }
+            }
             // `video on`, `video off 3`.
             "video" => Command::Video {
                 on: on_off(words.get(1)).ok_or("video needs on or off")?,
@@ -1403,6 +1510,75 @@ mod tests {
         assert_eq!(
             serde_json::to_string(&Response::ok()).unwrap(),
             r#"{"ok":true}"#
+        );
+    }
+
+    #[test]
+    fn our_voice_in_a_room_and_a_webinar_s_controls_are_read() {
+        assert_eq!(
+            Command::parse_line("hand up").unwrap(),
+            Command::Audience {
+                call: None,
+                action: AudienceAction::Hand { raised: true }
+            }
+        );
+        assert_eq!(
+            Command::parse_line("ask When does it ship?").unwrap(),
+            Command::Audience {
+                call: None,
+                action: AudienceAction::Ask {
+                    text: "When does it ship?".into(),
+                    anonymous: false
+                }
+            }
+        );
+        assert_eq!(
+            Command::parse_line("chat-hosts Slides please").unwrap(),
+            Command::Audience {
+                call: None,
+                action: AudienceAction::Chat {
+                    text: "Slides please".into(),
+                    to_hosts: true
+                }
+            }
+        );
+        assert!(Command::parse_line("chat").is_err());
+        assert!(Command::parse_line("hand sideways").is_err());
+        assert_eq!(
+            Command::parse_line("room live").unwrap(),
+            Command::Room {
+                call: None,
+                action: RoomAction::GoLive
+            }
+        );
+        assert_eq!(
+            Command::parse_line("room lower all 4").unwrap(),
+            Command::Room {
+                call: Some(4),
+                action: RoomAction::LowerAllHands
+            }
+        );
+        assert_eq!(
+            Command::parse_line("room stage p-9 on").unwrap(),
+            Command::Room {
+                call: None,
+                action: RoomAction::Stage {
+                    member: "p-9".into(),
+                    on: true
+                }
+            }
+        );
+        let json = r#"{"cmd":"audience","action":{"action":"answer","id":"q-1","live":true}}"#;
+        assert_eq!(
+            serde_json::from_str::<Command>(json).unwrap(),
+            Command::Audience {
+                call: None,
+                action: AudienceAction::Answer {
+                    id: "q-1".into(),
+                    text: None,
+                    live: true
+                }
+            }
         );
     }
 }

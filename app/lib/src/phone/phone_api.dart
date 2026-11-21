@@ -287,7 +287,52 @@ class RoomInfo {
     this.sharing = false,
     this.forwards = false,
     this.streams = const [],
+    this.role,
+    this.webinar,
+    this.lobby = false,
+    this.hand = false,
+    this.onStage = false,
+    this.audience,
+    this.questions = const [],
+    this.chat = const [],
+    this.chatMuted = false,
   });
+
+  /// Who we are in it, as the room says: `host`, `panelist`, `attendee`
+  /// or `guest` (FCP's `docs/WEBINARS.md` A7).
+  final String? role;
+
+  /// A webinar's phase, `practice`, `live` or `ended`; null in a meeting.
+  final String? webinar;
+
+  /// We wait in the webinar's lobby.
+  final bool lobby;
+
+  /// Our hand is up.
+  final bool hand;
+
+  /// An attendee brought to the stage: heard by the room.
+  final bool onStage;
+
+  /// A webinar's audience by count.
+  final int? audience;
+
+  /// The questions we may see, oldest first.
+  final List<RoomQuestion> questions;
+
+  /// The chat we may see, oldest first.
+  final List<RoomChatMessage> chat;
+
+  /// Our chat is muted for the sitting.
+  final bool chatMuted;
+
+  bool get isWebinar => webinar != null;
+
+  /// We moderate questions and chat: a host or a panelist.
+  bool get moderates => host || role == 'host' || role == 'panelist';
+
+  /// We listen and are not heard: an attendee off the stage.
+  bool get listening => role == 'attendee' && !onStage;
 
   /// The room's number.
   final String number;
@@ -332,7 +377,22 @@ class RoomInfo {
     sharing: sharing ?? this.sharing,
     forwards: forwards ?? this.forwards,
     streams: streams ?? this.streams,
+    role: role,
+    webinar: webinar,
+    lobby: lobby,
+    hand: hand,
+    onStage: onStage,
+    audience: audience,
+    questions: questions,
+    chat: chat,
+    chatMuted: chatMuted,
   );
+
+  /// Raised hands, as the stage sees them: attendees whose hand is up.
+  List<RoomMember> get hands => [
+    for (final m in members)
+      if (m.attendee && m.hand != null) m,
+  ];
 
   RoomMember? member(String? id) {
     for (final m in members) {
@@ -377,7 +437,19 @@ class RoomMember {
     this.presenting = false,
     this.paused = false,
     this.spotlight = false,
+    this.panelist = false,
+    this.attendee = false,
+    this.hand,
   });
+
+  /// A webinar's panelist, or an attendee brought to the stage.
+  final bool panelist;
+
+  /// A webinar's attendee, listed for a raised hand.
+  final bool attendee;
+
+  /// Their hand is up, since when (RFC 3339).
+  final String? hand;
 
   /// The room's id for them: what a host's controls name.
   final String id;
@@ -432,8 +504,90 @@ class Meeting {
   final String name;
 }
 
+/// A question in a room, as it is shown to us.
+class RoomQuestion {
+  const RoomQuestion({
+    required this.id,
+    required this.text,
+    this.asker,
+    this.mine = false,
+    this.status = 'pending',
+    this.published = false,
+    this.upvotes = 0,
+    this.upvoted = false,
+    this.answer,
+    this.answeredLive = false,
+  });
+  final String id;
+  final String text;
+
+  /// Who asked; null when anonymous.
+  final String? asker;
+  final bool mine;
+
+  /// `pending` or `answered`.
+  final String status;
+  final bool published;
+  final int upvotes;
+  final bool upvoted;
+  final String? answer;
+  final bool answeredLive;
+
+  bool get answered => status == 'answered';
+}
+
+/// A chat message in a room.
+class RoomChatMessage {
+  const RoomChatMessage({
+    required this.id,
+    required this.text,
+    this.sender,
+    required this.senderId,
+    this.fromStage = false,
+    this.mine = false,
+    this.toHosts = false,
+  });
+  final String id;
+  final String text;
+  final String? sender;
+  final String senderId;
+
+  /// Sent by a host or panelist.
+  final bool fromStage;
+  final bool mine;
+
+  /// To the hosts and panelists alone.
+  final bool toHosts;
+}
+
 /// What a room's host can do (`PhoneApi.roomControl`).
-enum RoomControl { layout, pin, spotlight, mute, camera, remove, stopShare }
+enum RoomControl {
+  layout,
+  pin,
+  spotlight,
+  mute,
+  camera,
+  remove,
+  stopShare,
+  goLive,
+  endWebinar,
+  lowerHand,
+  lowerAllHands,
+  stage,
+  muteChat,
+}
+
+/// Our voice in a room (`PhoneApi.roomAudience`).
+enum AudienceAction {
+  hand,
+  ask,
+  upvote,
+  chat,
+  publish,
+  answer,
+  dismiss,
+  deleteMessage,
+}
 
 /// A camera to choose.
 class CameraDevice {
@@ -1523,6 +1677,18 @@ abstract class PhoneApi {
     int call,
     RoomControl control, {
     String? member,
+    bool on = false,
+  });
+
+  /// Our voice in the room `call` is in: `hand` (`on`, raised), `ask`
+  /// (`text`; `on`, anonymously), `upvote` (`id`, `on`), `chat` (`text`;
+  /// `on`, to the hosts alone); for the stage `publish`, `answer` (`id`,
+  /// `text`; `on`, aloud), `dismiss` and `deleteMessage` (`id`).
+  Future<void> roomAudience(
+    int call,
+    AudienceAction action, {
+    String? id,
+    String? text,
     bool on = false,
   });
 

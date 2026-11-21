@@ -2443,6 +2443,222 @@ abstract class Strings {
   /// In en, this message translates to:
   /// **'Host controls for {name}'**
   String roomMemberActions(String name);
+
+  /// No description provided for @webinarLobby.
+  ///
+  /// In en, this message translates to:
+  /// **'Waiting for the webinar to start'**
+  String get webinarLobby;
+
+  /// No description provided for @webinarPractice.
+  ///
+  /// In en, this message translates to:
+  /// **'Practice: only the stage is in'**
+  String get webinarPractice;
+
+  /// No description provided for @webinarLive.
+  ///
+  /// In en, this message translates to:
+  /// **'Live'**
+  String get webinarLive;
+
+  /// No description provided for @webinarEnded.
+  ///
+  /// In en, this message translates to:
+  /// **'The webinar has ended'**
+  String get webinarEnded;
+
+  /// No description provided for @webinarWatching.
+  ///
+  /// In en, this message translates to:
+  /// **'{count} watching'**
+  String webinarWatching(int count);
+
+  /// No description provided for @webinarOnStage.
+  ///
+  /// In en, this message translates to:
+  /// **'You are on the stage: the room can hear you'**
+  String get webinarOnStage;
+
+  /// No description provided for @webinarListening.
+  ///
+  /// In en, this message translates to:
+  /// **'You are in the audience: the room does not hear you'**
+  String get webinarListening;
+
+  /// No description provided for @webinarGoLive.
+  ///
+  /// In en, this message translates to:
+  /// **'Go live'**
+  String get webinarGoLive;
+
+  /// No description provided for @webinarEnd.
+  ///
+  /// In en, this message translates to:
+  /// **'End webinar'**
+  String get webinarEnd;
+
+  /// No description provided for @webinarEndConfirm.
+  ///
+  /// In en, this message translates to:
+  /// **'End the webinar? Everyone in it is released.'**
+  String get webinarEndConfirm;
+
+  /// No description provided for @webinarRaiseHand.
+  ///
+  /// In en, this message translates to:
+  /// **'Raise hand'**
+  String get webinarRaiseHand;
+
+  /// No description provided for @webinarLowerHand.
+  ///
+  /// In en, this message translates to:
+  /// **'Lower hand'**
+  String get webinarLowerHand;
+
+  /// No description provided for @webinarHands.
+  ///
+  /// In en, this message translates to:
+  /// **'Raised hands ({count})'**
+  String webinarHands(int count);
+
+  /// No description provided for @webinarLowerAll.
+  ///
+  /// In en, this message translates to:
+  /// **'Lower all'**
+  String get webinarLowerAll;
+
+  /// No description provided for @webinarToStage.
+  ///
+  /// In en, this message translates to:
+  /// **'Bring to the stage'**
+  String get webinarToStage;
+
+  /// No description provided for @webinarFromStage.
+  ///
+  /// In en, this message translates to:
+  /// **'Back to the audience'**
+  String get webinarFromStage;
+
+  /// No description provided for @webinarLowerTheirs.
+  ///
+  /// In en, this message translates to:
+  /// **'Lower hand'**
+  String get webinarLowerTheirs;
+
+  /// No description provided for @roomQuestions.
+  ///
+  /// In en, this message translates to:
+  /// **'Questions ({count})'**
+  String roomQuestions(int count);
+
+  /// No description provided for @roomAsk.
+  ///
+  /// In en, this message translates to:
+  /// **'Ask a question'**
+  String get roomAsk;
+
+  /// No description provided for @roomAskAnonymously.
+  ///
+  /// In en, this message translates to:
+  /// **'Anonymously'**
+  String get roomAskAnonymously;
+
+  /// No description provided for @roomUpvote.
+  ///
+  /// In en, this message translates to:
+  /// **'Upvote'**
+  String get roomUpvote;
+
+  /// No description provided for @roomPublish.
+  ///
+  /// In en, this message translates to:
+  /// **'Show to everyone'**
+  String get roomPublish;
+
+  /// No description provided for @roomAnswerAloud.
+  ///
+  /// In en, this message translates to:
+  /// **'Answered aloud'**
+  String get roomAnswerAloud;
+
+  /// No description provided for @roomAnswerText.
+  ///
+  /// In en, this message translates to:
+  /// **'Answer in writing'**
+  String get roomAnswerText;
+
+  /// No description provided for @roomDismiss.
+  ///
+  /// In en, this message translates to:
+  /// **'Dismiss'**
+  String get roomDismiss;
+
+  /// No description provided for @roomAnswered.
+  ///
+  /// In en, this message translates to:
+  /// **'Answered'**
+  String get roomAnswered;
+
+  /// No description provided for @roomAnswerHint.
+  ///
+  /// In en, this message translates to:
+  /// **'Your answer'**
+  String get roomAnswerHint;
+
+  /// No description provided for @roomNotPublished.
+  ///
+  /// In en, this message translates to:
+  /// **'Only the stage sees this'**
+  String get roomNotPublished;
+
+  /// No description provided for @roomChat.
+  ///
+  /// In en, this message translates to:
+  /// **'Chat ({count})'**
+  String roomChat(int count);
+
+  /// No description provided for @roomChatHint.
+  ///
+  /// In en, this message translates to:
+  /// **'Message'**
+  String get roomChatHint;
+
+  /// No description provided for @roomChatToHosts.
+  ///
+  /// In en, this message translates to:
+  /// **'To the hosts only'**
+  String get roomChatToHosts;
+
+  /// No description provided for @roomChatMuted.
+  ///
+  /// In en, this message translates to:
+  /// **'A host has muted your chat'**
+  String get roomChatMuted;
+
+  /// No description provided for @roomChatDelete.
+  ///
+  /// In en, this message translates to:
+  /// **'Delete for everyone'**
+  String get roomChatDelete;
+
+  /// No description provided for @roomChatMuteSender.
+  ///
+  /// In en, this message translates to:
+  /// **'Mute their chat'**
+  String get roomChatMuteSender;
+
+  /// No description provided for @roomSend.
+  ///
+  /// In en, this message translates to:
+  /// **'Send'**
+  String get roomSend;
+
+  /// No description provided for @roomYou.
+  ///
+  /// In en, this message translates to:
+  /// **'You'**
+  String get roomYou;
 }
 
 class _StringsDelegate extends LocalizationsDelegate<Strings> {
