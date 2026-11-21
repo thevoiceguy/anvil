@@ -1830,7 +1830,7 @@ async fn told<T>(
 }
 
 /// A webinar on FCP run from two Anvils (FCP's `docs/WEBINARS.md` A7a and
-/// A7b). The owner dials in as its host, and a guest follows a join link
+/// A7b). The owner joins by a host's link, and a guest follows a join link
 /// and is an attendee in the lobby. The host takes it live through
 /// `/me`, and the attendee is let in and told. The attendee raises a hand
 /// in the call, and the host sees it on the roster and in the audience.
@@ -1858,11 +1858,21 @@ async fn a_webinar_on_fcp_is_run_by_its_host_from_anvil() {
         .await
         .expect("a join link");
 
+    // In a webinar the owner is its host by a host's link: dialed by number
+    // with no PIN, anyone is an attendee.
+    let host_link = alice_client
+        .join_link(&meeting, JoinRole::Host, Some("Alice"), None)
+        .await
+        .expect("a host's link");
     let target = format!("sip:{room}@{domain}");
     let a = alice
-        .join_room(&target, &RoomJoin::default(), CallMedia::AUDIO)
+        .join_room(
+            &target,
+            &RoomJoin::from_link(&host_link.link()).expect("the host link's token"),
+            CallMedia::AUDIO,
+        )
         .await
-        .expect("the owner dials in");
+        .expect("the owner joins as host");
     let a = established(&mut alice_events, Some(a)).await;
     let state = told(&mut alice_events, a, "the host the webinar", |e| match e {
         Event::RoomWebinar { state, .. } => Some(*state),
@@ -1945,9 +1955,10 @@ async fn a_webinar_on_fcp_is_run_by_its_host_from_anvil() {
     // Chat: posted, seen by the host; then muted, and told.
     bob.room_chat(
         b,
+        // A webinar's chat is to the hosts unless its meeting says.
         &ChatRequest::Post {
             text: "Hello from the audience".into(),
-            to: ChatTo::Room,
+            to: ChatTo::Hosts,
         },
     )
     .await
