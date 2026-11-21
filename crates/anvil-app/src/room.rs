@@ -124,6 +124,28 @@ impl Phone {
         Ok(fcp.join_link(&id, role, None, None).await?.link())
     }
 
+    /// The attendance report of one of the user's meetings (by id or room
+    /// number), the newest run unless `sitting` says, and its runs.
+    pub(crate) async fn attendance(
+        &self,
+        meeting: &str,
+        sitting: Option<&str>,
+    ) -> Result<(anvil_fcp::Attendance, Vec<anvil_fcp::Sitting>), PhoneError> {
+        let fcp = Arc::clone(self.fcp("the attendance report")?);
+        let id = self
+            .inner
+            .state
+            .lock()
+            .meetings
+            .iter()
+            .find(|m| m.id == meeting || m.room_number == meeting)
+            .map(|m| m.id.clone())
+            .unwrap_or_else(|| meeting.to_string());
+        let sittings = fcp.sittings(&id).await?;
+        let report = fcp.attendance(&id, sitting).await?;
+        Ok((report, sittings))
+    }
+
     /// Share our screen in the room `call` is in, or stop. The floor is
     /// taken by sending: the room's notice says whether it was granted.
     pub(crate) async fn share(&self, call: Option<u64>, on: bool) -> Result<(), PhoneError> {

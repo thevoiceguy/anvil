@@ -820,5 +820,66 @@
   "roomChatDelete": "Delete for everyone",
   "roomChatMuteSender": "Mute their chat",
   "roomSend": "Send",
-  "roomYou": "You"
+  "roomYou": "You",
+  "attendanceButton": "Attendance",
+  "attendanceTitle": "Attendance: {name}",
+  "@attendanceTitle": {
+    "placeholders": {
+      "name": {
+        "type": "String"
+      }
+    }
+  },
+  "attendanceNone": "Nobody has been in this room yet.",
+  "attendanceRun": "Run",
+  "attendanceSummary": "{attendees} came · at most {peak} at once",
+  "@attendanceSummary": {
+    "placeholders": {
+      "attendees": {
+        "type": "int"
+      },
+      "peak": {
+        "type": "int"
+      }
+    }
+  },
+  "attendancePeople": "In the room",
+  "attendanceMinutes": "{minutes} min",
+  "@attendanceMinutes": {
+    "placeholders": {
+      "minutes": {
+        "type": "int"
+      }
+    }
+  },
+  "attendanceLobbyOnly": "Waited in the lobby",
+  "attendanceRegistrants": "Registrations",
+  "attendanceCame": "Came, {minutes} min",
+  "@attendanceCame": {
+    "placeholders": {
+      "minutes": {
+        "type": "int"
+      }
+    }
+  },
+  "attendanceDidNotCome": "Did not come",
+  "attendanceWatched": "Watched the stream, {minutes} min",
+  "@attendanceWatched": {
+    "placeholders": {
+      "minutes": {
+        "type": "int"
+      }
+    }
+  },
+  "attendanceOpened": "Opened the recording",
+  "attendanceRevoked": "Revoked",
+  "attendanceViewers": "Watched the stream",
+  "attendanceError": "The report could not be read: {error}",
+  "@attendanceError": {
+    "placeholders": {
+      "error": {
+        "type": "String"
+      }
+    }
+  }
 }

@@ -292,6 +292,21 @@ class FakePhone implements PhoneApi {
     return link;
   }
 
+  /// What `meetingAttendance` answers.
+  AttendanceReport? attendance;
+
+  @override
+  Future<AttendanceReport> meetingAttendance(
+    String meeting, {
+    String? sitting,
+  }) async {
+    _refuse();
+    log.add('attendance $meeting${sitting == null ? '' : ' $sitting'}');
+    final a = attendance;
+    if (a == null) throw StateError('no attendance set');
+    return a;
+  }
+
   @override
   Future<void> setRoomView(
     int call, {

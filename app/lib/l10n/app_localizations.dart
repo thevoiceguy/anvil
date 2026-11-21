@@ -2659,6 +2659,102 @@ abstract class Strings {
   /// In en, this message translates to:
   /// **'You'**
   String get roomYou;
+
+  /// No description provided for @attendanceButton.
+  ///
+  /// In en, this message translates to:
+  /// **'Attendance'**
+  String get attendanceButton;
+
+  /// No description provided for @attendanceTitle.
+  ///
+  /// In en, this message translates to:
+  /// **'Attendance: {name}'**
+  String attendanceTitle(String name);
+
+  /// No description provided for @attendanceNone.
+  ///
+  /// In en, this message translates to:
+  /// **'Nobody has been in this room yet.'**
+  String get attendanceNone;
+
+  /// No description provided for @attendanceRun.
+  ///
+  /// In en, this message translates to:
+  /// **'Run'**
+  String get attendanceRun;
+
+  /// No description provided for @attendanceSummary.
+  ///
+  /// In en, this message translates to:
+  /// **'{attendees} came · at most {peak} at once'**
+  String attendanceSummary(int attendees, int peak);
+
+  /// No description provided for @attendancePeople.
+  ///
+  /// In en, this message translates to:
+  /// **'In the room'**
+  String get attendancePeople;
+
+  /// No description provided for @attendanceMinutes.
+  ///
+  /// In en, this message translates to:
+  /// **'{minutes} min'**
+  String attendanceMinutes(int minutes);
+
+  /// No description provided for @attendanceLobbyOnly.
+  ///
+  /// In en, this message translates to:
+  /// **'Waited in the lobby'**
+  String get attendanceLobbyOnly;
+
+  /// No description provided for @attendanceRegistrants.
+  ///
+  /// In en, this message translates to:
+  /// **'Registrations'**
+  String get attendanceRegistrants;
+
+  /// No description provided for @attendanceCame.
+  ///
+  /// In en, this message translates to:
+  /// **'Came, {minutes} min'**
+  String attendanceCame(int minutes);
+
+  /// No description provided for @attendanceDidNotCome.
+  ///
+  /// In en, this message translates to:
+  /// **'Did not come'**
+  String get attendanceDidNotCome;
+
+  /// No description provided for @attendanceWatched.
+  ///
+  /// In en, this message translates to:
+  /// **'Watched the stream, {minutes} min'**
+  String attendanceWatched(int minutes);
+
+  /// No description provided for @attendanceOpened.
+  ///
+  /// In en, this message translates to:
+  /// **'Opened the recording'**
+  String get attendanceOpened;
+
+  /// No description provided for @attendanceRevoked.
+  ///
+  /// In en, this message translates to:
+  /// **'Revoked'**
+  String get attendanceRevoked;
+
+  /// No description provided for @attendanceViewers.
+  ///
+  /// In en, this message translates to:
+  /// **'Watched the stream'**
+  String get attendanceViewers;
+
+  /// No description provided for @attendanceError.
+  ///
+  /// In en, this message translates to:
+  /// **'The report could not be read: {error}'**
+  String attendanceError(String error);
 }
 
 class _StringsDelegate extends LocalizationsDelegate<Strings> {

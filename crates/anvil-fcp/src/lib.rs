@@ -49,7 +49,10 @@ pub use me::{
 };
 pub use presence::{MyPresence, OwnStatus, Presence, PresenceUpdate};
 pub use remember::LastSignIn;
-pub use rooms::{AudienceMember, JoinLink, JoinRole, Meeting, RoomHost, RoomLayout};
+pub use rooms::{
+    Attendance, AttendanceLeg, AttendanceRegistrant, AudienceMember, JoinLink, JoinRole, Meeting,
+    RoomHost, RoomLayout, Sitting, StreamViewer,
+};
 pub use session::{AppClient, DeviceCredentials, FileTokenStore, Session, TokenStore};
 pub use signin::{
     begin_password_sign_in, password_sign_in, BrowserSignIn, PasswordStep, SecondFactor,

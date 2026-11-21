@@ -152,6 +152,41 @@ impl FcpClient {
         .await
     }
 
+    /// The runs of one of the user's meetings, newest first: what the
+    /// attendance report picks among (FCP's `/me/conferences/{id}/sittings`).
+    pub async fn sittings(&self, meeting: &str) -> Result<Vec<Sitting>, FcpError> {
+        let page: Page<Sitting> = json(
+            self.api_with(
+                reqwest::Method::GET,
+                &format!("/me/conferences/{}/sittings?limit=50", segment(meeting)?),
+                None,
+            )
+            .await?,
+            "sittings",
+        )
+        .await?;
+        Ok(page.data)
+    }
+
+    /// Who came to a run of one of the user's meetings (the newest when
+    /// `sitting` is `None`), how long, and who watched its stream: FCP's
+    /// `/me/conferences/{id}/attendance`.
+    pub async fn attendance(
+        &self,
+        meeting: &str,
+        sitting: Option<&str>,
+    ) -> Result<Attendance, FcpError> {
+        let mut path = format!("/me/conferences/{}/attendance", segment(meeting)?);
+        if let Some(s) = sitting {
+            path.push_str(&format!("?sitting={}", segment(s)?));
+        }
+        json(
+            self.api_with(reqwest::Method::GET, &path, None).await?,
+            "attendance",
+        )
+        .await
+    }
+
     /// A host's controls over the running room `room` (its number), as
     /// its owner or, with `token`, a host join token's holder.
     pub fn room_host(&self, room: &str, token: Option<&str>) -> RoomHost<'_> {
@@ -362,6 +397,104 @@ impl RoomHost<'_> {
         .await
         .map(drop)
     }
+}
+
+/// One run of a meeting's room.
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize)]
+pub struct Sitting {
+    pub id: String,
+    #[serde(default)]
+    pub room_number: String,
+    /// `meeting` or `webinar`.
+    #[serde(default)]
+    pub kind: String,
+    /// RFC 3339.
+    pub started_at: String,
+    #[serde(default)]
+    pub live_at: Option<String>,
+    #[serde(default)]
+    pub ended_at: Option<String>,
+    #[serde(default)]
+    pub ended_by: Option<String>,
+}
+
+/// A sitting's attendance, as FCP reports it to the meeting's host.
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize)]
+pub struct Attendance {
+    pub sitting: Sitting,
+    /// Distinct people in the room, the lobby aside.
+    #[serde(default)]
+    pub attendees: u64,
+    /// The most in the room at once.
+    #[serde(default)]
+    pub peak: u64,
+    #[serde(default)]
+    pub legs: Vec<AttendanceLeg>,
+    /// A webinar's registrations, each with whether they came or watched.
+    #[serde(default)]
+    pub registrants: Vec<AttendanceRegistrant>,
+    /// Who watched the stream by a registrant's link.
+    #[serde(default)]
+    pub stream_viewers: Vec<StreamViewer>,
+}
+
+/// One leg of a sitting: someone's time in the room.
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize)]
+pub struct AttendanceLeg {
+    #[serde(default)]
+    pub participant_id: Option<String>,
+    #[serde(default)]
+    pub name: Option<String>,
+    /// Where they called from.
+    #[serde(default)]
+    pub from: String,
+    #[serde(default)]
+    pub role: Option<String>,
+    #[serde(default)]
+    pub registrant: Option<String>,
+    pub joined_at: String,
+    #[serde(default)]
+    pub left_at: Option<String>,
+    #[serde(default)]
+    pub duration_secs: u64,
+    /// They never left the lobby.
+    #[serde(default)]
+    pub lobby: bool,
+    #[serde(default)]
+    pub questions: u32,
+    #[serde(default)]
+    pub messages: u32,
+}
+
+/// A registration and what became of it in the sitting.
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize)]
+pub struct AttendanceRegistrant {
+    pub id: String,
+    pub name: String,
+    #[serde(default)]
+    pub email: Option<String>,
+    #[serde(default)]
+    pub attended: bool,
+    #[serde(default)]
+    pub attended_secs: u64,
+    #[serde(default)]
+    pub watched: bool,
+    #[serde(default)]
+    pub watched_secs: u64,
+    #[serde(default)]
+    pub revoked_at: Option<String>,
+}
+
+/// A registrant who watched the stream by their own link.
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize)]
+pub struct StreamViewer {
+    pub registrant_id: String,
+    #[serde(default)]
+    pub name: Option<String>,
+    pub first_at: String,
+    pub last_at: String,
+    #[serde(default)]
+    pub watched_secs: u64,
 }
 
 /// One of a webinar's audience, as the stage's host lists them.

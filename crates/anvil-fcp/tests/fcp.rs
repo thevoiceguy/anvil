@@ -1990,6 +1990,26 @@ async fn a_webinar_on_fcp_is_run_by_its_host_from_anvil() {
         _ => None,
     })
     .await;
+
+    // The host reads who came, as its owner (FCP's /me attendance); the
+    // attendee may not.
+    let sittings = alice_client.sittings(&meeting).await.expect("the sittings");
+    assert!(!sittings.is_empty(), "the run is listed");
+    let report = alice_client
+        .attendance(&meeting, Some(&sittings[0].id))
+        .await
+        .expect("the attendance");
+    assert_eq!(report.sitting.id, sittings[0].id);
+    assert_eq!(report.sitting.kind, "webinar");
+    assert!(report.sitting.live_at.is_some(), "it went live: {report:?}");
+    let refused = bob_client
+        .attendance(&meeting, None)
+        .await
+        .expect_err("not the attendee's meeting");
+    assert!(
+        matches!(refused, FcpError::Refused { status: 404, .. }),
+        "{refused:?}"
+    );
     let _ = alice.hangup(a).await;
     let _ = bob.hangup(b).await;
     let _ = alice.shutdown().await;
