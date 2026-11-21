@@ -11,7 +11,10 @@ mod common;
 use std::net::SocketAddr;
 
 use anvil_core::video::synthetic::SyntheticVideoHost;
-use anvil_core::{CallMedia, Event, FloorState, MediaConfig, RoomAudio, RoomJoin};
+use anvil_core::{
+    CallMedia, ChatRequest, ChatTo, Event, FloorState, MediaConfig, QaRequest, QuestionStatus,
+    RoomAudio, RoomJoin, RoomRole, WebinarPhase,
+};
 use common::*;
 use tokio::net::UdpSocket;
 
@@ -217,8 +220,8 @@ async fn a_room_joined_by_link_tells_its_roster_and_its_floor() {
     );
     assert_eq!(
         header(&room.invite, "Recv-Info").as_deref(),
-        Some("fcp-content"),
-        "without video, no streams of anyone's are asked for"
+        Some("fcp-content, fcp-qa, fcp-chat"),
+        "without video, no streams of anyone's are asked for; the audience's voice and chat are"
     );
     expect(&mut events, SOON, |e| match e {
         Event::CallEstablished { call: c, .. } if *c == call => Some(()),
@@ -344,10 +347,236 @@ async fn a_room_joined_by_link_tells_its_roster_and_its_floor() {
         )
         .await;
     assert!(other.starts_with("SIP/2.0 469"), "{other}");
-    assert_eq!(header(&other, "Recv-Info").as_deref(), Some("fcp-content"));
+    assert_eq!(
+        header(&other, "Recv-Info").as_deref(),
+        Some("fcp-content, fcp-qa, fcp-chat")
+    );
 
     // Leaving.
     let alice = std::sync::Arc::new(alice);
+    let hangup = {
+        let alice = std::sync::Arc::clone(&alice);
+        tokio::spawn(async move { alice.hangup(call).await })
+    };
+    let (bye, from) = room.next("BYE ").await;
+    room.answer(&bye, from, "200 OK", "", "", "").await;
+    hangup.await.unwrap().expect("the BYE is answered");
+}
+
+const QA_TYPE: &str = "application/vnd.fcp.qa+json";
+const CHAT_TYPE: &str = "application/vnd.fcp.chat+json";
+
+/// A webinar's attendee (FCP's `docs/WEBINARS.md` §2.5, A7a): the room's
+/// `fcp-qa` and `fcp-chat` INFOs told as events — the phase, lobby and
+/// role, the stage, a hand lowered, questions, chat and a mute — the
+/// roster's audience by count and a raised hand; and ours sent in the
+/// call: a hand, a question, a post, and one the room refuses.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_webinar_s_attendee_is_told_the_room_s_voice_and_heard_in_it() {
+    let (alice, mut events) = start(account(
+        "sip:alice@127.0.0.1",
+        "sip:127.0.0.1:9",
+        "alice",
+        "",
+        "127.0.0.1",
+        3600,
+    ))
+    .await;
+    let alice = std::sync::Arc::new(alice);
+    let mut room = Room::bind("127.0.0.12").await;
+    let join = RoomJoin::from_link("fcp://join/attendee.tok").unwrap();
+    let call = alice
+        .join_room(&format!("sip:3000@{}", room.addr), &join, CallMedia::AUDIO)
+        .await
+        .expect("the room is dialed");
+    room.admit(&audio_answer("127.0.0.12")).await;
+    expect(&mut events, SOON, |e| match e {
+        Event::CallEstablished { call: c, .. } if *c == call => Some(()),
+        _ => None,
+    })
+    .await
+    .expect("in the room");
+    let (subscribe, from) = room.next("SUBSCRIBE ").await;
+    room.answer(&subscribe, from, "200 OK", "Expires: 600\r\n", "", "")
+        .await;
+
+    // In the lobby, an attendee.
+    let ok = room
+        .send(
+            "INFO",
+            "Info-Package: fcp-qa\r\n",
+            QA_TYPE,
+            r#"{"op":"webinar","phase":"practice","lobby":true,"role":"attendee"}"#,
+        )
+        .await;
+    assert!(ok.starts_with("SIP/2.0 200"), "{ok}");
+    let state = expect(&mut events, SOON, |e| match e {
+        Event::RoomWebinar { call: c, state } if *c == call => Some(*state),
+        _ => None,
+    })
+    .await
+    .expect("the webinar is told");
+    assert_eq!(state.phase, WebinarPhase::Practice);
+    assert!(state.lobby);
+    assert_eq!(state.role, Some(RoomRole::Attendee));
+
+    // The stage's roster with the audience by count, and our own hand.
+    let doc = String::from(
+        "<?xml version=\"1.0\"?>\n<conference-info xmlns=\"urn:ietf:params:xml:ns:conference-info\" \
+         xmlns:fcp=\"urn:fcp:conference-info\" entity=\"sip:3000@fcp\" state=\"full\" version=\"1\">\n\
+         <conference-state><user-count>2</user-count><fcp:audience>250</fcp:audience></conference-state>\n\
+         <users>\n<user entity=\"sip:p-host@fcp\" state=\"full\"><display-text>Hostess</display-text>\
+         <roles><entry>host</entry></roles></user>\n\
+         <user entity=\"sip:p-me@fcp\" state=\"full\"><display-text>Alice</display-text>\
+         <roles><entry>attendee</entry></roles><fcp:hand>2026-11-21T10:00:00.000Z</fcp:hand></user>\n\
+         </users>\n</conference-info>"
+    );
+    room.send(
+        "NOTIFY",
+        "Event: conference\r\nSubscription-State: active;expires=600\r\n",
+        ROSTER_TYPE,
+        &doc,
+    )
+    .await;
+    let (members, audience) = expect(&mut events, SOON, |e| match e {
+        Event::RoomRoster {
+            call: c,
+            members,
+            audience,
+            ..
+        } if *c == call => Some((members.clone(), *audience)),
+        _ => None,
+    })
+    .await
+    .expect("the roster is told");
+    assert_eq!(audience, Some(250));
+    let me = members.iter().find(|m| m.id == "p-me").unwrap();
+    assert!(me.attendee && me.hand.is_some());
+
+    // Our hand, a question and a post go to the room in the call.
+    let send = |r: QaRequest| {
+        let alice = std::sync::Arc::clone(&alice);
+        tokio::spawn(async move { alice.room_qa(call, &r).await })
+    };
+    let raised = send(QaRequest::Hand { raised: true });
+    let (info, from) = room.next("INFO ").await;
+    assert_eq!(header(&info, "Info-Package").as_deref(), Some("fcp-qa"));
+    assert_eq!(header(&info, "Content-Type").as_deref(), Some(QA_TYPE));
+    assert_eq!(body(&info), r#"{"op":"hand","raised":true}"#);
+    assert_eq!(header(&info, "Call-ID"), header(&room.invite, "Call-ID"));
+    room.answer(&info, from, "200 OK", "", "", "").await;
+    raised.await.unwrap().expect("the hand is taken");
+
+    let asked = send(QaRequest::Ask {
+        text: "When does it ship?".into(),
+        anonymous: true,
+    });
+    let (info, from) = room.next("INFO ").await;
+    assert_eq!(
+        body(&info),
+        r#"{"op":"ask","text":"When does it ship?","anonymous":true}"#
+    );
+    room.answer(&info, from, "200 OK", "", "", "").await;
+    asked.await.unwrap().expect("asked");
+
+    // An attendee may not publish: the room's refusal is an error.
+    let refused = send(QaRequest::Publish { id: "q-1".into() });
+    let (info, from) = room.next("INFO ").await;
+    room.answer(&info, from, "403 Forbidden", "", "", "").await;
+    let e = refused.await.unwrap().expect_err("refused");
+    assert!(e.to_string().contains("403"), "{e}");
+
+    let posted = {
+        let alice = std::sync::Arc::clone(&alice);
+        tokio::spawn(async move {
+            alice
+                .room_chat(
+                    call,
+                    &ChatRequest::Post {
+                        text: "Hello".into(),
+                        to: ChatTo::Hosts,
+                    },
+                )
+                .await
+        })
+    };
+    let (info, from) = room.next("INFO ").await;
+    assert_eq!(header(&info, "Info-Package").as_deref(), Some("fcp-chat"));
+    assert_eq!(header(&info, "Content-Type").as_deref(), Some(CHAT_TYPE));
+    assert_eq!(body(&info), r#"{"op":"post","text":"Hello","to":"hosts"}"#);
+    room.answer(&info, from, "200 OK", "", "", "").await;
+    posted.await.unwrap().expect("posted");
+
+    // The room's word: live and let in, our hand down and on the stage,
+    // the questions, the chat, and our chat muted.
+    for (pkg, kind, body) in [
+        (
+            "fcp-qa",
+            QA_TYPE,
+            r#"{"op":"webinar","phase":"live","lobby":false,"role":"attendee"}"#,
+        ),
+        ("fcp-qa", QA_TYPE, r#"{"op":"hand","raised":false}"#),
+        ("fcp-qa", QA_TYPE, r#"{"op":"stage","on":true}"#),
+        (
+            "fcp-qa",
+            QA_TYPE,
+            r#"{"op":"questions","questions":[{"id":"q-1","text":"When does it ship?","asker":null,"mine":true,"status":"pending","published":false,"upvotes":0,"upvoted":false,"answer":null,"answered_live":false,"asked_at":"2026-11-21T10:00:00.000Z"}]}"#,
+        ),
+        (
+            "fcp-chat",
+            CHAT_TYPE,
+            r#"{"op":"messages","messages":[{"id":"m-1","text":"Welcome","sender":"Hostess","sender_id":"p-host","sender_moderates":true,"mine":false,"to":"room","deleted":false,"sent_at":"2026-11-21T10:00:01.000Z"}]}"#,
+        ),
+        ("fcp-chat", CHAT_TYPE, r#"{"op":"muted","on":true}"#),
+    ] {
+        let ok = room
+            .send("INFO", &format!("Info-Package: {pkg}\r\n"), kind, body)
+            .await;
+        assert!(ok.starts_with("SIP/2.0 200"), "{body}: {ok}");
+    }
+    let mut told = Vec::new();
+    while told.len() < 6 {
+        let e = expect(&mut events, SOON, |e| match e {
+            Event::RoomWebinar { call: c, .. }
+            | Event::RoomHand { call: c, .. }
+            | Event::RoomStage { call: c, .. }
+            | Event::RoomQuestions { call: c, .. }
+            | Event::RoomChat { call: c, .. }
+            | Event::RoomChatMuted { call: c, .. }
+                if *c == call =>
+            {
+                Some(e.clone())
+            }
+            _ => None,
+        })
+        .await
+        .unwrap_or_else(|| panic!("told only {told:?}"));
+        told.push(e);
+    }
+    assert!(
+        matches!(&told[0], Event::RoomWebinar { state, .. } if state.phase == WebinarPhase::Live && !state.lobby)
+    );
+    assert!(matches!(told[1], Event::RoomHand { raised: false, .. }));
+    assert!(matches!(told[2], Event::RoomStage { on: true, .. }));
+    assert!(
+        matches!(&told[3], Event::RoomQuestions { questions, .. } if questions[0].mine && questions[0].status == QuestionStatus::Pending)
+    );
+    assert!(
+        matches!(&told[4], Event::RoomChat { messages, .. } if messages[0].sender.as_deref() == Some("Hostess") && messages[0].to == ChatTo::Room)
+    );
+    assert!(matches!(told[5], Event::RoomChatMuted { on: true, .. }));
+
+    // A body not one of the room's is refused.
+    let bad = room
+        .send(
+            "INFO",
+            "Info-Package: fcp-qa\r\n",
+            QA_TYPE,
+            r#"{"op":"nonsense"}"#,
+        )
+        .await;
+    assert!(bad.starts_with("SIP/2.0 400"), "{bad}");
+
     let hangup = {
         let alice = std::sync::Arc::clone(&alice);
         tokio::spawn(async move { alice.hangup(call).await })
@@ -408,7 +637,7 @@ async fn a_room_dialed_with_video_is_offered_a_section_for_its_shared_screen() {
     assert_eq!(header(&invite, "X-FCP-Join"), None, "dialed by number");
     assert_eq!(
         header(&invite, "Recv-Info").as_deref(),
-        Some("fcp-content, fcp-view"),
+        Some("fcp-content, fcp-view, fcp-qa, fcp-chat"),
         "with video, each person's stream is asked for"
     );
     let sdp = body(&invite);
@@ -687,7 +916,7 @@ async fn a_forwarding_room_names_each_stream_and_takes_a_view() {
     room.phone = from;
     assert_eq!(
         header(&invite, "Recv-Info").as_deref(),
-        Some("fcp-content, fcp-view")
+        Some("fcp-content, fcp-view, fcp-qa, fcp-chat")
     );
     let offered = video_sections(body(&invite));
     let pt = vp8_pt(&offered[0]);
