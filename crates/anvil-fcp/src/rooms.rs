@@ -275,6 +275,117 @@ impl RoomHost<'_> {
             .await
             .map(drop)
     }
+
+    // A webinar's room controls (FCP's `docs/WEBINARS.md` §2.6, A7b): what
+    // the call has no words for. One's own hand, questions and chat go in
+    // the call (anvil-core's `room_qa` and `room_chat`).
+
+    /// The webinar's sitting now: its phase, lobby, stream and push.
+    pub async fn webinar(&self) -> Result<serde_json::Value, FcpError> {
+        self.send(reqwest::Method::GET, "/webinar", None).await
+    }
+
+    /// Take the webinar live: the lobby is let in, and it records and
+    /// streams if its meeting says to.
+    pub async fn go_live(&self) -> Result<(), FcpError> {
+        self.send(reqwest::Method::POST, "/webinar/live", None)
+            .await
+            .map(drop)
+    }
+
+    /// End the webinar: everyone in it is released.
+    pub async fn end_webinar(&self) -> Result<(), FcpError> {
+        self.send(reqwest::Method::POST, "/webinar/end", None)
+            .await
+            .map(drop)
+    }
+
+    /// The audience by page: `limit` of them after `cursor`.
+    pub async fn audience(
+        &self,
+        cursor: Option<&str>,
+        limit: u32,
+    ) -> Result<Page<AudienceMember>, FcpError> {
+        let mut rest = format!("/audience?limit={}", limit.clamp(1, 200));
+        if let Some(c) = cursor {
+            // Opaque: whatever it holds, sent as it was given.
+            let encoded: String = c
+                .bytes()
+                .map(|b| match b {
+                    b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'~' => {
+                        (b as char).to_string()
+                    }
+                    _ => format!("%{b:02X}"),
+                })
+                .collect();
+            rest.push_str(&format!("&cursor={encoded}"));
+        }
+        let value = self.send(reqwest::Method::GET, &rest, None).await?;
+        serde_json::from_value(value).map_err(|e| FcpError::Invalid(format!("the audience: {e}")))
+    }
+
+    /// Lower `participant`'s raised hand.
+    pub async fn lower_hand(&self, participant: &str) -> Result<(), FcpError> {
+        let path = format!("/participants/{}/hand", segment(participant)?);
+        self.send(reqwest::Method::DELETE, &path, None)
+            .await
+            .map(drop)
+    }
+
+    /// Lower every raised hand.
+    pub async fn lower_all_hands(&self) -> Result<(), FcpError> {
+        self.send(reqwest::Method::DELETE, "/hands", None)
+            .await
+            .map(drop)
+    }
+
+    /// Bring an attendee to the stage, heard by the room (`true`), or
+    /// send them back to the audience.
+    pub async fn stage(&self, participant: &str, on: bool) -> Result<(), FcpError> {
+        let path = format!("/participants/{}/stage", segment(participant)?);
+        let method = if on {
+            reqwest::Method::POST
+        } else {
+            reqwest::Method::DELETE
+        };
+        self.send(method, &path, None).await.map(drop)
+    }
+
+    /// Mute `participant`'s chat for the rest of the sitting, or unmute it.
+    pub async fn mute_chat(&self, participant: &str, on: bool) -> Result<(), FcpError> {
+        let path = format!("/participants/{}/chat-mute", segment(participant)?);
+        self.send(
+            reqwest::Method::POST,
+            &path,
+            Some(serde_json::json!({ "on": on })),
+        )
+        .await
+        .map(drop)
+    }
+}
+
+/// One of a webinar's audience, as the stage's host lists them.
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize)]
+pub struct AudienceMember {
+    pub participant_id: String,
+    #[serde(default)]
+    pub display_name: Option<String>,
+    #[serde(default)]
+    pub caller_id: Option<String>,
+    /// The registration they joined by.
+    #[serde(default)]
+    pub registrant: Option<String>,
+    /// RFC 3339.
+    pub joined_at: String,
+    /// Since when their hand is up.
+    #[serde(default)]
+    pub hand: Option<String>,
+    /// Waiting in the lobby.
+    #[serde(default)]
+    pub lobby: bool,
+    /// Brought to the stage.
+    #[serde(default)]
+    pub on_stage: bool,
 }
 
 #[cfg(test)]

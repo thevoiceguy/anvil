@@ -1801,3 +1801,197 @@ async fn a_simulcast_camera_reaches_each_viewer_at_the_size_it_asks_for() {
         let _ = anvil.shutdown().await;
     }
 }
+
+/// The next of `call`'s events that `pick` takes, or a panic naming `what`.
+async fn told<T>(
+    events: &mut EventStream,
+    call: CallId,
+    what: &str,
+    pick: impl Fn(&Event) -> Option<T>,
+) -> T {
+    expect(events, Duration::from_secs(15), |e| {
+        let mine = match e {
+            Event::RoomWebinar { call: c, .. }
+            | Event::RoomHand { call: c, .. }
+            | Event::RoomStage { call: c, .. }
+            | Event::RoomQuestions { call: c, .. }
+            | Event::RoomChat { call: c, .. }
+            | Event::RoomChatMuted { call: c, .. } => *c == call,
+            _ => false,
+        };
+        if mine {
+            pick(e)
+        } else {
+            None
+        }
+    })
+    .await
+    .unwrap_or_else(|| panic!("never told {what}"))
+}
+
+/// A webinar on FCP run from two Anvils (FCP's `docs/WEBINARS.md` A7a and
+/// A7b). The owner joins by a host's link, and a guest follows a join link
+/// and is an attendee in the lobby. The host takes it live through
+/// `/me`, and the attendee is let in and told. The attendee raises a hand
+/// in the call, and the host sees it on the roster and in the audience.
+/// The host brings them to the stage and they are told. The attendee
+/// chats, and the host is told. The host mutes their chat, and they are
+/// told. The host ends it.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_webinar_on_fcp_is_run_by_its_host_from_anvil() {
+    use anvil_core::{CallMedia, ChatRequest, ChatTo, QaRequest, RoomJoin, RoomRole, WebinarPhase};
+    use anvil_fcp::JoinRole;
+    let fcp = fcp_or_skip!();
+    let (alice_client, alice_name) = signed_in(&fcp, "webinar-alice").await;
+    let (bob_client, _) = signed_in(&fcp, "webinar-bob").await;
+    let (alice, mut alice_events) = softphone(&alice_client, "127.0.0.74").await;
+    let (bob, mut bob_events) = softphone(&bob_client, "127.0.0.75").await;
+    let domain = alice_client.softphone().await.unwrap().account.domain;
+    let (meeting, room) = fcp
+        .meeting_with(
+            &alice_name,
+            json!({ "kind": "webinar", "video_enabled": false }),
+        )
+        .await;
+    let link = alice_client
+        .join_link(&meeting, JoinRole::Guest, Some("Bob"), None)
+        .await
+        .expect("a join link");
+
+    // In a webinar the owner is its host by a host's link: dialed by number
+    // with no PIN, anyone is an attendee.
+    let host_link = alice_client
+        .join_link(&meeting, JoinRole::Host, Some("Alice"), None)
+        .await
+        .expect("a host's link");
+    let target = format!("sip:{room}@{domain}");
+    let a = alice
+        .join_room(
+            &target,
+            &RoomJoin::from_link(&host_link.link()).expect("the host link's token"),
+            CallMedia::AUDIO,
+        )
+        .await
+        .expect("the owner joins as host");
+    let a = established(&mut alice_events, Some(a)).await;
+    let state = told(&mut alice_events, a, "the host the webinar", |e| match e {
+        Event::RoomWebinar { state, .. } => Some(*state),
+        _ => None,
+    })
+    .await;
+    assert_eq!(state.phase, WebinarPhase::Practice);
+    assert!(
+        matches!(state.role, None | Some(RoomRole::Host)),
+        "{state:?}"
+    );
+
+    let join = RoomJoin::from_link(&link.link()).expect("the link's token");
+    let b = bob
+        .join_room(&target, &join, CallMedia::AUDIO)
+        .await
+        .expect("the guest follows the link");
+    let b = established(&mut bob_events, Some(b)).await;
+    let state = told(&mut bob_events, b, "the attendee the lobby", |e| match e {
+        Event::RoomWebinar { state, .. } => Some(*state),
+        _ => None,
+    })
+    .await;
+    assert!(
+        state.lobby && state.phase == WebinarPhase::Practice,
+        "{state:?}"
+    );
+    assert!(
+        matches!(state.role, None | Some(RoomRole::Attendee)),
+        "{state:?}"
+    );
+
+    // Live: the attendee is let in.
+    let host = alice_client.room_host(&room, None);
+    bob_client
+        .room_host(&room, None)
+        .go_live()
+        .await
+        .expect_err("an attendee does not take it live");
+    host.go_live().await.expect("the host takes it live");
+    told(&mut bob_events, b, "the webinar live", |e| match e {
+        Event::RoomWebinar { state, .. } if state.phase == WebinarPhase::Live && !state.lobby => {
+            Some(())
+        }
+        _ => None,
+    })
+    .await;
+
+    // A hand, in the call: on the host's roster and in the audience.
+    bob.room_qa(b, &QaRequest::Hand { raised: true })
+        .await
+        .expect("the hand goes up");
+    let members = roster_where(&mut alice_events, a, "the attendee's hand", |m| {
+        m.iter().any(|m| m.attendee && m.hand.is_some())
+    })
+    .await;
+    let bob_id = members
+        .iter()
+        .find(|m| m.attendee)
+        .map(|m| m.id.clone())
+        .unwrap();
+    let page = host.audience(None, 50).await.expect("the audience");
+    assert!(
+        page.data
+            .iter()
+            .any(|m| m.participant_id == bob_id && m.hand.is_some()),
+        "{page:?}"
+    );
+
+    // To the stage, and told.
+    host.stage(&bob_id, true)
+        .await
+        .expect("brought to the stage");
+    told(&mut bob_events, b, "the stage", |e| match e {
+        Event::RoomStage { on: true, .. } => Some(()),
+        _ => None,
+    })
+    .await;
+
+    // Chat: posted, seen by the host; then muted, and told.
+    bob.room_chat(
+        b,
+        // A webinar's chat is to the hosts unless its meeting says.
+        &ChatRequest::Post {
+            text: "Hello from the audience".into(),
+            to: ChatTo::Hosts,
+        },
+    )
+    .await
+    .expect("posted");
+    told(
+        &mut alice_events,
+        a,
+        "the attendee's message",
+        |e| match e {
+            Event::RoomChat { messages, .. }
+                if messages.iter().any(|m| m.text == "Hello from the audience") =>
+            {
+                Some(())
+            }
+            _ => None,
+        },
+    )
+    .await;
+    host.mute_chat(&bob_id, true).await.expect("muted");
+    told(&mut bob_events, b, "the chat muted", |e| match e {
+        Event::RoomChatMuted { on: true, .. } => Some(()),
+        _ => None,
+    })
+    .await;
+
+    host.end_webinar().await.expect("ended");
+    told(&mut bob_events, b, "the webinar ended", |e| match e {
+        Event::RoomWebinar { state, .. } if state.phase == WebinarPhase::Ended => Some(()),
+        _ => None,
+    })
+    .await;
+    let _ = alice.hangup(a).await;
+    let _ = bob.hangup(b).await;
+    let _ = alice.shutdown().await;
+    let _ = bob.shutdown().await;
+}
