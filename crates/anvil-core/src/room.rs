@@ -166,6 +166,13 @@ pub struct RoomMember {
     /// A host has put the spotlight on them: a layout of our own shows
     /// them large.
     pub spotlight: bool,
+    /// A webinar's panelist, or an attendee brought to the stage.
+    pub panelist: bool,
+    /// A webinar's attendee, listed for their raised hand (the stage sees
+    /// every one; an attendee sees their own).
+    pub attendee: bool,
+    /// Their hand is up, since when (RFC 3339).
+    pub hand: Option<String>,
 }
 
 /// The SSRCs a forwarding room sends a member to us on (RFC 4575's
@@ -325,6 +332,8 @@ pub(crate) struct RosterDoc {
     pub version: u32,
     /// Each user listed: in full, or `None` when they left.
     pub users: Vec<(String, Option<(RoomMember, MemberSources)>)>,
+    /// A webinar's audience, by count (`fcp:audience`), when it says.
+    pub audience: Option<u64>,
 }
 
 /// What applying a document did.
@@ -345,6 +354,7 @@ pub(crate) struct Roster {
     sources: BTreeMap<String, MemberSources>,
     version: Option<u32>,
     speaker: Option<String>,
+    audience: Option<u64>,
 }
 
 impl Roster {
@@ -360,6 +370,12 @@ impl Roster {
             (false, _) => {}
         }
         self.version = Some(doc.version);
+        if doc.full {
+            self.audience = None;
+        }
+        if doc.audience.is_some() {
+            self.audience = doc.audience;
+        }
         for (id, member) in doc.users {
             match member {
                 Some((m, src)) => {
@@ -401,6 +417,11 @@ impl Roster {
 
     pub(crate) fn speaker(&self) -> Option<String> {
         self.speaker.clone()
+    }
+
+    /// A webinar's audience by count, when the room says it.
+    pub(crate) fn audience(&self) -> Option<u64> {
+        self.audience
     }
 
     /// Every SSRC the roster names: whose, and whether it is the speaker
@@ -449,6 +470,9 @@ struct UserBuild {
     presenting: bool,
     spotlight: bool,
     paused: bool,
+    panelist: bool,
+    attendee: bool,
+    hand: Option<String>,
     sources: MemberSources,
     /// The media element being read.
     media: Option<MediaBuild>,
@@ -480,6 +504,9 @@ impl UserBuild {
             presenting: self.presenting,
             paused: self.paused,
             spotlight: self.spotlight,
+            panelist: self.panelist,
+            attendee: self.attendee,
+            hand: self.hand,
         };
         (self.id, Some((member, self.sources)))
     }
@@ -512,6 +539,7 @@ pub(crate) fn parse_roster(xml: &str) -> Option<RosterDoc> {
                             full: attr("state").as_deref() != Some("partial"),
                             version: attr("version")?.trim().parse().ok()?,
                             users: Vec::new(),
+                            audience: None,
                         });
                     }
                     "user" if path.last().map(String::as_str) == Some("users") => {
@@ -576,6 +604,13 @@ fn end(
 ) {
     let parent = path.last().map(String::as_str);
     let value = text.trim();
+    // The audience is the conference's, outside any user.
+    if name == "audience" && parent == Some("conference-state") {
+        if let Some(d) = doc.as_mut() {
+            d.audience = value.parse().ok();
+        }
+        return;
+    }
     let Some(u) = user.as_mut() else {
         return;
     };
@@ -586,7 +621,11 @@ fn end(
             }
         }
         ("display-text", Some("user")) => u.name = value.to_string(),
-        ("entry", Some("roles")) => u.host |= value.eq_ignore_ascii_case("host"),
+        ("entry", Some("roles")) => {
+            u.host |= value.eq_ignore_ascii_case("host");
+            u.panelist |= value.eq_ignore_ascii_case("panelist");
+            u.attendee |= value.eq_ignore_ascii_case("attendee");
+        }
         ("type", Some("media")) => {
             if let Some(m) = u.media.as_mut() {
                 m.kind = value.to_ascii_lowercase();
@@ -652,6 +691,7 @@ fn end(
         ("speaking", _) => u.speaking = value.eq_ignore_ascii_case("true"),
         ("presenting", _) => u.presenting = value.eq_ignore_ascii_case("true"),
         ("spotlight", _) => u.spotlight = value.eq_ignore_ascii_case("true"),
+        ("hand", _) if !value.is_empty() => u.hand = Some(value.to_string()),
         _ => {}
     }
 }
@@ -702,6 +742,15 @@ pub(crate) fn parse_floor(body: &[u8]) -> Option<FloorNotice> {
 
 /// Whether an INFO is the floor's: its package, or (from a room that
 /// does not name one) its type.
+/// Whether an INFO is of `package` (its `Info-Package`).
+pub(crate) fn info_package_is(request: &sip_core::Request, package: &str) -> bool {
+    request
+        .headers()
+        .get("Info-Package")
+        .map(|p| p.split(';').next().unwrap_or_default().trim().to_string())
+        .is_some_and(|p| p.eq_ignore_ascii_case(package))
+}
+
 pub(crate) fn is_floor_info(request: &sip_core::Request) -> bool {
     let package = request
         .headers()
@@ -1062,6 +1111,51 @@ mod tests {
         assert!(roster.members().is_empty());
         assert!(parse_roster("not xml <").is_none());
         assert!(parse_roster("<presence entity=\"x\"/>").is_none());
+    }
+
+    #[test]
+    fn a_webinar_s_roster_counts_its_audience_and_lists_raised_hands() {
+        let full = r#"<?xml version="1.0" encoding="UTF-8"?>
+<conference-info xmlns="urn:ietf:params:xml:ns:conference-info" xmlns:fcp="urn:fcp:conference-info" entity="sip:8000@fcp" state="full" version="1">
+  <conference-state>
+    <user-count>3</user-count>
+    <active>true</active>
+    <fcp:audience>1200</fcp:audience>
+  </conference-state>
+  <users>
+    <user entity="sip:p-host@fcp" state="full">
+      <display-text>Hostess</display-text>
+      <roles><entry>host</entry></roles>
+    </user>
+    <user entity="sip:p-pan@fcp" state="full">
+      <display-text>Pat</display-text>
+      <roles><entry>panelist</entry></roles>
+    </user>
+    <user entity="sip:p-dan@fcp" state="full">
+      <display-text>Dan</display-text>
+      <roles><entry>attendee</entry></roles>
+      <fcp:hand>2026-11-06T21:22:03.456Z</fcp:hand>
+    </user>
+  </users>
+</conference-info>"#;
+        let mut roster = Roster::default();
+        assert_eq!(roster.apply(parse_roster(full).unwrap()), Applied::Changed);
+        assert_eq!(roster.audience(), Some(1200));
+        let members = roster.members();
+        let by = |id: &str| members.iter().find(|m| m.id == id).unwrap().clone();
+        assert!(by("p-host").host && by("p-host").hand.is_none());
+        assert!(by("p-pan").panelist && !by("p-pan").attendee);
+        let dan = by("p-dan");
+        assert!(dan.attendee && !dan.host);
+        assert_eq!(dan.hand.as_deref(), Some("2026-11-06T21:22:03.456Z"));
+
+        // The audience's count alone, as the room coalesces it.
+        let count = r#"<conference-info xmlns="urn:ietf:params:xml:ns:conference-info" xmlns:fcp="urn:fcp:conference-info" entity="sip:8000@fcp" state="partial" version="2">
+  <conference-state><fcp:audience>1350</fcp:audience></conference-state>
+</conference-info>"#;
+        assert_eq!(roster.apply(parse_roster(count).unwrap()), Applied::Changed);
+        assert_eq!(roster.audience(), Some(1350));
+        assert_eq!(roster.members().len(), 3, "the stage is unchanged");
     }
 
     #[test]

@@ -290,6 +290,43 @@ pub enum Event {
         /// names them): a layout of our own, asked for with
         /// [`set_room_view`](crate::Anvil::set_room_view), can be drawn.
         forwards: bool,
+        /// A webinar's audience by count, beside the stage it lists.
+        audience: Option<u64>,
+    },
+    /// A webinar's phase as the room tells it to `call`: practice, live
+    /// or ended, whether we wait in its lobby, and who we are.
+    RoomWebinar {
+        call: CallId,
+        state: crate::audience::WebinarState,
+    },
+    /// Our hand in the room `call` is in is up, or down (we, a host, or
+    /// our being brought to the stage lowered it).
+    RoomHand {
+        call: CallId,
+        raised: bool,
+    },
+    /// We were brought to the stage of the room `call` is in, and are
+    /// heard; or sent back to the audience.
+    RoomStage {
+        call: CallId,
+        on: bool,
+    },
+    /// The questions we may see in the room `call` is in, as they are
+    /// now: those that changed, and ones dismissed to be dropped.
+    RoomQuestions {
+        call: CallId,
+        questions: Vec<crate::audience::Question>,
+    },
+    /// Chat in the room `call` is in: new messages, the backlog on
+    /// joining, and deleted ones to drop.
+    RoomChat {
+        call: CallId,
+        messages: Vec<crate::audience::ChatMessage>,
+    },
+    /// Our chat in the room `call` is in was muted by a host, or unmuted.
+    RoomChatMuted {
+        call: CallId,
+        on: bool,
     },
     /// A room that forwards each person's stream: whose each of `call`'s
     /// incoming camera streams is, sent whole whenever that changes (a

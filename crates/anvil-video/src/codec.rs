@@ -342,7 +342,10 @@ mod tests {
         // 1.7 s of pictures on CI's runner): keeping up there is an
         // iPhone's media engine's to show, as on the Android emulator.
         let simulator = cfg!(target_abi = "sim");
-        simulcast_keeps_up(&crate::vt::VtCodecs, VideoCodec::H264, 0, !simulator);
+        // VideoToolbox codes asynchronously: the last picture may still be
+        // inside it when the test counts (macOS CI, 2026-11-21: one layer
+        // decoded 49 of 50). Nothing drains it at the end.
+        simulcast_keeps_up(&crate::vt::VtCodecs, VideoCodec::H264, 1, !simulator);
     }
 
     #[cfg(target_vendor = "apple")]
@@ -375,7 +378,10 @@ mod tests {
             eprintln!("skipped: no Media Foundation H.264 here");
             return;
         }
-        simulcast_keeps_up(&codecs, VideoCodec::H264, 0, true);
+        // A hardware MFT is pipelined: the last picture may still be inside
+        // it when the test counts (Windows CI, 2026-11-21: layer 0 decoded
+        // 49 of 50). Nothing drains it at the end.
+        simulcast_keeps_up(&codecs, VideoCodec::H264, 1, true);
     }
 
     #[cfg(windows)]

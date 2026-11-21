@@ -10,6 +10,11 @@
 // Re-enable when the public API stabilises.
 // #![warn(missing_docs)]
 
+pub mod audience;
+pub use audience::{
+    ChatMessage, ChatRequest, ChatTo, QaRequest, Question, QuestionStatus, RoomRole, WebinarPhase,
+    WebinarState,
+};
 pub mod audio;
 pub mod brand;
 pub(crate) mod call;
@@ -907,10 +912,23 @@ impl Anvil {
             if let Some(token) = &room.token {
                 extra.push((room::JOIN_HEADER, token.clone()));
             }
+            // The audience's voice and chat in every room (FCP's
+            // `docs/WEBINARS.md` §2.5).
             let packages = if call_video.is_some() {
-                format!("{}, {}", room::INFO_PACKAGE, room::VIEW_PACKAGE)
+                format!(
+                    "{}, {}, {}, {}",
+                    room::INFO_PACKAGE,
+                    room::VIEW_PACKAGE,
+                    audience::QA_PACKAGE,
+                    audience::CHAT_PACKAGE
+                )
             } else {
-                room::INFO_PACKAGE.to_string()
+                format!(
+                    "{}, {}, {}",
+                    room::INFO_PACKAGE,
+                    audience::QA_PACKAGE,
+                    audience::CHAT_PACKAGE
+                )
             };
             extra.push(("Recv-Info", packages));
         }
@@ -1170,6 +1188,70 @@ impl Anvil {
                 "not in a room that forwards each person's stream".into(),
             ));
         }
+        self.send_room_info(
+            call,
+            room::VIEW_PACKAGE,
+            room::VIEW_TYPE,
+            &view.body(),
+            "view",
+        )
+        .await
+    }
+
+    /// Say something to the room `call` is in in `fcp-qa` (FCP's
+    /// `docs/WEBINARS.md` §2.5): our hand, a question or an upvote; and
+    /// for the stage, publishing, answering or dismissing one. What the
+    /// room makes of it follows in [`Event::RoomHand`] and
+    /// [`Event::RoomQuestions`]. Fails on a call not in a room, or when
+    /// the room refuses (a hand in a meeting, questions turned off, one
+    /// not of the stage moderating).
+    pub async fn room_qa(&self, call: CallId, request: &QaRequest) -> Result<(), AnvilError> {
+        self.require_room(call)?;
+        self.send_room_info(
+            call,
+            audience::QA_PACKAGE,
+            audience::QA_TYPE,
+            &request.body(),
+            "fcp-qa",
+        )
+        .await
+    }
+
+    /// Say something to the room `call` is in in `fcp-chat`: a post to the
+    /// room or its hosts; and for the stage, deleting a message or muting
+    /// someone's chat. The messages follow in [`Event::RoomChat`]. Fails on
+    /// a call not in a room, or when the room refuses (chat off, ours
+    /// muted, not of the stage moderating).
+    pub async fn room_chat(&self, call: CallId, request: &ChatRequest) -> Result<(), AnvilError> {
+        self.require_room(call)?;
+        self.send_room_info(
+            call,
+            audience::CHAT_PACKAGE,
+            audience::CHAT_TYPE,
+            &request.body(),
+            "fcp-chat",
+        )
+        .await
+    }
+
+    fn require_room(&self, call: CallId) -> Result<(), AnvilError> {
+        if self.calls.get(&call).is_some_and(|e| e.room.is_some()) {
+            Ok(())
+        } else {
+            Err(AnvilError::Config(format!("{call:?} is not in a room")))
+        }
+    }
+
+    /// An INFO of `package` in `call`'s dialog; the room's refusal an error
+    /// naming `what`.
+    async fn send_room_info(
+        &self,
+        call: CallId,
+        package: &str,
+        content_type: &str,
+        body: &[u8],
+        what: &str,
+    ) -> Result<(), AnvilError> {
         let mut dialog = call_dialog(&self.calls, call)
             .await
             .ok_or_else(|| AnvilError::Config(format!("no dialog for {call:?}")))?;
@@ -1177,10 +1259,10 @@ impl Anvil {
             &dialog,
             sip_core::Method::Info,
             &[
-                ("Info-Package", room::VIEW_PACKAGE.to_string()),
-                ("Content-Type", room::VIEW_TYPE.to_string()),
+                ("Info-Package", package.to_string()),
+                ("Content-Type", content_type.to_string()),
             ],
-            &view.body(),
+            body,
         )
         .map_err(AnvilError::Transport)?;
         let result = self
@@ -1191,11 +1273,11 @@ impl Anvil {
         match result {
             Ok(resp) if (200..300).contains(&resp.code()) => Ok(()),
             Ok(resp) => Err(AnvilError::Transport(format!(
-                "view refused: {} {}",
+                "{what} refused: {} {}",
                 resp.code(),
                 resp.reason()
             ))),
-            Err(e) => Err(AnvilError::Transport(format!("view INFO: {e}"))),
+            Err(e) => Err(AnvilError::Transport(format!("{what} INFO: {e}"))),
         }
     }
 
@@ -2327,9 +2409,28 @@ async fn dispatch_request(
             let resp = UserAgentServer::create_response(&request, code, reason);
             handle.send_final(resp).await;
         }
+        // The audience's voice and chat (FCP's `fcp-qa` and `fcp-chat`).
+        "INFO" if room::info_package_is(&request, audience::QA_PACKAGE) => {
+            let (code, reason) = room_qa(handler, &request).await;
+            let resp = UserAgentServer::create_response(&request, code, reason);
+            handle.send_final(resp).await;
+        }
+        "INFO" if room::info_package_is(&request, audience::CHAT_PACKAGE) => {
+            let (code, reason) = room_chat(handler, &request).await;
+            let resp = UserAgentServer::create_response(&request, code, reason);
+            handle.send_final(resp).await;
+        }
         "INFO" if request.headers().get("Info-Package").is_some() => {
             let mut resp = UserAgentServer::create_response(&request, 469, "Bad Info Package");
-            let _ = resp.headers_mut().push("Recv-Info", room::INFO_PACKAGE);
+            let _ = resp.headers_mut().push(
+                "Recv-Info",
+                format!(
+                    "{}, {}, {}",
+                    room::INFO_PACKAGE,
+                    audience::QA_PACKAGE,
+                    audience::CHAT_PACKAGE
+                ),
+            );
             handle.send_final(resp).await;
         }
         _ => {
@@ -2380,6 +2481,7 @@ async fn room_notify(
                         members: room.roster.members(),
                         speaker: room.roster.speaker(),
                         forwards: room.forwards,
+                        audience: room.roster.audience(),
                     });
                     if let Some(streams) = room.owners.named(&room.roster) {
                         told.push(Event::RoomStreams { call, streams });
@@ -2402,6 +2504,46 @@ async fn room_notify(
     for event in told {
         let _ = handler.events.send(event).await;
     }
+    (200, "OK")
+}
+
+/// An `fcp-qa` INFO: told as what it says.
+async fn room_qa(
+    handler: &uas::AnvilUasHandler,
+    request: &sip_core::Request,
+) -> (u16, &'static str) {
+    let Some(call) = room_call_of(handler, request) else {
+        return (481, "Call/Transaction Does Not Exist");
+    };
+    let Some(notice) = audience::parse_qa(request.body()) else {
+        return (400, "Bad Request");
+    };
+    let event = match notice {
+        audience::QaNotice::Hand { raised } => Event::RoomHand { call, raised },
+        audience::QaNotice::Stage { on } => Event::RoomStage { call, on },
+        audience::QaNotice::Questions(questions) => Event::RoomQuestions { call, questions },
+        audience::QaNotice::Webinar(state) => Event::RoomWebinar { call, state },
+    };
+    let _ = handler.events.send(event).await;
+    (200, "OK")
+}
+
+/// An `fcp-chat` INFO: told as what it says.
+async fn room_chat(
+    handler: &uas::AnvilUasHandler,
+    request: &sip_core::Request,
+) -> (u16, &'static str) {
+    let Some(call) = room_call_of(handler, request) else {
+        return (481, "Call/Transaction Does Not Exist");
+    };
+    let Some(notice) = audience::parse_chat(request.body()) else {
+        return (400, "Bad Request");
+    };
+    let event = match notice {
+        audience::ChatNotice::Messages(messages) => Event::RoomChat { call, messages },
+        audience::ChatNotice::Muted { on } => Event::RoomChatMuted { call, on },
+    };
+    let _ = handler.events.send(event).await;
     (200, "OK")
 }
 

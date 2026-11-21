@@ -368,6 +368,7 @@ pub(crate) fn on_event(inner: &Arc<Inner>, event: &Event) -> bool {
             members,
             speaker,
             forwards,
+            ..
         } if in_room(call.0) => {
             let members: Vec<RoomMemberView> = members.iter().map(member_view).collect();
             let presenter = members
