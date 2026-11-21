@@ -7,8 +7,10 @@ use std::sync::Arc;
 use anvil_core::{Event, FloorState, RoomAudio, RoomJoin, RoomMember};
 use anvil_fcp::{JoinRole, RoomLayout};
 
-use crate::command::RoomAction;
-use crate::state::{CallView, Change, Direction, RoomMemberView, RoomStreamView, RoomView};
+use crate::command::{AudienceAction, RoomAction};
+use crate::state::{
+    CallView, Change, ChatItem, Direction, QuestionItem, RoomMemberView, RoomStreamView, RoomView,
+};
 use crate::{update_call, CallState, Inner, Phone, PhoneError};
 
 /// What `join` was given: a room's number, or a join link.
@@ -227,6 +229,65 @@ impl Phone {
             RoomAction::MemberVideo { member, on } => host.participant_video(&member, on).await?,
             RoomAction::Remove { member } => host.remove(&member).await?,
             RoomAction::StopShare => host.stop_content().await?,
+            RoomAction::GoLive => host.go_live().await?,
+            RoomAction::EndWebinar => host.end_webinar().await?,
+            RoomAction::LowerHand { member } => host.lower_hand(&member).await?,
+            RoomAction::LowerAllHands => host.lower_all_hands().await?,
+            RoomAction::Stage { member, on } => host.stage(&member, on).await?,
+            RoomAction::MuteChat { member, on } => host.mute_chat(&member, on).await?,
+        }
+        Ok(())
+    }
+
+    /// Our voice in the room `call` is in: an INFO in the call. The room
+    /// answers in what it tells us next (our hand, the questions, chat).
+    pub(crate) async fn audience(
+        &self,
+        call: Option<u64>,
+        action: AudienceAction,
+    ) -> Result<(), PhoneError> {
+        use anvil_core::{ChatRequest, ChatTo, QaRequest};
+        let id = self.pick(call, "no call in a room", |c| {
+            c.room.is_some() && c.state == CallState::Connected
+        })?;
+        let anvil = self.anvil().await?;
+        let call = anvil_core::CallId(id);
+        match action {
+            AudienceAction::Hand { raised } => {
+                anvil.room_qa(call, &QaRequest::Hand { raised }).await?
+            }
+            AudienceAction::Ask { text, anonymous } => {
+                anvil
+                    .room_qa(call, &QaRequest::Ask { text, anonymous })
+                    .await?
+            }
+            AudienceAction::Upvote { id, on } => {
+                anvil.room_qa(call, &QaRequest::Upvote { id, on }).await?
+            }
+            AudienceAction::Publish { id } => {
+                anvil.room_qa(call, &QaRequest::Publish { id }).await?
+            }
+            AudienceAction::Answer { id, text, live } => {
+                anvil
+                    .room_qa(call, &QaRequest::Answer { id, text, live })
+                    .await?
+            }
+            AudienceAction::Dismiss { id } => {
+                anvil.room_qa(call, &QaRequest::Dismiss { id }).await?
+            }
+            AudienceAction::Chat { text, to_hosts } => {
+                let to = if to_hosts {
+                    ChatTo::Hosts
+                } else {
+                    ChatTo::Room
+                };
+                anvil
+                    .room_chat(call, &ChatRequest::Post { text, to })
+                    .await?
+            }
+            AudienceAction::DeleteMessage { id } => {
+                anvil.room_chat(call, &ChatRequest::Delete { id }).await?
+            }
         }
         Ok(())
     }
@@ -336,7 +397,97 @@ fn member_view(m: &RoomMember) -> RoomMemberView {
         presenting: m.presenting,
         paused: m.paused,
         spotlight: m.spotlight,
+        panelist: m.panelist,
+        attendee: m.attendee,
+        hand: m.hand.clone(),
     }
+}
+
+/// The most chat a call keeps.
+const CHAT_KEPT: usize = 500;
+
+fn question_item(q: &anvil_core::Question) -> QuestionItem {
+    QuestionItem {
+        id: q.id.clone(),
+        text: q.text.clone(),
+        asker: q.asker.clone(),
+        mine: q.mine,
+        status: match q.status {
+            anvil_core::QuestionStatus::Pending => "pending",
+            anvil_core::QuestionStatus::Answered => "answered",
+            anvil_core::QuestionStatus::Dismissed => "dismissed",
+        }
+        .to_string(),
+        published: q.published,
+        upvotes: q.upvotes,
+        upvoted: q.upvoted,
+        answer: q.answer.clone(),
+        answered_live: q.answered_live,
+        asked_at: q.asked_at.clone(),
+    }
+}
+
+/// The questions the room told merged into what we had: changed ones
+/// replaced, new ones added, dismissed ones dropped.
+fn merge_questions(kept: &mut Vec<QuestionItem>, told: &[anvil_core::Question]) {
+    for q in told {
+        let at = kept.iter().position(|k| k.id == q.id);
+        match (at, q.status == anvil_core::QuestionStatus::Dismissed) {
+            (Some(i), true) => {
+                kept.remove(i);
+            }
+            (Some(i), false) => kept[i] = question_item(q),
+            (None, false) => kept.push(question_item(q)),
+            (None, true) => {}
+        }
+    }
+}
+
+/// Chat the room told merged in: new messages added, deleted ones dropped,
+/// the oldest let go past [`CHAT_KEPT`].
+fn merge_chat(kept: &mut Vec<ChatItem>, told: &[anvil_core::ChatMessage]) {
+    for m in told {
+        let at = kept.iter().position(|k| k.id == m.id);
+        if m.deleted {
+            if let Some(i) = at {
+                kept.remove(i);
+            }
+            continue;
+        }
+        let item = ChatItem {
+            id: m.id.clone(),
+            text: m.text.clone(),
+            sender: m.sender.clone(),
+            sender_id: m.sender_id.clone(),
+            from_stage: m.sender_moderates,
+            mine: m.mine,
+            to_hosts: m.to == anvil_core::ChatTo::Hosts,
+            sent_at: m.sent_at.clone(),
+        };
+        match at {
+            Some(i) => kept[i] = item,
+            None => kept.push(item),
+        }
+    }
+    if kept.len() > CHAT_KEPT {
+        let over = kept.len() - CHAT_KEPT;
+        kept.drain(..over);
+    }
+}
+
+/// An attendee is not heard until brought to the stage: the microphone is
+/// muted in the app while they listen, and theirs to unmute once on it.
+fn hold_the_microphone(inner: &Arc<Inner>, call: u64, muted: bool) {
+    let inner2 = Arc::clone(inner);
+    tokio::spawn(async move {
+        let anvil = inner2.anvil.read().await;
+        if let Some(anvil) = anvil.as_ref() {
+            match anvil.mute(anvil_core::CallId(call), muted) {
+                Ok(()) => update_call(&inner2, call, |c| c.muted = muted, || crate::outgoing(call)),
+                Err(e) => tracing::info!(call, %e, "the microphone was not muted for the audience"),
+            }
+        }
+    });
 }
 
 /// Tell the room our share is over (a re-INVITE receiving only), off the
@@ -368,7 +519,7 @@ pub(crate) fn on_event(inner: &Arc<Inner>, event: &Event) -> bool {
             members,
             speaker,
             forwards,
-            ..
+            audience,
         } if in_room(call.0) => {
             let members: Vec<RoomMemberView> = members.iter().map(member_view).collect();
             let presenter = members
@@ -384,6 +535,7 @@ pub(crate) fn on_event(inner: &Arc<Inner>, event: &Event) -> bool {
                         r.speaker = speaker.clone();
                         r.presenter = presenter;
                         r.forwards = *forwards;
+                        r.audience = *audience;
                     }
                 },
                 || crate::outgoing(call.0),
@@ -448,7 +600,120 @@ pub(crate) fn on_event(inner: &Arc<Inner>, event: &Event) -> bool {
             },
             || crate::outgoing(call.0),
         ),
-        Event::RoomRoster { .. } | Event::RoomFloor { .. } | Event::RoomStreams { .. } => {}
+        Event::RoomWebinar { call, state } if in_room(call.0) => {
+            let role = state.role.map(|r| {
+                match r {
+                    anvil_core::RoomRole::Host => "host",
+                    anvil_core::RoomRole::Panelist => "panelist",
+                    anvil_core::RoomRole::Attendee => "attendee",
+                    anvil_core::RoomRole::Guest => "guest",
+                }
+                .to_string()
+            });
+            let phase = match state.phase {
+                anvil_core::WebinarPhase::Practice => "practice",
+                anvil_core::WebinarPhase::Live => "live",
+                anvil_core::WebinarPhase::Ended => "ended",
+            };
+            // Newly an attendee off the stage: not heard, so muted.
+            let mut mute = false;
+            update_call(
+                inner,
+                call.0,
+                |c| {
+                    if let Some(r) = c.room.as_mut() {
+                        let was = r.role.clone();
+                        r.webinar = Some(phase.to_string());
+                        r.lobby = state.lobby;
+                        if role.is_some() {
+                            r.role = role.clone();
+                        }
+                        if role.as_deref() == Some("host") {
+                            r.host = true;
+                        }
+                        mute = r.role.as_deref() == Some("attendee")
+                            && was.as_deref() != Some("attendee")
+                            && !r.on_stage
+                            && !c.muted;
+                    }
+                },
+                || crate::outgoing(call.0),
+            );
+            if mute {
+                hold_the_microphone(inner, call.0, true);
+            }
+        }
+        Event::RoomHand { call, raised } if in_room(call.0) => update_call(
+            inner,
+            call.0,
+            |c| {
+                if let Some(r) = c.room.as_mut() {
+                    r.hand = *raised;
+                }
+            },
+            || crate::outgoing(call.0),
+        ),
+        Event::RoomStage { call, on } if in_room(call.0) => {
+            let mut attendee = false;
+            update_call(
+                inner,
+                call.0,
+                |c| {
+                    if let Some(r) = c.room.as_mut() {
+                        r.on_stage = *on;
+                        if *on {
+                            r.hand = false;
+                        }
+                        attendee = r.role.as_deref() == Some("attendee");
+                    }
+                },
+                || crate::outgoing(call.0),
+            );
+            // Sent back to the audience: not heard again, so muted. On the
+            // stage the microphone is the person's to unmute.
+            if attendee && !*on {
+                hold_the_microphone(inner, call.0, true);
+            }
+        }
+        Event::RoomQuestions { call, questions } if in_room(call.0) => update_call(
+            inner,
+            call.0,
+            |c| {
+                if let Some(r) = c.room.as_mut() {
+                    merge_questions(&mut r.questions, questions);
+                }
+            },
+            || crate::outgoing(call.0),
+        ),
+        Event::RoomChat { call, messages } if in_room(call.0) => update_call(
+            inner,
+            call.0,
+            |c| {
+                if let Some(r) = c.room.as_mut() {
+                    merge_chat(&mut r.chat, messages);
+                }
+            },
+            || crate::outgoing(call.0),
+        ),
+        Event::RoomChatMuted { call, on } if in_room(call.0) => update_call(
+            inner,
+            call.0,
+            |c| {
+                if let Some(r) = c.room.as_mut() {
+                    r.chat_muted = *on;
+                }
+            },
+            || crate::outgoing(call.0),
+        ),
+        Event::RoomRoster { .. }
+        | Event::RoomFloor { .. }
+        | Event::RoomStreams { .. }
+        | Event::RoomWebinar { .. }
+        | Event::RoomHand { .. }
+        | Event::RoomStage { .. }
+        | Event::RoomQuestions { .. }
+        | Event::RoomChat { .. }
+        | Event::RoomChatMuted { .. } => {}
         _ => return false,
     }
     true
@@ -519,6 +784,69 @@ mod tests {
             [("a".into(), 720, true)]
         );
         assert_eq!(view_of(&[], false, None), anvil_core::RoomView::default());
+    }
+
+    fn question(
+        id: &str,
+        status: anvil_core::QuestionStatus,
+        upvotes: u32,
+    ) -> anvil_core::Question {
+        serde_json::from_value(serde_json::json!({
+            "id": id, "text": format!("Question {id}"), "asker": null, "mine": false,
+            "status": match status {
+                anvil_core::QuestionStatus::Pending => "pending",
+                anvil_core::QuestionStatus::Answered => "answered",
+                anvil_core::QuestionStatus::Dismissed => "dismissed",
+            },
+            "published": true, "upvotes": upvotes, "upvoted": false, "answer": null,
+            "answered_live": false, "asked_at": "2026-11-21T10:00:00.000Z"
+        }))
+        .unwrap()
+    }
+
+    fn message(id: &str, deleted: bool) -> anvil_core::ChatMessage {
+        serde_json::from_value(serde_json::json!({
+            "id": id, "text": if deleted { "" } else { "hi" }, "sender": "Ann",
+            "sender_id": "p-1", "sender_moderates": false, "mine": false,
+            "to": "hosts", "deleted": deleted, "sent_at": "2026-11-21T10:00:00.000Z"
+        }))
+        .unwrap()
+    }
+
+    #[test]
+    fn questions_the_room_tells_are_merged_and_dismissed_ones_dropped() {
+        use anvil_core::QuestionStatus::*;
+        let mut kept = Vec::new();
+        merge_questions(
+            &mut kept,
+            &[question("q-1", Pending, 0), question("q-2", Pending, 1)],
+        );
+        assert_eq!(kept.len(), 2);
+        merge_questions(&mut kept, &[question("q-1", Answered, 4)]);
+        assert_eq!((kept[0].status.as_str(), kept[0].upvotes), ("answered", 4));
+        merge_questions(
+            &mut kept,
+            &[question("q-2", Dismissed, 1), question("q-3", Dismissed, 0)],
+        );
+        assert_eq!(
+            kept.iter().map(|q| q.id.as_str()).collect::<Vec<_>>(),
+            ["q-1"]
+        );
+    }
+
+    #[test]
+    fn chat_is_merged_deleted_messages_dropped_and_the_oldest_let_go() {
+        let mut kept = Vec::new();
+        merge_chat(&mut kept, &[message("m-1", false), message("m-2", false)]);
+        assert!(kept[0].to_hosts && kept[0].sender.as_deref() == Some("Ann"));
+        merge_chat(&mut kept, &[message("m-1", true)]);
+        assert_eq!(kept.len(), 1);
+        let many: Vec<_> = (0..CHAT_KEPT + 10)
+            .map(|i| message(&format!("x-{i}"), false))
+            .collect();
+        merge_chat(&mut kept, &many);
+        assert_eq!(kept.len(), CHAT_KEPT);
+        assert_eq!(kept.last().unwrap().id, format!("x-{}", CHAT_KEPT + 9));
     }
 
     #[test]

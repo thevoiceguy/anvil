@@ -200,6 +200,78 @@ pub struct RoomView {
     /// forwards.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub streams: Vec<RoomStreamView>,
+    /// Who we are in it, as the room says: `host`, `panelist`,
+    /// `attendee` or `guest` (FCP's `docs/WEBINARS.md` A7).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub role: Option<String>,
+    /// A webinar's phase, `practice`, `live` or `ended`; `None` in a
+    /// meeting.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub webinar: Option<String>,
+    /// We wait in the webinar's lobby.
+    #[serde(default)]
+    pub lobby: bool,
+    /// Our hand is up.
+    #[serde(default)]
+    pub hand: bool,
+    /// An attendee brought to the stage: heard by the room.
+    #[serde(default)]
+    pub on_stage: bool,
+    /// A webinar's audience by count.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub audience: Option<u64>,
+    /// The questions we may see, oldest first.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub questions: Vec<QuestionItem>,
+    /// The chat we may see, oldest first (the last 500).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub chat: Vec<ChatItem>,
+    /// Our chat is muted for the sitting.
+    #[serde(default)]
+    pub chat_muted: bool,
+}
+
+/// A question as the room shows it to us.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct QuestionItem {
+    pub id: String,
+    pub text: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub asker: Option<String>,
+    #[serde(default)]
+    pub mine: bool,
+    /// `pending` or `answered`.
+    pub status: String,
+    #[serde(default)]
+    pub published: bool,
+    #[serde(default)]
+    pub upvotes: u32,
+    #[serde(default)]
+    pub upvoted: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub answer: Option<String>,
+    #[serde(default)]
+    pub answered_live: bool,
+    pub asked_at: String,
+}
+
+/// A chat message as the room shows it to us.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ChatItem {
+    pub id: String,
+    pub text: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub sender: Option<String>,
+    pub sender_id: String,
+    /// Sent by a host or panelist.
+    #[serde(default)]
+    pub from_stage: bool,
+    #[serde(default)]
+    pub mine: bool,
+    /// To the hosts and panelists alone.
+    #[serde(default)]
+    pub to_hosts: bool,
+    pub sent_at: String,
 }
 
 /// One incoming camera stream of a room that forwards: its tile, and
@@ -239,6 +311,15 @@ pub struct RoomMemberView {
     /// A host's spotlight is on them.
     #[serde(default)]
     pub spotlight: bool,
+    /// A webinar's panelist, or an attendee brought to the stage.
+    #[serde(default)]
+    pub panelist: bool,
+    /// A webinar's attendee, listed for a raised hand.
+    #[serde(default)]
+    pub attendee: bool,
+    /// Their hand is up, since when.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub hand: Option<String>,
 }
 
 /// A test of this device's audio, under way.

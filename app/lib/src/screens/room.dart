@@ -10,6 +10,7 @@ import '../../l10n/app_localizations.dart';
 import '../phone/phone_api.dart';
 import '../phone/phone_model.dart';
 import 'contacts.dart';
+import 'webinar.dart';
 
 /// The room a call is in: who speaks or shares, the people, and (for a
 /// host) the room's controls.
@@ -41,6 +42,7 @@ class RoomPanel extends StatelessWidget {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
+            if (room.isWebinar) WebinarBanner(model: model, call: call),
             if (room.presenter case final presenter?)
               ListTile(
                 key: const Key('roomPresenter'),
@@ -75,6 +77,8 @@ class RoomPanel extends StatelessWidget {
                 title: Text(s.roomSpeaking(speaking.name)),
               ),
             if (room.host) _HostBar(onControl: _control),
+            if (room.isWebinar && room.host)
+              HandsPanel(model: model, call: call),
             ExpansionTile(
               key: const Key('roomPeople'),
               initiallyExpanded: room.members.length <= 8,
@@ -90,6 +94,10 @@ class RoomPanel extends StatelessWidget {
                   ),
               ],
             ),
+            if (call.isConnected &&
+                (room.isWebinar || room.questions.isNotEmpty))
+              QuestionsPanel(model: model, call: call),
+            if (call.isConnected) ChatPanel(model: model, call: call),
           ],
         ),
       ),

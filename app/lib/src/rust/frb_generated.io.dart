@@ -182,7 +182,13 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   List<Ringtone> dco_decode_list_ringtone(dynamic raw);
 
   @protected
+  List<RoomChatMessage> dco_decode_list_room_chat_message(dynamic raw);
+
+  @protected
   List<RoomMember> dco_decode_list_room_member(dynamic raw);
+
+  @protected
+  List<RoomQuestion> dco_decode_list_room_question(dynamic raw);
 
   @protected
   List<RoomStream> dco_decode_list_room_stream(dynamic raw);
@@ -284,7 +290,13 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   Room dco_decode_room(dynamic raw);
 
   @protected
+  RoomChatMessage dco_decode_room_chat_message(dynamic raw);
+
+  @protected
   RoomMember dco_decode_room_member(dynamic raw);
+
+  @protected
+  RoomQuestion dco_decode_room_question(dynamic raw);
 
   @protected
   RoomStream dco_decode_room_stream(dynamic raw);
@@ -498,7 +510,17 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   List<Ringtone> sse_decode_list_ringtone(SseDeserializer deserializer);
 
   @protected
+  List<RoomChatMessage> sse_decode_list_room_chat_message(
+    SseDeserializer deserializer,
+  );
+
+  @protected
   List<RoomMember> sse_decode_list_room_member(SseDeserializer deserializer);
+
+  @protected
+  List<RoomQuestion> sse_decode_list_room_question(
+    SseDeserializer deserializer,
+  );
 
   @protected
   List<RoomStream> sse_decode_list_room_stream(SseDeserializer deserializer);
@@ -610,7 +632,13 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   Room sse_decode_room(SseDeserializer deserializer);
 
   @protected
+  RoomChatMessage sse_decode_room_chat_message(SseDeserializer deserializer);
+
+  @protected
   RoomMember sse_decode_room_member(SseDeserializer deserializer);
+
+  @protected
+  RoomQuestion sse_decode_room_question(SseDeserializer deserializer);
 
   @protected
   RoomStream sse_decode_room_stream(SseDeserializer deserializer);
@@ -868,8 +896,20 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   void sse_encode_list_ringtone(List<Ringtone> self, SseSerializer serializer);
 
   @protected
+  void sse_encode_list_room_chat_message(
+    List<RoomChatMessage> self,
+    SseSerializer serializer,
+  );
+
+  @protected
   void sse_encode_list_room_member(
     List<RoomMember> self,
+    SseSerializer serializer,
+  );
+
+  @protected
+  void sse_encode_list_room_question(
+    List<RoomQuestion> self,
     SseSerializer serializer,
   );
 
@@ -1015,7 +1055,16 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   void sse_encode_room(Room self, SseSerializer serializer);
 
   @protected
+  void sse_encode_room_chat_message(
+    RoomChatMessage self,
+    SseSerializer serializer,
+  );
+
+  @protected
   void sse_encode_room_member(RoomMember self, SseSerializer serializer);
+
+  @protected
+  void sse_encode_room_question(RoomQuestion self, SseSerializer serializer);
 
   @protected
   void sse_encode_room_stream(RoomStream self, SseSerializer serializer);

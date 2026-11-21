@@ -633,6 +633,57 @@ pub struct Room {
     pub forwards: bool,
     /// Its camera streams coming in and whose each is, where it forwards.
     pub streams: Vec<RoomStream>,
+    /// Who we are in it, as the room says: `host`, `panelist`,
+    /// `attendee` or `guest`.
+    pub role: Option<String>,
+    /// A webinar's phase, `practice`, `live` or `ended`; `None` in a
+    /// meeting.
+    pub webinar: Option<String>,
+    /// We wait in the webinar's lobby.
+    pub lobby: bool,
+    /// Our hand is up.
+    pub hand: bool,
+    /// An attendee brought to the stage: heard by the room.
+    pub on_stage: bool,
+    /// A webinar's audience by count.
+    pub audience: Option<u64>,
+    /// The questions we may see, oldest first.
+    pub questions: Vec<RoomQuestion>,
+    /// The chat we may see, oldest first.
+    pub chat: Vec<RoomChatMessage>,
+    /// Our chat is muted for the sitting.
+    pub chat_muted: bool,
+}
+
+/// A question in a room, as it is shown to us.
+pub struct RoomQuestion {
+    pub id: String,
+    pub text: String,
+    /// Who asked; `None` when anonymous.
+    pub asker: Option<String>,
+    pub mine: bool,
+    /// `pending` or `answered`.
+    pub status: String,
+    pub published: bool,
+    pub upvotes: u32,
+    pub upvoted: bool,
+    pub answer: Option<String>,
+    pub answered_live: bool,
+    pub asked_at: String,
+}
+
+/// A chat message in a room.
+pub struct RoomChatMessage {
+    pub id: String,
+    pub text: String,
+    pub sender: Option<String>,
+    pub sender_id: String,
+    /// Sent by a host or panelist.
+    pub from_stage: bool,
+    pub mine: bool,
+    /// To the hosts and panelists alone.
+    pub to_hosts: bool,
+    pub sent_at: String,
 }
 
 /// One camera stream of a room that forwards: its tile, and whose it is.
@@ -662,6 +713,12 @@ pub struct RoomMember {
     pub paused: bool,
     /// A host's spotlight is on them.
     pub spotlight: bool,
+    /// A webinar's panelist, or an attendee brought to the stage.
+    pub panelist: bool,
+    /// A webinar's attendee, listed for a raised hand.
+    pub attendee: bool,
+    /// Their hand is up, since when.
+    pub hand: Option<String>,
 }
 
 /// A meeting the user owns on FCP.
@@ -1187,6 +1244,9 @@ pub fn phone_state() -> anyhow::Result<PhoneState> {
                             presenting: m.presenting,
                             paused: m.paused,
                             spotlight: m.spotlight,
+                            panelist: m.panelist,
+                            attendee: m.attendee,
+                            hand: m.hand,
                         })
                         .collect(),
                     speaker: r.speaker,
@@ -1203,6 +1263,44 @@ pub fn phone_state() -> anyhow::Result<PhoneState> {
                             speaker: s.speaker,
                         })
                         .collect(),
+                    role: r.role,
+                    webinar: r.webinar,
+                    lobby: r.lobby,
+                    hand: r.hand,
+                    on_stage: r.on_stage,
+                    audience: r.audience,
+                    questions: r
+                        .questions
+                        .into_iter()
+                        .map(|q| RoomQuestion {
+                            id: q.id,
+                            text: q.text,
+                            asker: q.asker,
+                            mine: q.mine,
+                            status: q.status,
+                            published: q.published,
+                            upvotes: q.upvotes,
+                            upvoted: q.upvoted,
+                            answer: q.answer,
+                            answered_live: q.answered_live,
+                            asked_at: q.asked_at,
+                        })
+                        .collect(),
+                    chat: r
+                        .chat
+                        .into_iter()
+                        .map(|m| RoomChatMessage {
+                            id: m.id,
+                            text: m.text,
+                            sender: m.sender,
+                            sender_id: m.sender_id,
+                            from_stage: m.from_stage,
+                            mine: m.mine,
+                            to_hosts: m.to_hosts,
+                            sent_at: m.sent_at,
+                        })
+                        .collect(),
+                    chat_muted: r.chat_muted,
                 }),
             })
             .collect(),
@@ -1585,9 +1683,70 @@ pub async fn room_control(
             member: need(member)?,
         },
         "stop_share" => A::StopShare,
+        "go_live" => A::GoLive,
+        "end_webinar" => A::EndWebinar,
+        "lower_hand" => A::LowerHand {
+            member: need(member)?,
+        },
+        "lower_all_hands" => A::LowerAllHands,
+        "stage" => A::Stage {
+            member: need(member)?,
+            on,
+        },
+        "mute_chat" => A::MuteChat {
+            member: need(member)?,
+            on,
+        },
         other => anyhow::bail!("no room control {other}"),
     };
     execute(Command::Room { call, action }).await.map(|_| ())
+}
+
+/// Our voice in the room `call` is in (FCP's `docs/WEBINARS.md` §2.5):
+/// `hand` (`on`, raised), `ask` (`text`; `on`, anonymously), `upvote`
+/// (`id`, `on`), `chat` (`text`; `on`, to the hosts alone); and for the
+/// stage `publish`, `answer` (`id`, `text`; `on`, answered aloud),
+/// `dismiss` (`id`) and `delete_message` (`id`).
+pub async fn room_audience(
+    call: Option<u64>,
+    action: String,
+    id: Option<String>,
+    text: Option<String>,
+    on: bool,
+) -> anyhow::Result<()> {
+    use anvil_app::AudienceAction as A;
+    let need_id = |v: Option<String>| v.ok_or_else(|| anyhow::anyhow!("{action} needs an id"));
+    let need_text = |v: Option<String>| {
+        v.filter(|t| !t.trim().is_empty())
+            .ok_or_else(|| anyhow::anyhow!("{action} needs text"))
+    };
+    let action = match action.as_str() {
+        "hand" => A::Hand { raised: on },
+        "ask" => A::Ask {
+            text: need_text(text)?,
+            anonymous: on,
+        },
+        "upvote" => A::Upvote {
+            id: need_id(id)?,
+            on,
+        },
+        "chat" => A::Chat {
+            text: need_text(text)?,
+            to_hosts: on,
+        },
+        "publish" => A::Publish { id: need_id(id)? },
+        "answer" => A::Answer {
+            id: need_id(id)?,
+            text: text.filter(|t| !t.trim().is_empty()),
+            live: on,
+        },
+        "dismiss" => A::Dismiss { id: need_id(id)? },
+        "delete_message" => A::DeleteMessage { id: need_id(id)? },
+        other => anyhow::bail!("no audience action {other}"),
+    };
+    execute(Command::Audience { call, action })
+        .await
+        .map(|_| ())
 }
 
 /// What the room `call` is in sends us, where it forwards each person's

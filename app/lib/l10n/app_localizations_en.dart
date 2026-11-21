@@ -1310,4 +1310,122 @@ class StringsEn extends Strings {
   String roomMemberActions(String name) {
     return 'Host controls for $name';
   }
+
+  @override
+  String get webinarLobby => 'Waiting for the webinar to start';
+
+  @override
+  String get webinarPractice => 'Practice: only the stage is in';
+
+  @override
+  String get webinarLive => 'Live';
+
+  @override
+  String get webinarEnded => 'The webinar has ended';
+
+  @override
+  String webinarWatching(int count) {
+    return '$count watching';
+  }
+
+  @override
+  String get webinarOnStage => 'You are on the stage: the room can hear you';
+
+  @override
+  String get webinarListening =>
+      'You are in the audience: the room does not hear you';
+
+  @override
+  String get webinarGoLive => 'Go live';
+
+  @override
+  String get webinarEnd => 'End webinar';
+
+  @override
+  String get webinarEndConfirm =>
+      'End the webinar? Everyone in it is released.';
+
+  @override
+  String get webinarRaiseHand => 'Raise hand';
+
+  @override
+  String get webinarLowerHand => 'Lower hand';
+
+  @override
+  String webinarHands(int count) {
+    return 'Raised hands ($count)';
+  }
+
+  @override
+  String get webinarLowerAll => 'Lower all';
+
+  @override
+  String get webinarToStage => 'Bring to the stage';
+
+  @override
+  String get webinarFromStage => 'Back to the audience';
+
+  @override
+  String get webinarLowerTheirs => 'Lower hand';
+
+  @override
+  String roomQuestions(int count) {
+    return 'Questions ($count)';
+  }
+
+  @override
+  String get roomAsk => 'Ask a question';
+
+  @override
+  String get roomAskAnonymously => 'Anonymously';
+
+  @override
+  String get roomUpvote => 'Upvote';
+
+  @override
+  String get roomPublish => 'Show to everyone';
+
+  @override
+  String get roomAnswerAloud => 'Answered aloud';
+
+  @override
+  String get roomAnswerText => 'Answer in writing';
+
+  @override
+  String get roomDismiss => 'Dismiss';
+
+  @override
+  String get roomAnswered => 'Answered';
+
+  @override
+  String get roomAnswerHint => 'Your answer';
+
+  @override
+  String get roomNotPublished => 'Only the stage sees this';
+
+  @override
+  String roomChat(int count) {
+    return 'Chat ($count)';
+  }
+
+  @override
+  String get roomChatHint => 'Message';
+
+  @override
+  String get roomChatToHosts => 'To the hosts only';
+
+  @override
+  String get roomChatMuted => 'A host has muted your chat';
+
+  @override
+  String get roomChatDelete => 'Delete for everyone';
+
+  @override
+  String get roomChatMuteSender => 'Mute their chat';
+
+  @override
+  String get roomSend => 'Send';
+
+  @override
+  String get roomYou => 'You';
 }

@@ -756,5 +756,69 @@
         "type": "String"
       }
     }
-  }
+  },
+  "webinarLobby": "Waiting for the webinar to start",
+  "webinarPractice": "Practice: only the stage is in",
+  "webinarLive": "Live",
+  "webinarEnded": "The webinar has ended",
+  "webinarWatching": "{count} watching",
+  "@webinarWatching": {
+    "placeholders": {
+      "count": {
+        "type": "int"
+      }
+    }
+  },
+  "webinarOnStage": "You are on the stage: the room can hear you",
+  "webinarListening": "You are in the audience: the room does not hear you",
+  "webinarGoLive": "Go live",
+  "webinarEnd": "End webinar",
+  "webinarEndConfirm": "End the webinar? Everyone in it is released.",
+  "webinarRaiseHand": "Raise hand",
+  "webinarLowerHand": "Lower hand",
+  "webinarHands": "Raised hands ({count})",
+  "@webinarHands": {
+    "placeholders": {
+      "count": {
+        "type": "int"
+      }
+    }
+  },
+  "webinarLowerAll": "Lower all",
+  "webinarToStage": "Bring to the stage",
+  "webinarFromStage": "Back to the audience",
+  "webinarLowerTheirs": "Lower hand",
+  "roomQuestions": "Questions ({count})",
+  "@roomQuestions": {
+    "placeholders": {
+      "count": {
+        "type": "int"
+      }
+    }
+  },
+  "roomAsk": "Ask a question",
+  "roomAskAnonymously": "Anonymously",
+  "roomUpvote": "Upvote",
+  "roomPublish": "Show to everyone",
+  "roomAnswerAloud": "Answered aloud",
+  "roomAnswerText": "Answer in writing",
+  "roomDismiss": "Dismiss",
+  "roomAnswered": "Answered",
+  "roomAnswerHint": "Your answer",
+  "roomNotPublished": "Only the stage sees this",
+  "roomChat": "Chat ({count})",
+  "@roomChat": {
+    "placeholders": {
+      "count": {
+        "type": "int"
+      }
+    }
+  },
+  "roomChatHint": "Message",
+  "roomChatToHosts": "To the hosts only",
+  "roomChatMuted": "A host has muted your chat",
+  "roomChatDelete": "Delete for everyone",
+  "roomChatMuteSender": "Mute their chat",
+  "roomSend": "Send",
+  "roomYou": "You"
 }

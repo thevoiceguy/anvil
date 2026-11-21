@@ -162,6 +162,25 @@ Future<void> roomControl({
   on_: on_,
 );
 
+/// Our voice in the room `call` is in (FCP's `docs/WEBINARS.md` §2.5):
+/// `hand` (`on`, raised), `ask` (`text`; `on`, anonymously), `upvote`
+/// (`id`, `on`), `chat` (`text`; `on`, to the hosts alone); and for the
+/// stage `publish`, `answer` (`id`, `text`; `on`, answered aloud),
+/// `dismiss` (`id`) and `delete_message` (`id`).
+Future<void> roomAudience({
+  BigInt? call,
+  required String action,
+  String? id,
+  String? text,
+  required bool on_,
+}) => RustLib.instance.api.crateApiPhoneRoomAudience(
+  call: call,
+  action: action,
+  id: id,
+  text: text,
+  on_: on_,
+);
+
 /// What the room `call` is in sends us, where it forwards each person's
 /// stream (the user's own layout): `members`, with `speaker` the one who
 /// speaks large, or `pinned` large; neither, the room's default.
@@ -1758,6 +1777,35 @@ class Room {
   /// Its camera streams coming in and whose each is, where it forwards.
   final List<RoomStream> streams;
 
+  /// Who we are in it, as the room says: `host`, `panelist`,
+  /// `attendee` or `guest`.
+  final String? role;
+
+  /// A webinar's phase, `practice`, `live` or `ended`; `None` in a
+  /// meeting.
+  final String? webinar;
+
+  /// We wait in the webinar's lobby.
+  final bool lobby;
+
+  /// Our hand is up.
+  final bool hand;
+
+  /// An attendee brought to the stage: heard by the room.
+  final bool onStage;
+
+  /// A webinar's audience by count.
+  final BigInt? audience;
+
+  /// The questions we may see, oldest first.
+  final List<RoomQuestion> questions;
+
+  /// The chat we may see, oldest first.
+  final List<RoomChatMessage> chat;
+
+  /// Our chat is muted for the sitting.
+  final bool chatMuted;
+
   const Room({
     required this.number,
     required this.host,
@@ -1768,6 +1816,15 @@ class Room {
     required this.sharing,
     required this.forwards,
     required this.streams,
+    this.role,
+    this.webinar,
+    required this.lobby,
+    required this.hand,
+    required this.onStage,
+    this.audience,
+    required this.questions,
+    required this.chat,
+    required this.chatMuted,
   });
 
   @override
@@ -1780,7 +1837,16 @@ class Room {
       floorRefused.hashCode ^
       sharing.hashCode ^
       forwards.hashCode ^
-      streams.hashCode;
+      streams.hashCode ^
+      role.hashCode ^
+      webinar.hashCode ^
+      lobby.hashCode ^
+      hand.hashCode ^
+      onStage.hashCode ^
+      audience.hashCode ^
+      questions.hashCode ^
+      chat.hashCode ^
+      chatMuted.hashCode;
 
   @override
   bool operator ==(Object other) =>
@@ -1795,7 +1861,68 @@ class Room {
           floorRefused == other.floorRefused &&
           sharing == other.sharing &&
           forwards == other.forwards &&
-          streams == other.streams;
+          streams == other.streams &&
+          role == other.role &&
+          webinar == other.webinar &&
+          lobby == other.lobby &&
+          hand == other.hand &&
+          onStage == other.onStage &&
+          audience == other.audience &&
+          questions == other.questions &&
+          chat == other.chat &&
+          chatMuted == other.chatMuted;
+}
+
+/// A chat message in a room.
+class RoomChatMessage {
+  final String id;
+  final String text;
+  final String? sender;
+  final String senderId;
+
+  /// Sent by a host or panelist.
+  final bool fromStage;
+  final bool mine;
+
+  /// To the hosts and panelists alone.
+  final bool toHosts;
+  final String sentAt;
+
+  const RoomChatMessage({
+    required this.id,
+    required this.text,
+    this.sender,
+    required this.senderId,
+    required this.fromStage,
+    required this.mine,
+    required this.toHosts,
+    required this.sentAt,
+  });
+
+  @override
+  int get hashCode =>
+      id.hashCode ^
+      text.hashCode ^
+      sender.hashCode ^
+      senderId.hashCode ^
+      fromStage.hashCode ^
+      mine.hashCode ^
+      toHosts.hashCode ^
+      sentAt.hashCode;
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is RoomChatMessage &&
+          runtimeType == other.runtimeType &&
+          id == other.id &&
+          text == other.text &&
+          sender == other.sender &&
+          senderId == other.senderId &&
+          fromStage == other.fromStage &&
+          mine == other.mine &&
+          toHosts == other.toHosts &&
+          sentAt == other.sentAt;
 }
 
 /// One person in a room.
@@ -1820,6 +1947,15 @@ class RoomMember {
   /// A host's spotlight is on them.
   final bool spotlight;
 
+  /// A webinar's panelist, or an attendee brought to the stage.
+  final bool panelist;
+
+  /// A webinar's attendee, listed for a raised hand.
+  final bool attendee;
+
+  /// Their hand is up, since when.
+  final String? hand;
+
   const RoomMember({
     required this.id,
     required this.name,
@@ -1830,6 +1966,9 @@ class RoomMember {
     required this.presenting,
     required this.paused,
     required this.spotlight,
+    required this.panelist,
+    required this.attendee,
+    this.hand,
   });
 
   @override
@@ -1842,7 +1981,10 @@ class RoomMember {
       speaking.hashCode ^
       presenting.hashCode ^
       paused.hashCode ^
-      spotlight.hashCode;
+      spotlight.hashCode ^
+      panelist.hashCode ^
+      attendee.hashCode ^
+      hand.hashCode;
 
   @override
   bool operator ==(Object other) =>
@@ -1857,7 +1999,74 @@ class RoomMember {
           speaking == other.speaking &&
           presenting == other.presenting &&
           paused == other.paused &&
-          spotlight == other.spotlight;
+          spotlight == other.spotlight &&
+          panelist == other.panelist &&
+          attendee == other.attendee &&
+          hand == other.hand;
+}
+
+/// A question in a room, as it is shown to us.
+class RoomQuestion {
+  final String id;
+  final String text;
+
+  /// Who asked; `None` when anonymous.
+  final String? asker;
+  final bool mine;
+
+  /// `pending` or `answered`.
+  final String status;
+  final bool published;
+  final int upvotes;
+  final bool upvoted;
+  final String? answer;
+  final bool answeredLive;
+  final String askedAt;
+
+  const RoomQuestion({
+    required this.id,
+    required this.text,
+    this.asker,
+    required this.mine,
+    required this.status,
+    required this.published,
+    required this.upvotes,
+    required this.upvoted,
+    this.answer,
+    required this.answeredLive,
+    required this.askedAt,
+  });
+
+  @override
+  int get hashCode =>
+      id.hashCode ^
+      text.hashCode ^
+      asker.hashCode ^
+      mine.hashCode ^
+      status.hashCode ^
+      published.hashCode ^
+      upvotes.hashCode ^
+      upvoted.hashCode ^
+      answer.hashCode ^
+      answeredLive.hashCode ^
+      askedAt.hashCode;
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is RoomQuestion &&
+          runtimeType == other.runtimeType &&
+          id == other.id &&
+          text == other.text &&
+          asker == other.asker &&
+          mine == other.mine &&
+          status == other.status &&
+          published == other.published &&
+          upvotes == other.upvotes &&
+          upvoted == other.upvoted &&
+          answer == other.answer &&
+          answeredLive == other.answeredLive &&
+          askedAt == other.askedAt;
 }
 
 /// One camera stream of a room that forwards: its tile, and whose it is.

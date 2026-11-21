@@ -321,6 +321,21 @@ class FakePhone implements PhoneApi {
   }
 
   @override
+  Future<void> roomAudience(
+    int call,
+    AudienceAction action, {
+    String? id,
+    String? text,
+    bool on = false,
+  }) async {
+    _refuse();
+    log.add(
+      'audience $call ${action.name}${id == null ? '' : ' $id'}'
+      '${text == null ? '' : ' "$text"'}${on ? ' on' : ''}',
+    );
+  }
+
+  @override
   Future<int> takeAppearance(String line, int index) async {
     _refuse();
     log.add('take $line $index');
