@@ -504,6 +504,93 @@ class Meeting {
   final String name;
 }
 
+/// One run of a meeting's room.
+class MeetingSitting {
+  const MeetingSitting({
+    required this.id,
+    this.kind = 'meeting',
+    required this.startedAt,
+    this.liveAt,
+    this.endedAt,
+  });
+  final String id;
+
+  /// `meeting` or `webinar`.
+  final String kind;
+  final DateTime startedAt;
+  final DateTime? liveAt;
+  final DateTime? endedAt;
+}
+
+/// Someone's time in a run of the room.
+class AttendanceEntry {
+  const AttendanceEntry({
+    required this.name,
+    this.from = '',
+    this.role,
+    required this.joinedAt,
+    this.leftAt,
+    this.durationSecs = 0,
+    this.lobby = false,
+    this.questions = 0,
+    this.messages = 0,
+  });
+  final String name;
+  final String from;
+  final String? role;
+  final DateTime joinedAt;
+  final DateTime? leftAt;
+  final int durationSecs;
+
+  /// They never left the lobby.
+  final bool lobby;
+  final int questions;
+  final int messages;
+}
+
+/// A registration, and whether its holder came or watched.
+class AttendanceRegistrant {
+  const AttendanceRegistrant({
+    required this.name,
+    this.email,
+    this.attended = false,
+    this.attendedSecs = 0,
+    this.watched = false,
+    this.watchedSecs = 0,
+    this.revoked = false,
+  });
+  final String name;
+  final String? email;
+  final bool attended;
+  final int attendedSecs;
+  final bool watched;
+  final int watchedSecs;
+  final bool revoked;
+}
+
+/// Who came to a run of one of the user's meetings, how long, and who
+/// watched its stream (FCP's `/me/conferences/{id}/attendance`).
+class AttendanceReport {
+  const AttendanceReport({
+    this.sittings = const [],
+    required this.sitting,
+    this.attendees = 0,
+    this.peak = 0,
+    this.legs = const [],
+    this.registrants = const [],
+    this.viewers = const [],
+  });
+
+  /// The meeting's runs, newest first; `sitting` is one of them.
+  final List<MeetingSitting> sittings;
+  final MeetingSitting sitting;
+  final int attendees;
+  final int peak;
+  final List<AttendanceEntry> legs;
+  final List<AttendanceRegistrant> registrants;
+  final List<AttendanceRegistrant> viewers;
+}
+
 /// A question in a room, as it is shown to us.
 class RoomQuestion {
   const RoomQuestion({
@@ -1669,6 +1756,10 @@ abstract class PhoneApi {
   /// A link to send for one of the user's meetings: a guest's, or a
   /// host's.
   Future<String> meetingLink(String meeting, {bool host = false});
+
+  /// Who came to a run of one of the user's meetings (the newest unless
+  /// `sitting` says), how long, and who watched its stream.
+  Future<AttendanceReport> meetingAttendance(String meeting, {String? sitting});
 
   /// A host's control over the room `call` is in: `layout` (`on`, a
   /// grid), `pin` and `spotlight` (`member`, or null to stop), `mute` and

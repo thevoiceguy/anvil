@@ -48,6 +48,14 @@ pub enum Command {
         #[serde(default, skip_serializing_if = "is_false")]
         host: bool,
     },
+    /// Who came to a run of one of the user's meetings (by id or room
+    /// number; the newest run unless `sitting` says), and who watched its
+    /// stream: the answer's `attendance`, with the meeting's `sittings`.
+    Attendance {
+        meeting: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        sitting: Option<String>,
+    },
     /// A host's control over the room a call is in.
     Room {
         #[serde(default)]
@@ -519,6 +527,12 @@ pub struct Response {
     /// The link `join_link` made.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub link: Option<String>,
+    /// The report `attendance` read.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub attendance: Option<anvil_fcp::Attendance>,
+    /// The meeting's runs, newest first, for `attendance`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub sittings: Option<Vec<anvil_fcp::Sitting>>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub error: Option<String>,
 }
@@ -543,6 +557,8 @@ impl Response {
             state: None,
             imported: None,
             link: None,
+            attendance: None,
+            sittings: None,
             error: None,
         }
     }
@@ -554,6 +570,8 @@ impl Response {
             state: None,
             imported: None,
             link: None,
+            attendance: None,
+            sittings: None,
             error: Some(message.into()),
         }
     }
@@ -649,6 +667,11 @@ impl Command {
             // `room remove p2`, `room stop-share`; a trailing call id names
             // the call.
             "room" => room_line(&words)?,
+            // `attendance <meeting> [sitting]`: one of my meetings' report.
+            "attendance" => Command::Attendance {
+                meeting: need(words.get(1), "a meeting")?,
+                sitting: words.get(2).map(|w| w.to_string()),
+            },
             // Our own voice in a room: `hand up`, `ask When?`, `chat Hello`.
             "hand" => Command::Audience {
                 call: None,

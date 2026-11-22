@@ -1428,4 +1428,64 @@ class StringsEn extends Strings {
 
   @override
   String get roomYou => 'You';
+
+  @override
+  String get attendanceButton => 'Attendance';
+
+  @override
+  String attendanceTitle(String name) {
+    return 'Attendance: $name';
+  }
+
+  @override
+  String get attendanceNone => 'Nobody has been in this room yet.';
+
+  @override
+  String get attendanceRun => 'Run';
+
+  @override
+  String attendanceSummary(int attendees, int peak) {
+    return '$attendees came · at most $peak at once';
+  }
+
+  @override
+  String get attendancePeople => 'In the room';
+
+  @override
+  String attendanceMinutes(int minutes) {
+    return '$minutes min';
+  }
+
+  @override
+  String get attendanceLobbyOnly => 'Waited in the lobby';
+
+  @override
+  String get attendanceRegistrants => 'Registrations';
+
+  @override
+  String attendanceCame(int minutes) {
+    return 'Came, $minutes min';
+  }
+
+  @override
+  String get attendanceDidNotCome => 'Did not come';
+
+  @override
+  String attendanceWatched(int minutes) {
+    return 'Watched the stream, $minutes min';
+  }
+
+  @override
+  String get attendanceOpened => 'Opened the recording';
+
+  @override
+  String get attendanceRevoked => 'Revoked';
+
+  @override
+  String get attendanceViewers => 'Watched the stream';
+
+  @override
+  String attendanceError(String error) {
+    return 'The report could not be read: $error';
+  }
 }

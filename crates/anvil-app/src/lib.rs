@@ -1075,6 +1075,14 @@ impl Phone {
                 self.room_control(call, action).await?;
                 Ok(Response::ok())
             }
+            Command::Attendance { meeting, sitting } => {
+                let (attendance, sittings) = self.attendance(&meeting, sitting.as_deref()).await?;
+                Ok(Response {
+                    attendance: Some(attendance),
+                    sittings: Some(sittings),
+                    ..Response::ok()
+                })
+            }
             Command::Audience { call, action } => {
                 self.audience(call, action).await?;
                 Ok(Response::ok())

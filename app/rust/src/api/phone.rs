@@ -1655,6 +1655,139 @@ pub async fn meeting_link(meeting: String, host: bool) -> anyhow::Result<String>
     .await
 }
 
+/// One run of a meeting's room.
+pub struct MeetingSitting {
+    pub id: String,
+    /// `meeting` or `webinar`.
+    pub kind: String,
+    /// RFC 3339.
+    pub started_at: String,
+    pub live_at: Option<String>,
+    pub ended_at: Option<String>,
+}
+
+/// Someone's time in a run of the room: one leg.
+pub struct AttendanceLeg {
+    pub name: String,
+    /// Where they called from.
+    pub from: String,
+    /// `host`, `panelist`, `attendee` or `guest`.
+    pub role: Option<String>,
+    pub joined_at: String,
+    pub left_at: Option<String>,
+    pub duration_secs: u64,
+    /// They never left the lobby.
+    pub lobby: bool,
+    pub questions: u32,
+    pub messages: u32,
+}
+
+/// A registration, and whether its holder came or watched.
+pub struct AttendanceRegistrant {
+    pub name: String,
+    pub email: Option<String>,
+    pub attended: bool,
+    pub attended_secs: u64,
+    pub watched: bool,
+    pub watched_secs: u64,
+    pub revoked: bool,
+}
+
+/// A run of one of the user's meetings: who came, how long, who watched.
+pub struct MeetingAttendance {
+    /// The meeting's runs, newest first; `sitting` is one of them.
+    pub sittings: Vec<MeetingSitting>,
+    pub sitting: MeetingSitting,
+    /// Distinct people in the room, the lobby aside.
+    pub attendees: u64,
+    /// The most in the room at once.
+    pub peak: u64,
+    pub legs: Vec<AttendanceLeg>,
+    pub registrants: Vec<AttendanceRegistrant>,
+    /// Registrants who watched the stream by their own link.
+    pub viewers: Vec<AttendanceRegistrant>,
+}
+
+fn sitting_of(s: anvil_fcp::Sitting) -> MeetingSitting {
+    MeetingSitting {
+        id: s.id,
+        kind: s.kind,
+        started_at: s.started_at,
+        live_at: s.live_at,
+        ended_at: s.ended_at,
+    }
+}
+
+/// Who came to a run of one of the user's meetings (by id or room number;
+/// the newest unless `sitting` says), how long, and who watched its stream.
+pub async fn meeting_attendance(
+    meeting: String,
+    sitting: Option<String>,
+) -> anyhow::Result<MeetingAttendance> {
+    let phone = phone()?;
+    on_runtime(async move {
+        let answer = phone
+            .execute(Command::Attendance { meeting, sitting })
+            .await?;
+        let report = answer
+            .attendance
+            .ok_or_else(|| anyhow::anyhow!("FCP sent no report"))?;
+        Ok(MeetingAttendance {
+            sittings: answer
+                .sittings
+                .unwrap_or_default()
+                .into_iter()
+                .map(sitting_of)
+                .collect(),
+            sitting: sitting_of(report.sitting),
+            attendees: report.attendees,
+            peak: report.peak,
+            legs: report
+                .legs
+                .into_iter()
+                .map(|l| AttendanceLeg {
+                    name: l.name.unwrap_or_else(|| l.from.clone()),
+                    from: l.from,
+                    role: l.role,
+                    joined_at: l.joined_at,
+                    left_at: l.left_at,
+                    duration_secs: l.duration_secs,
+                    lobby: l.lobby,
+                    questions: l.questions,
+                    messages: l.messages,
+                })
+                .collect(),
+            registrants: report
+                .registrants
+                .into_iter()
+                .map(|r| AttendanceRegistrant {
+                    name: r.name,
+                    email: r.email,
+                    attended: r.attended,
+                    attended_secs: r.attended_secs,
+                    watched: r.watched,
+                    watched_secs: r.watched_secs,
+                    revoked: r.revoked_at.is_some(),
+                })
+                .collect(),
+            viewers: report
+                .stream_viewers
+                .into_iter()
+                .map(|v| AttendanceRegistrant {
+                    name: v.name.unwrap_or(v.registrant_id),
+                    email: None,
+                    attended: false,
+                    attended_secs: 0,
+                    watched: true,
+                    watched_secs: v.watched_secs,
+                    revoked: false,
+                })
+                .collect(),
+        })
+    })
+    .await
+}
+
 /// A host's control over the room `call` is in: `layout` (`on`, a grid;
 /// off, the speaker large), `pin` and `spotlight` (`member`, or none to
 /// stop), `mute` and `camera` (`member`, `on`), `remove` (`member`),

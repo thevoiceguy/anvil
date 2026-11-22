@@ -498,6 +498,58 @@ class RustPhone implements PhoneApi {
   Future<String> meetingLink(String meeting, {bool host = false}) =>
       rust.meetingLink(meeting: meeting, host: host);
 
+  static DateTime _at(String at) => DateTime.parse(at).toLocal();
+  static DateTime? _atOr(String? at) => at == null ? null : _at(at);
+
+  static MeetingSitting _sitting(rust.MeetingSitting s) => MeetingSitting(
+    id: s.id,
+    kind: s.kind,
+    startedAt: _at(s.startedAt),
+    liveAt: _atOr(s.liveAt),
+    endedAt: _atOr(s.endedAt),
+  );
+
+  static AttendanceRegistrant _registrant(rust.AttendanceRegistrant r) =>
+      AttendanceRegistrant(
+        name: r.name,
+        email: r.email,
+        attended: r.attended,
+        attendedSecs: r.attendedSecs.toInt(),
+        watched: r.watched,
+        watchedSecs: r.watchedSecs.toInt(),
+        revoked: r.revoked,
+      );
+
+  @override
+  Future<AttendanceReport> meetingAttendance(
+    String meeting, {
+    String? sitting,
+  }) async {
+    final r = await rust.meetingAttendance(meeting: meeting, sitting: sitting);
+    return AttendanceReport(
+      sittings: [for (final s in r.sittings) _sitting(s)],
+      sitting: _sitting(r.sitting),
+      attendees: r.attendees.toInt(),
+      peak: r.peak.toInt(),
+      legs: [
+        for (final l in r.legs)
+          AttendanceEntry(
+            name: l.name,
+            from: l.from,
+            role: l.role,
+            joinedAt: _at(l.joinedAt),
+            leftAt: _atOr(l.leftAt),
+            durationSecs: l.durationSecs.toInt(),
+            lobby: l.lobby,
+            questions: l.questions,
+            messages: l.messages,
+          ),
+      ],
+      registrants: [for (final x in r.registrants) _registrant(x)],
+      viewers: [for (final x in r.viewers) _registrant(x)],
+    );
+  }
+
   @override
   Future<void> roomControl(
     int call,

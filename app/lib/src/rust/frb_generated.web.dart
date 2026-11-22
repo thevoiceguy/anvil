@@ -43,6 +43,12 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   Appearance dco_decode_appearance(dynamic raw);
 
   @protected
+  AttendanceLeg dco_decode_attendance_leg(dynamic raw);
+
+  @protected
+  AttendanceRegistrant dco_decode_attendance_registrant(dynamic raw);
+
+  @protected
   AudioDevice dco_decode_audio_device(dynamic raw);
 
   @protected
@@ -145,6 +151,12 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   List<Appearance> dco_decode_list_appearance(dynamic raw);
 
   @protected
+  List<AttendanceLeg> dco_decode_list_attendance_leg(dynamic raw);
+
+  @protected
+  List<AttendanceRegistrant> dco_decode_list_attendance_registrant(dynamic raw);
+
+  @protected
   List<AudioDevice> dco_decode_list_audio_device(dynamic raw);
 
   @protected
@@ -164,6 +176,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   List<Meeting> dco_decode_list_meeting(dynamic raw);
+
+  @protected
+  List<MeetingSitting> dco_decode_list_meeting_sitting(dynamic raw);
 
   @protected
   List<OwnStatus> dco_decode_list_own_status(dynamic raw);
@@ -206,6 +221,12 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   Meeting dco_decode_meeting(dynamic raw);
+
+  @protected
+  MeetingAttendance dco_decode_meeting_attendance(dynamic raw);
+
+  @protected
+  MeetingSitting dco_decode_meeting_sitting(dynamic raw);
 
   @protected
   MyPresence dco_decode_my_presence(dynamic raw);
@@ -363,6 +384,14 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   Appearance sse_decode_appearance(SseDeserializer deserializer);
 
   @protected
+  AttendanceLeg sse_decode_attendance_leg(SseDeserializer deserializer);
+
+  @protected
+  AttendanceRegistrant sse_decode_attendance_registrant(
+    SseDeserializer deserializer,
+  );
+
+  @protected
   AudioDevice sse_decode_audio_device(SseDeserializer deserializer);
 
   @protected
@@ -471,6 +500,16 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   List<Appearance> sse_decode_list_appearance(SseDeserializer deserializer);
 
   @protected
+  List<AttendanceLeg> sse_decode_list_attendance_leg(
+    SseDeserializer deserializer,
+  );
+
+  @protected
+  List<AttendanceRegistrant> sse_decode_list_attendance_registrant(
+    SseDeserializer deserializer,
+  );
+
+  @protected
   List<AudioDevice> sse_decode_list_audio_device(SseDeserializer deserializer);
 
   @protected
@@ -492,6 +531,11 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   List<Meeting> sse_decode_list_meeting(SseDeserializer deserializer);
+
+  @protected
+  List<MeetingSitting> sse_decode_list_meeting_sitting(
+    SseDeserializer deserializer,
+  );
 
   @protected
   List<OwnStatus> sse_decode_list_own_status(SseDeserializer deserializer);
@@ -538,6 +582,12 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   Meeting sse_decode_meeting(SseDeserializer deserializer);
+
+  @protected
+  MeetingAttendance sse_decode_meeting_attendance(SseDeserializer deserializer);
+
+  @protected
+  MeetingSitting sse_decode_meeting_sitting(SseDeserializer deserializer);
 
   @protected
   MyPresence sse_decode_my_presence(SseDeserializer deserializer);
@@ -709,6 +759,15 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   void sse_encode_appearance(Appearance self, SseSerializer serializer);
 
   @protected
+  void sse_encode_attendance_leg(AttendanceLeg self, SseSerializer serializer);
+
+  @protected
+  void sse_encode_attendance_registrant(
+    AttendanceRegistrant self,
+    SseSerializer serializer,
+  );
+
+  @protected
   void sse_encode_audio_device(AudioDevice self, SseSerializer serializer);
 
   @protected
@@ -844,6 +903,18 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   );
 
   @protected
+  void sse_encode_list_attendance_leg(
+    List<AttendanceLeg> self,
+    SseSerializer serializer,
+  );
+
+  @protected
+  void sse_encode_list_attendance_registrant(
+    List<AttendanceRegistrant> self,
+    SseSerializer serializer,
+  );
+
+  @protected
   void sse_encode_list_audio_device(
     List<AudioDevice> self,
     SseSerializer serializer,
@@ -869,6 +940,12 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   void sse_encode_list_meeting(List<Meeting> self, SseSerializer serializer);
+
+  @protected
+  void sse_encode_list_meeting_sitting(
+    List<MeetingSitting> self,
+    SseSerializer serializer,
+  );
 
   @protected
   void sse_encode_list_own_status(
@@ -938,6 +1015,18 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   void sse_encode_meeting(Meeting self, SseSerializer serializer);
+
+  @protected
+  void sse_encode_meeting_attendance(
+    MeetingAttendance self,
+    SseSerializer serializer,
+  );
+
+  @protected
+  void sse_encode_meeting_sitting(
+    MeetingSitting self,
+    SseSerializer serializer,
+  );
 
   @protected
   void sse_encode_my_presence(MyPresence self, SseSerializer serializer);

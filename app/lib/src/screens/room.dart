@@ -9,6 +9,7 @@ import 'package:flutter/services.dart';
 import '../../l10n/app_localizations.dart';
 import '../phone/phone_api.dart';
 import '../phone/phone_model.dart';
+import 'attendance.dart';
 import 'contacts.dart';
 import 'webinar.dart';
 
@@ -497,6 +498,13 @@ class _MeetingsSheetState extends State<MeetingsSheet> {
                           icon: Icons.shield_outlined,
                           label: s.copyHostLinkButton,
                           onSelected: () => _copy(m, host: true),
+                        ),
+                        MoreAction(
+                          key: Key('meetingAttendance-${m.id}'),
+                          icon: Icons.fact_check_outlined,
+                          label: s.attendanceButton,
+                          onSelected: () =>
+                              AttendanceSheet.show(context, widget.model, m),
                         ),
                       ]),
                     ),

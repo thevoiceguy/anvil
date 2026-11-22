@@ -7,7 +7,7 @@ import '../frb_generated.dart';
 
 import 'package:flutter_rust_bridge/flutter_rust_bridge_for_generated.dart';
 
-// These functions are ignored because they are not marked as `pub`: `act`, `capture_mode_name`, `devices`, `direction`, `execute`, `kind_only`, `managed`, `on_runtime_pub`, `on_runtime`, `phone`, `place_of`, `registration`, `remember`, `run_command`, `running`, `runtime`, `set_push`, `this_install`, `wake`
+// These functions are ignored because they are not marked as `pub`: `act`, `capture_mode_name`, `devices`, `direction`, `execute`, `kind_only`, `managed`, `on_runtime_pub`, `on_runtime`, `phone`, `place_of`, `registration`, `remember`, `run_command`, `running`, `runtime`, `set_push`, `sitting_of`, `this_install`, `wake`
 
 /// This install's managed settings; an ordinary install's are all open.
 ManagedSettings managedSettings() =>
@@ -145,6 +145,16 @@ Future<BigInt> joinRoom({required String target, required bool video}) =>
 /// a guest's, or a host's.
 Future<String> meetingLink({required String meeting, required bool host}) =>
     RustLib.instance.api.crateApiPhoneMeetingLink(meeting: meeting, host: host);
+
+/// Who came to a run of one of the user's meetings (by id or room number;
+/// the newest unless `sitting` says), how long, and who watched its stream.
+Future<MeetingAttendance> meetingAttendance({
+  required String meeting,
+  String? sitting,
+}) => RustLib.instance.api.crateApiPhoneMeetingAttendance(
+  meeting: meeting,
+  sitting: sitting,
+);
 
 /// A host's control over the room `call` is in: `layout` (`on`, a grid;
 /// off, the speaker large), `pin` and `spotlight` (`member`, or none to
@@ -473,6 +483,108 @@ class Appearance {
           state == other.state &&
           remote == other.remote &&
           ours == other.ours;
+}
+
+/// Someone's time in a run of the room: one leg.
+class AttendanceLeg {
+  final String name;
+
+  /// Where they called from.
+  final String from;
+
+  /// `host`, `panelist`, `attendee` or `guest`.
+  final String? role;
+  final String joinedAt;
+  final String? leftAt;
+  final BigInt durationSecs;
+
+  /// They never left the lobby.
+  final bool lobby;
+  final int questions;
+  final int messages;
+
+  const AttendanceLeg({
+    required this.name,
+    required this.from,
+    this.role,
+    required this.joinedAt,
+    this.leftAt,
+    required this.durationSecs,
+    required this.lobby,
+    required this.questions,
+    required this.messages,
+  });
+
+  @override
+  int get hashCode =>
+      name.hashCode ^
+      from.hashCode ^
+      role.hashCode ^
+      joinedAt.hashCode ^
+      leftAt.hashCode ^
+      durationSecs.hashCode ^
+      lobby.hashCode ^
+      questions.hashCode ^
+      messages.hashCode;
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is AttendanceLeg &&
+          runtimeType == other.runtimeType &&
+          name == other.name &&
+          from == other.from &&
+          role == other.role &&
+          joinedAt == other.joinedAt &&
+          leftAt == other.leftAt &&
+          durationSecs == other.durationSecs &&
+          lobby == other.lobby &&
+          questions == other.questions &&
+          messages == other.messages;
+}
+
+/// A registration, and whether its holder came or watched.
+class AttendanceRegistrant {
+  final String name;
+  final String? email;
+  final bool attended;
+  final BigInt attendedSecs;
+  final bool watched;
+  final BigInt watchedSecs;
+  final bool revoked;
+
+  const AttendanceRegistrant({
+    required this.name,
+    this.email,
+    required this.attended,
+    required this.attendedSecs,
+    required this.watched,
+    required this.watchedSecs,
+    required this.revoked,
+  });
+
+  @override
+  int get hashCode =>
+      name.hashCode ^
+      email.hashCode ^
+      attended.hashCode ^
+      attendedSecs.hashCode ^
+      watched.hashCode ^
+      watchedSecs.hashCode ^
+      revoked.hashCode;
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is AttendanceRegistrant &&
+          runtimeType == other.runtimeType &&
+          name == other.name &&
+          email == other.email &&
+          attended == other.attended &&
+          attendedSecs == other.attendedSecs &&
+          watched == other.watched &&
+          watchedSecs == other.watchedSecs &&
+          revoked == other.revoked;
 }
 
 /// A microphone or a speaker.
@@ -1092,6 +1204,97 @@ class Meeting {
           id == other.id &&
           roomNumber == other.roomNumber &&
           name == other.name;
+}
+
+/// A run of one of the user's meetings: who came, how long, who watched.
+class MeetingAttendance {
+  /// The meeting's runs, newest first; `sitting` is one of them.
+  final List<MeetingSitting> sittings;
+  final MeetingSitting sitting;
+
+  /// Distinct people in the room, the lobby aside.
+  final BigInt attendees;
+
+  /// The most in the room at once.
+  final BigInt peak;
+  final List<AttendanceLeg> legs;
+  final List<AttendanceRegistrant> registrants;
+
+  /// Registrants who watched the stream by their own link.
+  final List<AttendanceRegistrant> viewers;
+
+  const MeetingAttendance({
+    required this.sittings,
+    required this.sitting,
+    required this.attendees,
+    required this.peak,
+    required this.legs,
+    required this.registrants,
+    required this.viewers,
+  });
+
+  @override
+  int get hashCode =>
+      sittings.hashCode ^
+      sitting.hashCode ^
+      attendees.hashCode ^
+      peak.hashCode ^
+      legs.hashCode ^
+      registrants.hashCode ^
+      viewers.hashCode;
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is MeetingAttendance &&
+          runtimeType == other.runtimeType &&
+          sittings == other.sittings &&
+          sitting == other.sitting &&
+          attendees == other.attendees &&
+          peak == other.peak &&
+          legs == other.legs &&
+          registrants == other.registrants &&
+          viewers == other.viewers;
+}
+
+/// One run of a meeting's room.
+class MeetingSitting {
+  final String id;
+
+  /// `meeting` or `webinar`.
+  final String kind;
+
+  /// RFC 3339.
+  final String startedAt;
+  final String? liveAt;
+  final String? endedAt;
+
+  const MeetingSitting({
+    required this.id,
+    required this.kind,
+    required this.startedAt,
+    this.liveAt,
+    this.endedAt,
+  });
+
+  @override
+  int get hashCode =>
+      id.hashCode ^
+      kind.hashCode ^
+      startedAt.hashCode ^
+      liveAt.hashCode ^
+      endedAt.hashCode;
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is MeetingSitting &&
+          runtimeType == other.runtimeType &&
+          id == other.id &&
+          kind == other.kind &&
+          startedAt == other.startedAt &&
+          liveAt == other.liveAt &&
+          endedAt == other.endedAt;
 }
 
 /// The user's presence (FCP's `docs/PRESENCE.md`).
