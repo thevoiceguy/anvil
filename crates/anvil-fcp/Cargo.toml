@@ -10,7 +10,7 @@ repository.workspace   = true
 homepage.workspace     = true
 
 [dependencies]
-anvil-core = { workspace = true }
+anvil-core = { workspace = true, features = ["tls"] }
 anvil-brand = { workspace = true }
 async-trait = { workspace = true }
 tokio      = { workspace = true }
