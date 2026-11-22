@@ -2719,13 +2719,25 @@ async fn drive_outgoing_call(
     // Drain provisional responses in parallel with await_final. We only care
     // about 180 Ringing at this milestone; other 1xx responses (100, 183)
     // are logged but not surfaced.
+    // A 180 handled after the final (they are read by two tasks, and on a
+    // fast path the 200 OK can win) must not report ringing after the
+    // answer: `finished` is set, under the same lock, before the final's
+    // events are sent, so every `CallRinging` is queued ahead of them.
+    let finished = Arc::new(tokio::sync::Mutex::new(false));
     let prov_events = events.clone();
     let prov_handle = Arc::clone(&handle);
+    let prov_finished = Arc::clone(&finished);
     tokio::spawn(async move {
         while let Some(resp) = prov_handle.await_provisional().await {
             match resp.code() {
                 180 => {
+                    let finished = prov_finished.lock().await;
+                    if *finished {
+                        tracing::debug!("180 after the final response: not reported");
+                        continue;
+                    }
                     let _ = prov_events.send(Event::CallRinging { call: call_id }).await;
+                    drop(finished);
                 }
                 other => {
                     tracing::debug!(code = other, reason = %resp.reason(), "provisional");
@@ -2738,6 +2750,7 @@ async fn drive_outgoing_call(
     // INVITE with the account's credentials, so a challenge reaches here
     // only when the credentials were refused.
     let final_resp = handle.await_final().await;
+    *finished.lock().await = true;
 
     match final_resp {
         // Answered after the user hung up (a 200 OK crossing the CANCEL):
