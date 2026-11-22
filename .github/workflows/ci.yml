@@ -171,6 +171,11 @@ jobs:
           docker compose pull --quiet
           docker compose up -d --no-build
           scripts/wait-healthy.sh 300
+          # The admin advertises its HTTPS address (`public_url`) through the
+          # proxy, whose certificate is from the stack's own CA: trust it.
+          docker compose cp fcp-proxy:/var/lib/fcp/certs/ca.crt fcp-ca.crt
+          sudo cp fcp-ca.crt /usr/local/share/ca-certificates/fcp-ca.crt
+          sudo update-ca-certificates
       - uses: dtolnay/rust-toolchain@stable
         if: env.FCP_READ_TOKEN != ''
       - name: Audio headers for cpal
