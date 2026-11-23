@@ -1829,6 +1829,31 @@ async fn told<T>(
     .unwrap_or_else(|| panic!("never told {what}"))
 }
 
+/// `call` is up and the room has told it the webinar's state. The room
+/// tells it as the call joins, so the notice can come before the call is
+/// heard to be up: either order is taken.
+async fn joined_webinar(
+    events: &mut EventStream,
+    call: CallId,
+    what: &str,
+) -> anvil_core::audience::WebinarState {
+    let mut up = false;
+    let mut state = None;
+    expect(events, SOON, |e| {
+        match e {
+            Event::CallEstablished { call: c, .. } if *c == call => up = true,
+            Event::RoomWebinar { call: c, state: s } if *c == call && state.is_none() => {
+                state = Some(*s)
+            }
+            _ => {}
+        }
+        (up && state.is_some()).then_some(())
+    })
+    .await
+    .unwrap_or_else(|| panic!("never told {what} (up: {up})"));
+    state.unwrap()
+}
+
 /// A webinar on FCP run from two Anvils (FCP's `docs/WEBINARS.md` A7a and
 /// A7b). The owner joins by a host's link, and a guest follows a join link
 /// and is an attendee in the lobby. The host takes it live through
@@ -1873,12 +1898,7 @@ async fn a_webinar_on_fcp_is_run_by_its_host_from_anvil() {
         )
         .await
         .expect("the owner joins as host");
-    let a = established(&mut alice_events, Some(a)).await;
-    let state = told(&mut alice_events, a, "the host the webinar", |e| match e {
-        Event::RoomWebinar { state, .. } => Some(*state),
-        _ => None,
-    })
-    .await;
+    let state = joined_webinar(&mut alice_events, a, "the host the webinar").await;
     assert_eq!(state.phase, WebinarPhase::Practice);
     assert!(
         matches!(state.role, None | Some(RoomRole::Host)),
@@ -1890,12 +1910,7 @@ async fn a_webinar_on_fcp_is_run_by_its_host_from_anvil() {
         .join_room(&target, &join, CallMedia::AUDIO)
         .await
         .expect("the guest follows the link");
-    let b = established(&mut bob_events, Some(b)).await;
-    let state = told(&mut bob_events, b, "the attendee the lobby", |e| match e {
-        Event::RoomWebinar { state, .. } => Some(*state),
-        _ => None,
-    })
-    .await;
+    let state = joined_webinar(&mut bob_events, b, "the attendee the lobby").await;
     assert!(
         state.lobby && state.phase == WebinarPhase::Practice,
         "{state:?}"
