@@ -149,8 +149,8 @@ jobs:
         if: env.FCP_READ_TOKEN != ''
         uses: actions/checkout@v5
         with:
-          repository: thevoiceguy/fcp
-          token: ${{ secrets.FCP_READ_TOKEN }}
+          # Public: no token needed to read it.
+          repository: feryx-io/fcp
           path: fcp
           sparse-checkout: deploy/docker-compose
       - name: Free disk space
