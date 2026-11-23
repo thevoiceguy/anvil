@@ -127,7 +127,7 @@ jobs:
   # Anvil against FCP: FCP's compose stack from its nightly images, and
   # the tests against it (users made through the admin API, calls through
   # the call manager). FCP's repository and images are private: the
-  # FCP_READ_TOKEN secret (a token that may read thevoiceguy/fcp and its
+  # FCP_READ_TOKEN secret (a token that may read feryx-io/fcp and its
   # packages) lets this job reach them; without it the job says so and
   # passes.
   fcp:
@@ -149,7 +149,7 @@ jobs:
         if: env.FCP_READ_TOKEN != ''
         uses: actions/checkout@v5
         with:
-          repository: thevoiceguy/fcp
+          repository: feryx-io/fcp
           token: ${{ secrets.FCP_READ_TOKEN }}
           path: fcp
           sparse-checkout: deploy/docker-compose
