@@ -269,6 +269,11 @@ impl Phone {
                     data::refresh_people(&inner, &first),
                     data::refresh_voicemail(&inner, &first),
                     data::refresh_contacts(&inner, &first),
+                    // Not left to an event: one sent before the events
+                    // stream is up is missed, and the user would see no
+                    // presence until it next changed.
+                    data::refresh_presence(&inner, &first),
+                    crate::room::refresh_meetings(&inner, &first),
                 );
             });
             let task = tokio::spawn(data::follow(Arc::downgrade(&phone.inner), fcp));
