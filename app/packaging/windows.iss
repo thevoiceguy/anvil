@@ -39,7 +39,7 @@ AppVerName=Anvil {#Version}
 #endif
 AppVersion={#Version}
 AppPublisher=Anvil
-AppPublisherURL=https://github.com/thevoiceguy/anvil
+AppPublisherURL=https://github.com/feryx-io/anvil
 DefaultDirName={localappdata}\Programs\Anvil
 DefaultGroupName=Anvil
 DisableProgramGroupPage=yes

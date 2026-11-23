@@ -31,7 +31,7 @@ Package: anvil
 Version: $version
 Architecture: amd64
 Maintainer: Anvil <noreply@github.com>
-Homepage: https://github.com/thevoiceguy/anvil
+Homepage: https://github.com/feryx-io/anvil
 Section: net
 Priority: optional
 Installed-Size: $(du -sk "$root/opt" | cut -f1)

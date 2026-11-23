@@ -8,7 +8,7 @@ prove the signal → media path works end to end before investing in UI or mobil
 ## As FCP's client
 
 Anvil becomes FCP's own softphone, desktop first. The design and its phases
-live in FCP: `docs/SOFTPHONE.md` in `thevoiceguy/fcp`. Anvil's phases:
+live in FCP: `docs/SOFTPHONE.md` in `feryx-io/fcp`. Anvil's phases:
 
 - [x] **A0** Today's stacks: siphon-rs and forge-media as git dependencies on
       release tags, the API breaks fixed, siphon-rs answering INVITE challenges,
