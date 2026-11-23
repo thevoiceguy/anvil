@@ -171,6 +171,11 @@ jobs:
           docker compose pull --quiet
           docker compose up -d --no-build
           scripts/wait-healthy.sh 300
+          # The admin advertises its HTTPS address (`public_url`) through the
+          # proxy, whose certificate is from the stack's own CA: trust it.
+          docker compose cp fcp-proxy:/var/lib/fcp/certs/ca.crt fcp-ca.crt
+          sudo cp fcp-ca.crt /usr/local/share/ca-certificates/fcp-ca.crt
+          sudo update-ca-certificates
       - uses: dtolnay/rust-toolchain@stable
         if: env.FCP_READ_TOKEN != ''
       - name: Audio headers for cpal
@@ -186,7 +191,10 @@ jobs:
         run: |
           export ANVIL_FCP_TOKEN=$(grep '^FCP_ADMIN_AUTH_TOKEN=' fcp/deploy/docker-compose/.env | cut -d= -f2-)
           cargo test -p anvil-core --test fcp -- --nocapture
-          cargo test -p anvil-fcp --test fcp -- --nocapture
+          # One at a time: the conference node's video budget, measured on
+          # this runner, holds about two composing rooms, and rooms in
+          # parallel are refused (503) past it.
+          cargo test -p anvil-fcp --test fcp -- --nocapture --test-threads=1
           cargo test -p anvil-app --test fcp -- --nocapture
       - name: FCP's logs
         if: failure() && env.FCP_READ_TOKEN != ''

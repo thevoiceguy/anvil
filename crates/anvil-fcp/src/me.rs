@@ -605,6 +605,9 @@ impl FcpClient {
     pub async fn events(&self) -> Result<UserEvents, FcpError> {
         let api = self.session().await.server.api_url;
         let url = websocket_url(&api, "/me/events")?;
+        // A `wss:` URL builds a rustls client from the process default,
+        // which rustls cannot pick with both ring and aws-lc-rs linked.
+        anvil_core::install_default_crypto_provider();
         let (mut socket, _) = tokio_tungstenite::connect_async(url.as_str())
             .await
             .map_err(|e| FcpError::Unreachable(format!("{url}: {e}")))?;

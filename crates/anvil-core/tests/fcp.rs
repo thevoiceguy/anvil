@@ -89,8 +89,10 @@ impl Fcp {
             .expect("the admin answers");
         let status = response.status();
         let body: Value = response.json().await.unwrap_or(Value::Null);
-        if status == reqwest::StatusCode::CONFLICT {
-            // Another test made it first.
+        // Another test made it first: FCP answers 409, or 500 before
+        // v0.25.617 (its unique index deciding the race).
+        if status == reqwest::StatusCode::CONFLICT || body.to_string().contains("tenants_name_key")
+        {
             return Box::pin(self.tenant_for_domain()).await;
         }
         assert!(status.is_success(), "creating the tenant: {status} {body}");
