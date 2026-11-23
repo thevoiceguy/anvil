@@ -4,8 +4,8 @@ Anvil is a cross-platform softphone (iOS, Android, Windows, macOS, Linux) built 
 Rust workspaces of its own, used as git dependencies pinned to release tags
 (the root `Cargo.toml`):
 
-- siphon-rs (`thevoiceguy/siphon-rs`) — RFC 3261 SIP signaling stack (pure Rust, Tokio)
-- forge-media (`thevoiceguy/forge-media`) — RTP / codec / media engine (Tokio; some Linux-only features)
+- siphon-rs (`feryx-io/siphon-rs`) — RFC 3261 SIP signaling stack (pure Rust, Tokio)
+- forge-media (`feryx-io/forge-media`) — RTP / codec / media engine (Tokio; some Linux-only features)
 
 Anvil is FCP's softphone (`feryx-io/fcp`, `docs/SOFTPHONE.md` there holds
 the design and the phases).

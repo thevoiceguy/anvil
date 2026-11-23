@@ -5,8 +5,8 @@ A cross-platform softphone built in Rust.
 Anvil is a SIP user agent that runs on **Linux, macOS, Windows, iOS, and Android**
 from a single Rust core. It builds on two existing workspaces:
 
-- [**siphon-rs**](https://github.com/thevoiceguy/siphon-rs) — RFC 3261 SIP signaling stack
-- [**forge-media**](https://github.com/thevoiceguy/forge-media) — RTP / codec / media engine
+- [**siphon-rs**](https://github.com/feryx-io/siphon-rs) — RFC 3261 SIP signaling stack
+- [**forge-media**](https://github.com/feryx-io/forge-media) — RTP / codec / media engine
 
 Both are git dependencies pinned to release tags. Anvil is the softphone of
 [FCP](https://github.com/feryx-io/fcp), and is tested against it.
