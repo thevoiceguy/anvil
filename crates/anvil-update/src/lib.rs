@@ -32,7 +32,7 @@ pub const UPDATE_KEY: [u8; 32] = [
 ];
 
 /// Where the latest release's manifest is.
-pub const FEED: &str = "https://github.com/thevoiceguy/anvil/releases/latest/download/";
+pub const FEED: &str = "https://github.com/feryx-io/anvil/releases/latest/download/";
 
 /// What can go wrong updating.
 #[derive(Debug, thiserror::Error)]

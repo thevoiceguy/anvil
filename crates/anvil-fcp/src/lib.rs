@@ -1,4 +1,4 @@
-//! Anvil as FCP's client (`docs/SOFTPHONE.md` in thevoiceguy/fcp):
+//! Anvil as FCP's client (`docs/SOFTPHONE.md` in feryx-io/fcp):
 //!
 //! - [`discover`] finds FCP from a server address or an email address, and
 //!   [`sign_in_methods`] asks it how a person signs in (password, single

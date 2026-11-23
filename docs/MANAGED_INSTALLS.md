@@ -1,6 +1,6 @@
 # Anvil — managed installs and branded builds
 
-Designed 2026-10-24 from D8's findings on FCP (`thevoiceguy/fcp`,
+Designed 2026-10-24 from D8's findings on FCP (`feryx-io/fcp`,
 `docs/DEEP_TESTING.md`) and agreed the same day on every recommendation
 in §7.
 
