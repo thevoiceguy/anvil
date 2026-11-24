@@ -68,7 +68,7 @@ live in FCP: `docs/SOFTPHONE.md` in `feryx-io/fcp`. Anvil's phases:
     callback, `NotFound` and `TotpRequired` statuses
   - FCP's `/me/events` needs its admin following an events server that the
     call manager posts to (`[events] server_url` on both)
-- [ ] **A5** SDES-SRTP, and the cross-repo suite completed
+- [x] **A5** SDES-SRTP, and the cross-repo suite completed
   - [x] **A5a** SDES-SRTP (RFC 4568, RFC 3711): `MediaConfig::srtp` read —
         `Optional` and `Required` offer `RTP/SAVP` with a fresh
         AES_CM_128_HMAC_SHA1_80 key, `Required` hangs up on an answer in the
@@ -86,9 +86,10 @@ live in FCP: `docs/SOFTPHONE.md` in `feryx-io/fcp`. Anvil's phases:
         `anvil_over_tls_is_called_encrypted` — Anvil over TLS requiring SRTP,
         called by a plain Anvil over UDP, both heard (`ANVIL_FCP_SIPS`,
         `ANVIL_FCP_CA`)
-  - [ ] **A5c** The cross-repo suite completed: CI against FCP (done:
-        FCP's compose stack from its public nightly images on every
-        run), a TLS listener in that stack (to do)
+  - [x] **A5c** The cross-repo suite completed: CI against FCP (FCP's
+        compose stack from its public nightly images on every run), and
+        its call manager's TLS listener (5061, from the stack's CA) for
+        `anvil_over_tls_is_called_encrypted`
 
 ---
 
