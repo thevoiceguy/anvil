@@ -166,6 +166,10 @@ jobs:
         env:
           ANVIL_FCP_ADMIN: http://127.0.0.1:8080
           ANVIL_FCP_SIP: 127.0.0.1:5060
+          # The call manager's TLS listener, its certificate from the
+          # stack's own CA (copied out above).
+          ANVIL_FCP_SIPS: 127.0.0.1:5061
+          ANVIL_FCP_CA: ${{ github.workspace }}/fcp/deploy/docker-compose/fcp-ca.crt
         run: |
           export ANVIL_FCP_TOKEN=$(grep '^FCP_ADMIN_AUTH_TOKEN=' fcp/deploy/docker-compose/.env | cut -d= -f2-)
           cargo test -p anvil-core --test fcp -- --nocapture
