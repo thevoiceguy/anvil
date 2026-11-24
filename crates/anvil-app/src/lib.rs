@@ -2162,10 +2162,18 @@ async fn follow(inner: std::sync::Weak<Inner>, mut events: EventStream) {
                 let v = view.clone();
                 update_call(&inner, call.0, |_| {}, move || v);
             }
+            // Ringing moves a call placed on from dialing, and never back
+            // from connected: a 180 told after the 200 OK left CI's
+            // video tests waiting on a call shown ringing with its media
+            // up (codec and connected_at set, so the answer was taken).
             Event::CallRinging { call } => update_call(
                 &inner,
                 call.0,
-                |c| c.state = CallState::Ringing,
+                |c| {
+                    if c.state == CallState::Dialing {
+                        c.state = CallState::Ringing;
+                    }
+                },
                 || outgoing(call.0),
             ),
             Event::CallEstablished { call, codec } => {
