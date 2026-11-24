@@ -27,4 +27,4 @@ repository, or here if you found it through Anvil.
 
 ## Supported versions
 
-Only the latest release is supported. Installed apps update themselves to it.
+Only the latest release is supported.
