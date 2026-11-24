@@ -86,8 +86,9 @@ live in FCP: `docs/SOFTPHONE.md` in `feryx-io/fcp`. Anvil's phases:
         `anvil_over_tls_is_called_encrypted` — Anvil over TLS requiring SRTP,
         called by a plain Anvil over UDP, both heard (`ANVIL_FCP_SIPS`,
         `ANVIL_FCP_CA`)
-  - [ ] **A5c** The cross-repo suite completed: CI against FCP (the
-        `FCP_READ_TOKEN` secret), a TLS listener in that stack
+  - [ ] **A5c** The cross-repo suite completed: CI against FCP (done:
+        FCP's compose stack from its public nightly images on every
+        run), a TLS listener in that stack (to do)
 
 ---
 

@@ -126,27 +126,17 @@ jobs:
 
   # Anvil against FCP: FCP's compose stack from its nightly images, and
   # the tests against it (users made through the admin API, calls through
-  # the call manager). FCP's repository and images are private: the
-  # FCP_READ_TOKEN secret (a token that may read feryx-io/fcp and its
-  # packages) lets this job reach them; without it the job says so and
-  # passes.
+  # the call manager). FCP's repository and its images on ghcr.io/feryx-io
+  # are public: no token is needed.
   fcp:
     name: against FCP
     runs-on: ubuntu-latest
     timeout-minutes: 60
     permissions:
       contents: read
-      packages: read
-    env:
-      FCP_READ_TOKEN: ${{ secrets.FCP_READ_TOKEN }}
     steps:
-      - name: Without FCP_READ_TOKEN, FCP cannot be reached
-        if: env.FCP_READ_TOKEN == ''
-        run: echo "::notice::FCP_READ_TOKEN is not set; the tests against FCP were skipped"
       - uses: actions/checkout@v5
-        if: env.FCP_READ_TOKEN != ''
       - name: FCP's compose files
-        if: env.FCP_READ_TOKEN != ''
         uses: actions/checkout@v5
         with:
           # Public: no token needed to read it.
@@ -154,16 +144,8 @@ jobs:
           path: fcp
           sparse-checkout: deploy/docker-compose
       - name: Free disk space
-        if: env.FCP_READ_TOKEN != ''
         run: sudo rm -rf /usr/share/dotnet /opt/ghc /usr/local/lib/android /opt/hostedtoolcache/CodeQL
-      - uses: docker/login-action@v3
-        if: env.FCP_READ_TOKEN != ''
-        with:
-          registry: ghcr.io
-          username: ${{ github.actor }}
-          password: ${{ secrets.FCP_READ_TOKEN }}
       - name: Start FCP from its nightly images
-        if: env.FCP_READ_TOKEN != ''
         working-directory: fcp/deploy/docker-compose
         run: |
           ip=$(hostname -I | awk '{print $1}')
@@ -177,14 +159,10 @@ jobs:
           sudo cp fcp-ca.crt /usr/local/share/ca-certificates/fcp-ca.crt
           sudo update-ca-certificates
       - uses: dtolnay/rust-toolchain@stable
-        if: env.FCP_READ_TOKEN != ''
       - name: Audio headers for cpal
-        if: env.FCP_READ_TOKEN != ''
         run: sudo apt-get update && sudo apt-get install -y libasound2-dev libvpx-dev libclang-dev libpipewire-0.3-dev
       - uses: Swatinem/rust-cache@v2
-        if: env.FCP_READ_TOKEN != ''
       - name: Anvil against FCP
-        if: env.FCP_READ_TOKEN != ''
         env:
           ANVIL_FCP_ADMIN: http://127.0.0.1:8080
           ANVIL_FCP_SIP: 127.0.0.1:5060
@@ -197,10 +175,23 @@ jobs:
           cargo test -p anvil-fcp --test fcp -- --nocapture --test-threads=1
           cargo test -p anvil-app --test fcp -- --nocapture
       - name: FCP's logs
-        if: failure() && env.FCP_READ_TOKEN != ''
+        if: failure()
         working-directory: fcp/deploy/docker-compose
-        run: docker compose logs --no-color --tail 300
+        run: |
+          docker compose logs --no-color --tail 300
+          # The call manager and conference server whole, as an artifact:
+          # a test's own lines are far above the last 300.
+          docker compose logs --no-color fcp-call-manager fcp-conference > "$RUNNER_TEMP/fcp-calls.log"
+          echo "-- warnings and errors from the call manager and conference server --"
+          grep -E " (WARN|ERROR) " "$RUNNER_TEMP/fcp-calls.log" | tail -200 || true
+      - name: Keep FCP's call logs
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: fcp-call-logs
+          path: ${{ runner.temp }}/fcp-calls.log
+          retention-days: 7
       - name: Stop FCP
-        if: always() && env.FCP_READ_TOKEN != ''
+        if: always()
         working-directory: fcp/deploy/docker-compose
         run: docker compose down -v

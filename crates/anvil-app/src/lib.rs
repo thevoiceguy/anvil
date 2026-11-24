@@ -107,6 +107,10 @@ struct Inner {
     /// Following FCP's live events.
     fcp_events: Mutex<Option<tokio::task::JoinHandle<()>>>,
     settings_path: Option<PathBuf>,
+    /// Counts the presence reads begun and the presence changes made, so a
+    /// read that something newer has overtaken is dropped
+    /// (`presence_read_began`).
+    presence_turn: std::sync::atomic::AtomicU64,
     local: Mutex<LocalSettings>,
     /// The contacts on the user's FCP account, as last read or written.
     account_contacts: Mutex<Vec<Contact>>,
@@ -227,6 +231,7 @@ impl Phone {
             events: Mutex::new(None),
             fcp_events: Mutex::new(None),
             settings_path: cfg.settings_path,
+            presence_turn: std::sync::atomic::AtomicU64::new(0),
             local: Mutex::new(local),
             account_contacts: Mutex::new(Vec::new()),
             features: Mutex::new(BTreeMap::new()),
@@ -269,6 +274,11 @@ impl Phone {
                     data::refresh_people(&inner, &first),
                     data::refresh_voicemail(&inner, &first),
                     data::refresh_contacts(&inner, &first),
+                    // Not left to an event: one sent before the events
+                    // stream is up is missed, and the user would see no
+                    // presence until it next changed.
+                    data::refresh_presence(&inner, &first),
+                    crate::room::refresh_meetings(&inner, &first),
                 );
             });
             let task = tokio::spawn(data::follow(Arc::downgrade(&phone.inner), fcp));
@@ -864,7 +874,7 @@ impl Phone {
                         idle: None,
                     })
                     .await?;
-                self.inner.set_presence(Some(now.into()));
+                self.inner.presence_changed(now.into());
                 Ok(Response::ok())
             }
             Command::PresenceNote { note } => {
@@ -875,7 +885,7 @@ impl Phone {
                         ..Default::default()
                     })
                     .await?;
-                self.inner.set_presence(Some(now.into()));
+                self.inner.presence_changed(now.into());
                 Ok(Response::ok())
             }
             Command::PresenceIdle { idle } => {
@@ -886,7 +896,7 @@ impl Phone {
                         ..Default::default()
                     })
                     .await?;
-                self.inner.set_presence(Some(now.into()));
+                self.inner.presence_changed(now.into());
                 Ok(Response::ok())
             }
             Command::StatusAdd { label, state } => {
@@ -1859,9 +1869,43 @@ impl Inner {
         }
     }
 
-    fn set_presence(&self, presence: Option<MyPresence>) {
+    /// A read of the user's presence begins. What it returns is given to
+    /// `presence_read` with this turn.
+    fn presence_read_began(&self) -> u64 {
+        self.presence_turn
+            .fetch_add(1, std::sync::atomic::Ordering::SeqCst)
+            + 1
+    }
+
+    /// What a read of the presence returned. Dropped when a later read
+    /// began or the user changed their presence while it was out: FCP may
+    /// have answered it before that change, and it would put the old
+    /// presence back.
+    fn presence_read(&self, turn: u64, presence: Option<MyPresence>) {
+        self.set_presence(Some(turn), presence);
+    }
+
+    /// FCP's answer to the user changing their presence. It is newer than
+    /// any read still out, so those are dropped.
+    fn presence_changed(&self, presence: MyPresence) {
+        self.set_presence(None, Some(presence));
+    }
+
+    fn set_presence(&self, read: Option<u64>, presence: Option<MyPresence>) {
         let changed = {
             let mut state = self.state.lock();
+            match read {
+                Some(turn)
+                    if self.presence_turn.load(std::sync::atomic::Ordering::SeqCst) != turn =>
+                {
+                    return
+                }
+                Some(_) => {}
+                None => {
+                    self.presence_turn
+                        .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                }
+            }
             let changed = state.presence != presence;
             state.presence = presence.clone();
             changed

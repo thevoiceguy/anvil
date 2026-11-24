@@ -182,8 +182,9 @@ pub(crate) async fn refresh_all(inner: &Inner, fcp: &FcpClient) {
 
 /// The user's presence, from an FCP that keeps it.
 pub(crate) async fn refresh_presence(inner: &Inner, fcp: &FcpClient) {
+    let turn = inner.presence_read_began();
     match fcp.presence().await {
-        Ok(p) => inner.set_presence(p.map(Into::into)),
+        Ok(p) => inner.presence_read(turn, p.map(Into::into)),
         Err(e) => tracing::debug!(%e, "presence not read"),
     }
 }
