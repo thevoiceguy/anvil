@@ -126,8 +126,12 @@ linked statically where `libvpx.a` is installed (Ubuntu's `libvpx-dev` has it), 
 dynamically. Its H.264 tests run when `ANVIL_OPENH264_DIR` holds Cisco's OpenH264
 (CI fetches it).
 
-To move to a new siphon-rs or forge-media release, change the tags in the root
-`Cargo.toml` (every crate of one repo on the same tag).
+siphon-rs comes from crates.io, published as `siphon-*` and renamed back with
+`package` so the code keeps its `sip_*` names; forge-media comes by git tag. To move
+to a new siphon-rs release, set each `siphon-*` version in the root `Cargo.toml` to
+that release's (its workspace `Cargo.toml` lists them); for forge-media, change the
+tag (every crate on the same tag). `cargo tree -d` must show one copy of
+`siphon-sdp`: forge-media takes it from crates.io too.
 
 ## Conventions
 
