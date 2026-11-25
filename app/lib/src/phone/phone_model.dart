@@ -33,6 +33,11 @@ class PhoneModel extends ChangeNotifier {
   /// Waiting for the system browser to come back from a sign-in.
   bool browserSignIn = false;
 
+  /// How long a passing notice (a call ended, a transfer's progress) stays
+  /// before it clears itself; a refusal stays until dismissed.
+  static const noticeFades = Duration(seconds: 6);
+  Timer? _noticeFade;
+
   /// The last thing to tell the user (a call ended, a command refused).
   Notice? notice;
 
@@ -269,14 +274,16 @@ class PhoneModel extends ChangeNotifier {
       switch (event.kind) {
         case 'call_ended':
           if (event.reason != null) {
-            notice = Notice('call_ended', event.reason!);
+            _passing(Notice('call_ended', event.reason!));
           }
           if (consulting != null &&
               !snapshot.calls.any((c) => c.id == consulting)) {
             consulting = null;
           }
         case 'transfer_progress':
-          if (event.reason != null) notice = Notice('transfer', event.reason!);
+          if (event.reason != null) {
+            _passing(Notice('transfer', event.reason!));
+          }
       }
       notifyListeners();
     });
@@ -318,8 +325,21 @@ class PhoneModel extends ChangeNotifier {
   }
 
   void clearNotice() {
+    _noticeFade?.cancel();
     notice = null;
     notifyListeners();
+  }
+
+  /// Show `shown` for [noticeFades], then clear it unless something else
+  /// was said meanwhile.
+  void _passing(Notice shown) {
+    notice = shown;
+    _noticeFade?.cancel();
+    _noticeFade = Timer(noticeFades, () {
+      if (_disposed || !identical(notice, shown)) return;
+      notice = null;
+      notifyListeners();
+    });
   }
 
   /// What an error says, without the wrapping a Dart or Rust error adds.
@@ -346,6 +366,7 @@ class PhoneModel extends ChangeNotifier {
   @override
   void dispose() {
     _disposed = true;
+    _noticeFade?.cancel();
     _stopEvents();
     dialRequest.dispose();
     joinRequest.dispose();
