@@ -15,7 +15,7 @@ members = [
 ]
 
 [workspace.package]
-version = "0.2.107"
+version = "0.2.108"
 edition = "2021"
 rust-version = "1.97"
 license = "MIT OR Apache-2.0"
@@ -52,25 +52,26 @@ cpal = "0.15"
 # Codec
 opus = "0.3"
 
-# siphon-rs (SIP stack) — pinned to a release tag
-sip-core = { git = "https://github.com/feryx-io/siphon-rs", tag = "v2026.11.22" }
-sip-parse = { git = "https://github.com/feryx-io/siphon-rs", tag = "v2026.11.22" }
-sip-transport = { git = "https://github.com/feryx-io/siphon-rs", tag = "v2026.11.22", features = ["tls"] }
-sip-transaction = { git = "https://github.com/feryx-io/siphon-rs", tag = "v2026.11.22" }
-sip-dialog = { git = "https://github.com/feryx-io/siphon-rs", tag = "v2026.11.22" }
-sip-uac = { git = "https://github.com/feryx-io/siphon-rs", tag = "v2026.11.22" }
-sip-uas = { git = "https://github.com/feryx-io/siphon-rs", tag = "v2026.11.22" }
-sip-sdp = { git = "https://github.com/feryx-io/siphon-rs", tag = "v2026.11.22" }
-sip-auth = { git = "https://github.com/feryx-io/siphon-rs", tag = "v2026.11.22" }
-sip-dns = { git = "https://github.com/feryx-io/siphon-rs", tag = "v2026.11.22" }
+# siphon-rs (SIP stack) — from crates.io (siphon-rs v2026.11.22.1). The crates
+# were published as `siphon-*`; `package` keeps the `sip_*` names the code uses.
+sip-core = { package = "siphon-core", version = "0.7.8" }
+sip-parse = { package = "siphon-parse", version = "0.4.0" }
+sip-transport = { package = "siphon-transport", version = "0.7.2", features = ["tls"] }
+sip-transaction = { package = "siphon-transaction", version = "0.9.1" }
+sip-dialog = { package = "siphon-dialog", version = "0.4.0" }
+sip-uac = { package = "siphon-uac", version = "0.9.6" }
+sip-uas = { package = "siphon-uas", version = "0.5.2" }
+sip-sdp = { package = "siphon-sdp", version = "0.3.2" }
+sip-auth = { package = "siphon-auth", version = "0.4.0" }
+sip-dns = { package = "siphon-dns", version = "0.3.0" }
 
 # forge-media — pinned to a release tag
-forge-rtp = { git = "https://github.com/feryx-io/forge-media", tag = "v2026.11.21.1" }
-forge-core = { git = "https://github.com/feryx-io/forge-media", tag = "v2026.11.21.1" }
-forge-codecs = { git = "https://github.com/feryx-io/forge-media", tag = "v2026.11.21.1", features = ["g722"] }
-forge-dtmf = { git = "https://github.com/feryx-io/forge-media", tag = "v2026.11.21.1" }
-forge-resampler = { git = "https://github.com/feryx-io/forge-media", tag = "v2026.11.21.1" }
-forge-bwe = { git = "https://github.com/feryx-io/forge-media", tag = "v2026.11.21.1" }
+forge-rtp = { git = "https://github.com/feryx-io/forge-media", tag = "v2026.11.22" }
+forge-core = { git = "https://github.com/feryx-io/forge-media", tag = "v2026.11.22" }
+forge-codecs = { git = "https://github.com/feryx-io/forge-media", tag = "v2026.11.22", features = ["g722"] }
+forge-dtmf = { git = "https://github.com/feryx-io/forge-media", tag = "v2026.11.22" }
+forge-resampler = { git = "https://github.com/feryx-io/forge-media", tag = "v2026.11.22" }
+forge-bwe = { git = "https://github.com/feryx-io/forge-media", tag = "v2026.11.22" }
 
 # Internal
 anvil-core  = { path = "crates/anvil-core"  }
