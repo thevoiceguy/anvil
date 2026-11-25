@@ -39,6 +39,19 @@ String shownText(Strings s, String state, String? label, {bool idle = false}) {
   };
 }
 
+/// What this app shows the user of themselves: FCP's reckoning, with a call
+/// of this app's own laid over it at once — the app knows before the
+/// server says (D8 finding 70). Offline stays (the chip then says why), and
+/// so does a call or ringing FCP already reports. The call's state goes
+/// when the call does, leaving the status the user chose.
+String ownShown(MyPresence p, List<PhoneCall> calls) {
+  if (p.shown == 'offline' || p.shown == 'on_call') return p.shown;
+  // Dialing out is already a call; ringing is one coming in.
+  if (calls.any((c) => c.state != CallState.ringing)) return 'on_call';
+  if (calls.isNotEmpty) return 'ringing';
+  return p.shown;
+}
+
 /// When a "clear after" choice ends, from `now`; null is never.
 DateTime? clearAt(String choice, DateTime now) => switch (choice) {
   '30m' => now.add(const Duration(minutes: 30)),
@@ -62,17 +75,19 @@ class PresenceChip extends StatelessWidget {
     }
     final s = Strings.of(context);
     final registered = snap.registration == Registration.registered;
+    final shown = ownShown(presence, snap.calls);
     // This app not registered: the user sees why, not "offline".
-    final (label, avatar) = registered || presence.shown != 'offline'
+    final (label, avatar) = registered || shown != 'offline'
         ? (
             shownText(
               s,
-              presence.shown,
+              shown,
               presence.shownLabel,
-              idle: presence.idle,
+              // A call says so, idle or not.
+              idle: presence.idle && shown == presence.shown,
             ),
             CircleAvatar(
-              backgroundColor: AnvilColors.presence(presence.shown),
+              backgroundColor: AnvilColors.presence(shown),
               radius: 5,
             ),
           )

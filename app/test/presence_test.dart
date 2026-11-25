@@ -261,4 +261,35 @@ void main() {
       expect(phone.log.last, 'presence idle false', reason: 'not idle for 30');
     },
   );
+
+  testWidgets('a call of this app shows at once, and the status comes back', (
+    tester,
+  ) async {
+    // D8 finding 70: the chip waited on FCP to say so, which may not come.
+    final phone = await running(
+      tester,
+      presence: const MyPresence(
+        shown: 'busy',
+        shownLabel: 'Heads down',
+        status: 'focus',
+        statusState: 'busy',
+      ),
+    );
+    expect(chip(tester), 'Heads down');
+
+    await phone.call('1002');
+    await tester.pumpAndSettle();
+    expect(chip(tester), 'On a call · Heads down', reason: 'dialing out');
+    phone.answerOutgoing(1);
+    await tester.pumpAndSettle();
+    expect(chip(tester), 'On a call · Heads down');
+
+    phone.hungUp(1);
+    await tester.pumpAndSettle();
+    expect(chip(tester), 'Heads down', reason: 'back to what was chosen');
+
+    phone.ring('1003', name: 'Cy');
+    await tester.pumpAndSettle();
+    expect(chip(tester), 'Ringing · Heads down');
+  });
 }
