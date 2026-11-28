@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:url_launcher/url_launcher.dart';
 
 import '../../l10n/app_localizations.dart';
+import '../design/theme.dart';
 import '../phone/phone_api.dart';
 import '../phone/phone_model.dart';
 
@@ -218,6 +219,19 @@ class _SignInScreenState extends State<SignInScreen> {
             shrinkWrap: true,
             padding: const EdgeInsets.all(24),
             children: [
+              // No tenant's logo on Feryx: its wordmark.
+              if (widget.model.brandLogo == null && FeryxLook.of(context))
+                Padding(
+                  padding: const EdgeInsets.only(bottom: 16),
+                  child: SizedBox(
+                    height: 36,
+                    child: Image.asset(
+                      'assets/feryx/feryx-wordmark.png',
+                      key: const Key('feryxWordmark'),
+                      semanticLabel: 'Feryx',
+                    ),
+                  ),
+                ),
               if (widget.model.brandLogo case final logo?)
                 Padding(
                   padding: const EdgeInsets.only(bottom: 12),

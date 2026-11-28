@@ -3,6 +3,7 @@ import 'dart:io';
 import 'package:flutter/material.dart';
 
 import 'src/app.dart';
+import 'src/design/theme_setting.dart';
 import 'src/desktop/idle.dart';
 import 'src/desktop/links.dart';
 import 'src/desktop/native_shell.dart';
@@ -37,8 +38,13 @@ Future<void> main(List<String> args) async {
             '${await RustPhone.directory()}${Platform.pathSeparator}idle.json',
           ),
         );
+  // System, light, dark or Feryx, kept on this device.
+  final themeSetting = await ThemeSetting.read(
+    File('${await RustPhone.directory()}${Platform.pathSeparator}theme.json'),
+  );
   runApp(
     AnvilApp(
+      themeSetting: themeSetting,
       phone: phone,
       shell: shell,
       idleClock: shell == null ? null : SystemIdleClock(),

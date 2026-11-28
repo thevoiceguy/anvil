@@ -1004,7 +1004,8 @@ void main() {
   testWidgets(
     'settings change dnd, call waiting, forwards, audio and ringing',
     (tester) async {
-      final phone = await signedIn(tester);
+      // Tall enough that Settings, Appearance and all, needs no scrolling.
+      final phone = await signedIn(tester, size: const Size(1000, 1800));
       await go(tester, 'Settings');
       expect(find.text('1009'), findsOneWidget, reason: 'forwarded when busy');
 

@@ -10,6 +10,7 @@ import 'package:flutter/services.dart';
 import 'package:url_launcher/url_launcher.dart';
 
 import '../../l10n/app_localizations.dart';
+import '../design/theme_setting.dart';
 import '../desktop/shell.dart';
 import '../mobile/bridge.dart';
 import '../update/update_banner.dart';
@@ -241,6 +242,33 @@ class SettingsPage extends StatelessWidget {
             snap.video.h264Allowed != null) ...[
           header(s.settingsVideo),
           _Video(snap: snap, model: model),
+        ],
+        if (ThemeScope.maybeOf(context) case final look?) ...[
+          header(s.settingsAppearance),
+          ListTile(
+            key: const Key('theme'),
+            leading: const Icon(Icons.palette_outlined),
+            title: Text(s.themeLabel),
+            subtitle: Text(s.themeSubtitle),
+            trailing: DropdownButton<AnvilThemeChoice>(
+              key: const Key('themeChoice'),
+              value: look.choice,
+              items: [
+                for (final (choice, label) in [
+                  (AnvilThemeChoice.system, s.themeSystem),
+                  (AnvilThemeChoice.light, s.themeLight),
+                  (AnvilThemeChoice.dark, s.themeDark),
+                  (AnvilThemeChoice.feryx, s.themeFeryx),
+                ])
+                  DropdownMenuItem(
+                    key: Key('themeChoice-${choice.name}'),
+                    value: choice,
+                    child: Text(label),
+                  ),
+              ],
+              onChanged: (choice) => look.set(choice ?? look.choice),
+            ),
+          ),
         ],
         if (DesktopScope.maybeOf(context) case final shell?
             when shell.canStartAtLogin) ...[
