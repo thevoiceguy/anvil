@@ -4,6 +4,7 @@
 import 'package:flutter/material.dart';
 
 import '../../l10n/app_localizations.dart';
+import '../design/theme.dart';
 import '../phone/phone_api.dart';
 import '../phone/phone_model.dart';
 import 'calls.dart';
@@ -255,7 +256,16 @@ class _HomeScreenState extends State<HomeScreen> {
     final snap = model.snapshot;
     return AppBar(
       leading: model.brandLogo == null
-          ? null
+          // No tenant's logo on Feryx: its emblem.
+          ? FeryxLook.of(context)
+                ? Padding(
+                    padding: const EdgeInsets.all(12),
+                    child: Image.asset(
+                      'assets/feryx/feryx-emblem.png',
+                      key: const Key('feryxEmblem'),
+                    ),
+                  )
+                : null
           : Padding(
               padding: const EdgeInsets.all(8),
               child: Image.memory(

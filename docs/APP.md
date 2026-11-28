@@ -119,6 +119,16 @@ only where users would notice them missing: window controls and the menu bar
 on desktop, the system call screen (CallKit, ConnectionService) on mobile, the
 share sheet.
 
+Themes: System (light or dark as the device is), Light, Dark and Feryx,
+chosen under Settings → Appearance and kept on this device (`theme.json`).
+Feryx is feryx.io's: charcoal (#0D0E10, panels #131518), silver gradient
+primary buttons, a peach accent (#F4A879), Inter with IBM Plex Mono for
+section headers, and the Feryx emblem and wordmark where the tenant shows no
+logo. It is always dark, and a tenant's brand colour does not replace it
+(the tenant's name and logo still show). The call buttons stay green and red
+on every theme (`AnvilTheme.ownColour`). The goldens hold every screen in
+light, dark and Feryx.
+
 - **Sign in.** Server address or email address (FCP's discovery) and the
   username first; FCP's `/auth/discover` then says how that person signs
   in: a password (with a small "Use single sign-on" link when the tenant

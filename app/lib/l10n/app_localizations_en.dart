@@ -504,6 +504,28 @@ class StringsEn extends Strings {
   String get trayQuit => 'Quit';
 
   @override
+  String get settingsAppearance => 'Appearance';
+
+  @override
+  String get themeLabel => 'Theme';
+
+  @override
+  String get themeSubtitle =>
+      'System follows this device; Feryx is always dark';
+
+  @override
+  String get themeSystem => 'System';
+
+  @override
+  String get themeLight => 'Light';
+
+  @override
+  String get themeDark => 'Dark';
+
+  @override
+  String get themeFeryx => 'Feryx';
+
+  @override
   String get settingsDesktop => 'This computer';
 
   @override

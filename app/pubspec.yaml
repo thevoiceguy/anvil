@@ -82,10 +82,17 @@ flutter:
     - family: Inter
       fonts:
         - asset: assets/fonts/Inter.ttf
+    # The Feryx theme's labels (OFL, assets/fonts/IBMPlexMono-OFL.txt).
+    - family: IBM Plex Mono
+      fonts:
+        - asset: assets/fonts/IBMPlexMono-Regular.ttf
+        - asset: assets/fonts/IBMPlexMono-Medium.ttf
+          weight: 500
 
   assets:
     - assets/tray/
     - assets/app/
+    - assets/feryx/
 
   # To add assets to your application, add an assets section, like this:
   # assets:

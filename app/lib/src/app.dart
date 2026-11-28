@@ -5,6 +5,7 @@ import 'package:flutter_localizations/flutter_localizations.dart';
 
 import '../l10n/app_localizations.dart';
 import 'design/theme.dart';
+import 'design/theme_setting.dart';
 import 'desktop/bridge.dart';
 import 'desktop/idle.dart';
 import 'desktop/shell.dart';
@@ -26,6 +27,7 @@ class AnvilApp extends StatefulWidget {
     this.mobile,
     this.idleClock,
     this.idleSetting,
+    this.themeSetting,
   });
   final PhoneApi phone;
 
@@ -47,12 +49,17 @@ class AnvilApp extends StatefulWidget {
   final IdleClock? idleClock;
   final IdleSetting? idleSetting;
 
+  /// System, light, dark or Feryx, kept on this device; the system's (and
+  /// not kept) in the screens' tests unless they give one.
+  final ThemeSetting? themeSetting;
+
   @override
   State<AnvilApp> createState() => _AnvilAppState();
 }
 
 class _AnvilAppState extends State<AnvilApp> {
   late final PhoneModel model = PhoneModel(widget.phone, mobile: widget.mobile);
+  late final ThemeSetting themeSetting = widget.themeSetting ?? ThemeSetting();
   // A managed install may never look for updates: the company installs
   // them.
   late final UpdateModel? updates =
@@ -111,7 +118,7 @@ class _AnvilAppState extends State<AnvilApp> {
   @override
   Widget build(BuildContext context) {
     return ListenableBuilder(
-      listenable: model,
+      listenable: Listenable.merge([model, themeSetting]),
       builder: (context, _) {
         final brand = model.brandPrimary;
         final color = brand == null ? null : Color(brand);
@@ -121,12 +128,19 @@ class _AnvilAppState extends State<AnvilApp> {
   }
 
   Widget _app(Color? brand) {
+    // Feryx keeps its own palette: a brand's colour does not replace it.
+    final feryx = themeSetting.choice == AnvilThemeChoice.feryx;
     return MaterialApp(
       debugShowCheckedModeBanner: false,
       onGenerateTitle: (context) =>
           model.brandName ?? Strings.of(context).appName,
-      theme: AnvilTheme.light(brand: brand),
-      darkTheme: AnvilTheme.dark(brand: brand),
+      theme: feryx ? AnvilTheme.feryx() : AnvilTheme.light(brand: brand),
+      darkTheme: feryx ? AnvilTheme.feryx() : AnvilTheme.dark(brand: brand),
+      themeMode: switch (themeSetting.choice) {
+        AnvilThemeChoice.system => ThemeMode.system,
+        AnvilThemeChoice.light => ThemeMode.light,
+        AnvilThemeChoice.dark || AnvilThemeChoice.feryx => ThemeMode.dark,
+      },
       localizationsDelegates: const [
         Strings.delegate,
         GlobalMaterialLocalizations.delegate,
@@ -139,6 +153,7 @@ class _AnvilAppState extends State<AnvilApp> {
         if (updates != null) {
           app = UpdateScope(updates: updates!, quit: _quit, child: app);
         }
+        app = ThemeScope(setting: themeSetting, child: app);
         if (widget.idleSetting != null) {
           app = IdleScope(setting: widget.idleSetting!, child: app);
         }

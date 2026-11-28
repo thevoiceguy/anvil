@@ -30,6 +30,8 @@ class VoicemailPage extends StatelessWidget {
             style: FilledButton.styleFrom(
               backgroundColor: AnvilColors.hangup,
               foregroundColor: Colors.white,
+              // Green or red on every theme, Feryx's silver too.
+              backgroundBuilder: AnvilTheme.ownColour,
             ),
             onPressed: () => Navigator.of(context).pop(true),
             child: Text(s.deleteButton),

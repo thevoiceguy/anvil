@@ -94,6 +94,8 @@ class IncomingCallCard extends StatelessWidget {
                   style: FilledButton.styleFrom(
                     backgroundColor: AnvilColors.hangup,
                     foregroundColor: Colors.white,
+                    // Green or red on every theme, Feryx's silver too.
+                    backgroundBuilder: AnvilTheme.ownColour,
                   ),
                   onPressed: () => model.run(() => model.api.decline(call.id)),
                   icon: const Icon(Icons.call_end),
@@ -106,6 +108,8 @@ class IncomingCallCard extends StatelessWidget {
                     style: FilledButton.styleFrom(
                       backgroundColor: AnvilColors.answer,
                       foregroundColor: Colors.white,
+                      // Green or red on every theme, Feryx's silver too.
+                      backgroundBuilder: AnvilTheme.ownColour,
                     ),
                     onPressed: () => model.answer(call.id, false),
                     icon: const Icon(Icons.call),
@@ -116,6 +120,8 @@ class IncomingCallCard extends StatelessWidget {
                     style: FilledButton.styleFrom(
                       backgroundColor: AnvilColors.answer,
                       foregroundColor: Colors.white,
+                      // Green or red on every theme, Feryx's silver too.
+                      backgroundBuilder: AnvilTheme.ownColour,
                     ),
                     onPressed: () => model.answer(call.id, true),
                     icon: const Icon(Icons.videocam),
@@ -127,6 +133,8 @@ class IncomingCallCard extends StatelessWidget {
                     style: FilledButton.styleFrom(
                       backgroundColor: AnvilColors.answer,
                       foregroundColor: Colors.white,
+                      // Green or red on every theme, Feryx's silver too.
+                      backgroundBuilder: AnvilTheme.ownColour,
                     ),
                     onPressed: () => model.answer(call.id),
                     icon: const Icon(Icons.call),
@@ -493,6 +501,8 @@ class _InCallPanelState extends State<InCallPanel> {
                 style: FilledButton.styleFrom(
                   backgroundColor: AnvilColors.hangup,
                   foregroundColor: Colors.white,
+                  // Green or red on every theme, Feryx's silver too.
+                  backgroundBuilder: AnvilTheme.ownColour,
                   minimumSize: const Size.fromHeight(52),
                 ),
                 onPressed: () => model.run(() => model.api.hangup(call.id)),
@@ -1185,6 +1195,8 @@ class _KeypadState extends State<Keypad> {
                 style: FilledButton.styleFrom(
                   backgroundColor: AnvilColors.answer,
                   foregroundColor: Colors.white,
+                  // Green or red on every theme, Feryx's silver too.
+                  backgroundBuilder: AnvilTheme.ownColour,
                   minimumSize: const Size.fromHeight(52),
                 ),
                 onPressed: _call,

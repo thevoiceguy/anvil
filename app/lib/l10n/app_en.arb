@@ -225,6 +225,13 @@
     }
   },
   "trayQuit": "Quit",
+  "settingsAppearance": "Appearance",
+  "themeLabel": "Theme",
+  "themeSubtitle": "System follows this device; Feryx is always dark",
+  "themeSystem": "System",
+  "themeLight": "Light",
+  "themeDark": "Dark",
+  "themeFeryx": "Feryx",
   "settingsDesktop": "This computer",
   "startAtLogin": "Start at login",
   "startAtLoginSubtitle": "Ready for calls when you sign in to the computer",

@@ -9,8 +9,10 @@
 import 'dart:convert';
 
 import 'package:anvil/src/app.dart';
+import 'package:anvil/src/design/theme_setting.dart';
 import 'package:anvil/src/phone/phone_api.dart';
 import 'package:clock/clock.dart';
+import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 
@@ -141,6 +143,7 @@ Future<FakePhone> open(
   required Size size,
   required Brightness brightness,
   bool signedIn = true,
+  AnvilThemeChoice look = AnvilThemeChoice.system,
 }) async {
   tester.view.physicalSize = size;
   tester.view.devicePixelRatio = 1;
@@ -149,7 +152,13 @@ Future<FakePhone> open(
   addTearDown(tester.platformDispatcher.clearPlatformBrightnessTestValue);
   final phone = FakePhone()..seed = seeded;
   if (signedIn) phone.saved = const SignedInAccountFake();
-  await tester.pumpWidget(AnvilApp(phone: phone, shell: FakeShell()));
+  await tester.pumpWidget(
+    AnvilApp(
+      phone: phone,
+      shell: FakeShell(),
+      themeSetting: ThemeSetting(choice: look),
+    ),
+  );
   await tester.pumpAndSettle();
   return phone;
 }
@@ -201,9 +210,13 @@ void main() {
   const wide = Size(1000, 700);
   const narrow = Size(400, 800);
 
-  for (final brightness in Brightness.values) {
-    final theme = brightness.name;
-
+  // Light and dark as the system has them, and Feryx on a light system:
+  // it is always dark.
+  for (final (theme, brightness, look) in [
+    ('light', Brightness.light, AnvilThemeChoice.system),
+    ('dark', Brightness.dark, AnvilThemeChoice.system),
+    ('feryx', Brightness.light, AnvilThemeChoice.feryx),
+  ]) {
     Future<void> shot(
       WidgetTester tester,
       String name,
@@ -216,8 +229,16 @@ void main() {
         size: size,
         brightness: brightness,
         signedIn: signedIn,
+        look: look,
       );
       await arrange(phone);
+      await tester.pumpAndSettle();
+      // Asset images (Feryx's emblem and wordmark) decoded before the shot.
+      await tester.runAsync(() async {
+        for (final e in find.byType(Image).evaluate()) {
+          await precacheImage((e.widget as Image).image, e);
+        }
+      });
       await tester.pumpAndSettle();
       await expectLater(
         find.byType(AnvilApp),
